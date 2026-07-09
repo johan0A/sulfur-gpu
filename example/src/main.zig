@@ -50,8 +50,10 @@ pub fn main(init: std.process.Init) !void {
         .present_mode = .fifo,
         .min_image_count = 3,
     });
+    _ = swapchain; // autofix
 
-    const frame_semaphore: gpu.Semaphore = try .create(0);
+    const frame_semaphore: gpu.Semaphore = try .create(device, 0);
+    _ = frame_semaphore; // autofix
     var frame_index: u64 = 1;
 
     var quit: bool = false;
@@ -62,11 +64,8 @@ pub fn main(init: std.process.Init) !void {
             else => {},
         };
 
-        if (frame_index > FRAMES_IN_FLIGHT)
-            frame_semaphore.wait(device, frame_index - FRAMES_IN_FLIGHT);
-
-        const back_buffer: gpu.Texture = swapchain.acquireNextTexture();
-        _ = back_buffer; // autofix
+        // if (frame_index > FRAMES_IN_FLIGHT)
+        //     try frame_semaphore.wait(device, frame_index - FRAMES_IN_FLIGHT);
 
         frame_index += 1;
     }

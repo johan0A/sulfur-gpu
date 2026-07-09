@@ -356,6 +356,7 @@ pub const UsageFlags = packed struct(u8) {
 };
 
 pub const Format = enum(u32) {
+    none,
     r8_unorm,
     r8_snorm,
     r8_uint,
@@ -482,10 +483,10 @@ pub const Semaphore = struct {
     pub fn wait(semaphore: Semaphore, d: Device, value: u64) !void {
         const wait_info: vk.SemaphoreWaitInfo = .{
             .semaphore_count = 1,
-            .p_semaphores = &.{semaphore},
+            .p_semaphores = &.{semaphore.semaphore},
             .p_values = &.{value},
         };
-        try d.device.waitSemaphores(&wait_info, std.math.maxInt(u64));
+        _ = try d.device.waitSemaphores(&wait_info, std.math.maxInt(u64)); // TODO: handle result?
     }
 };
 
