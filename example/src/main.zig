@@ -56,6 +56,10 @@ pub fn main(init: std.process.Init) !void {
     _ = frame_semaphore; // autofix
     var frame_index: u64 = 1;
 
+    _ = try device.rawAlloc(1024, .@"32", .default);
+    _ = try device.rawAlloc(1024, .@"32", .gpu);
+    _ = try device.rawAlloc(1024, .@"32", .readback);
+
     var quit: bool = false;
     while (!quit) {
         var event: c.SDL_Event = undefined;

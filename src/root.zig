@@ -76,13 +76,11 @@ pub fn enumerateAdapters(gpa: std.mem.Allocator, instance: Instance) ![]Adapter 
 pub const Device = struct {
     instance: vk.InstanceProxy,
     device: vk.DeviceProxy,
+    physical_device: vk.PhysicalDevice,
 
     queue_families: QueueFamilies,
 
     debug_messenger: vk.DebugUtilsMessengerEXT,
-
-    physical_device: vk.PhysicalDevice,
-
     gpa: std.mem.Allocator,
 
     pub fn create(
@@ -167,6 +165,140 @@ pub const Device = struct {
             .present_modes = try gpa.dupe(PresentMode, modes.items),
         };
     }
+
+    pub fn rawAlloc(
+        d: Device,
+        bytes: usize,
+        alignment: std.mem.Alignment,
+        memory: Memory,
+    ) !*anyopaque {
+        const usage: vk.BufferUsageFlags = switch (memory) {
+            .default => .{
+                .storage_buffer_bit = true,
+                .index_buffer_bit = true,
+                .indirect_buffer_bit = true,
+                .transfer_src_bit = true,
+                .shader_device_address_bit = true,
+            },
+            .gpu => .{
+                .storage_buffer_bit = true,
+                .index_buffer_bit = true,
+                .indirect_buffer_bit = true,
+                .transfer_src_bit = true,
+                .transfer_dst_bit = true,
+                .shader_device_address_bit = true,
+            },
+            .readback => .{
+                .storage_buffer_bit = true,
+                .transfer_dst_bit = true,
+                .shader_device_address_bit = true,
+            },
+        };
+
+        const info: vk.BufferCreateInfo = .{
+            .size = bytes,
+            .usage = usage,
+            .sharing_mode = .exclusive, // TODO: exclusive or concurrent?
+        };
+        const buffer = try d.device.createBuffer(&info, null);
+
+        const buffer_memory_requirements = d.device.getBufferMemoryRequirements(buffer);
+
+        // TODO: cache this
+        const color_bits = probeImageMemoryTypeBits(d, .r8g8b8a8_unorm, .{ .sampled_bit = true, .transfer_dst_bit = true, .color_attachment_bit = true });
+        const depth_bits = probeImageMemoryTypeBits(d, .d32_sfloat, .{ .depth_stencil_attachment_bit = true, .sampled_bit = true });
+
+        const memory_requirements: vk.MemoryRequirements = .{
+            .size = buffer_memory_requirements.size,
+            .alignment = alignment.max(.fromByteUnits(buffer_memory_requirements.alignment)).toByteUnits(),
+            .memory_type_bits = switch (memory) {
+                .default, .readback => buffer_memory_requirements.memory_type_bits,
+                .gpu => buffer_memory_requirements.memory_type_bits & color_bits & depth_bits,
+            },
+        };
+
+        const properties: vk.MemoryPropertyFlags = switch (memory) {
+            .default => .{
+                .device_local_bit = true, // TODO: if ReBAR is not available dont use device_local_bit
+                .host_visible_bit = true,
+                .host_coherent_bit = true,
+            },
+            .gpu => .{
+                .device_local_bit = true,
+            },
+            .readback => .{
+                .host_visible_bit = true,
+                .host_cached_bit = true,
+                .host_coherent_bit = true,
+            },
+        };
+        const alloc_flags: vk.MemoryAllocateFlagsInfo = .{
+            .flags = .{ .device_address_bit = true },
+            .device_mask = 0,
+        };
+        const index = findMemoryType(d, memory_requirements.memory_type_bits, properties);
+        const alloc_info: vk.MemoryAllocateInfo = .{
+            .p_next = &alloc_flags,
+            .allocation_size = memory_requirements.size,
+            .memory_type_index = index,
+        };
+
+        const buffer_memory = try d.device.allocateMemory(&alloc_info, null);
+        try d.device.bindBufferMemory(buffer, buffer_memory, 0);
+
+        const gpu_ptr = d.device.getBufferDeviceAddress(&.{ .buffer = buffer });
+        const cpu_ptr = switch (memory) {
+            .readback, .default => try d.device.mapMemory(buffer_memory, 0, vk.WHOLE_SIZE, .{}),
+            .gpu => null,
+        };
+        _ = cpu_ptr; // autofix
+
+        // return .{
+        //     .buffer = buffer,
+        //     .memory = buffer_memory,
+        //     .size = bytes,
+        //     .gpu_ptr = gpu_ptr,
+        //     .cpu_ptr = cpu_ptr,
+        // };
+
+        return @ptrFromInt(gpu_ptr);
+    }
+
+    fn findMemoryType(d: Device, type_filter: u32, properties: vk.MemoryPropertyFlags) u32 {
+        const mem_properties = d.instance.getPhysicalDeviceMemoryProperties(d.physical_device); // TODO: cache this
+        for (0..mem_properties.memory_type_count) |i| {
+            if ((type_filter & (@as(u32, 1) << @intCast(i))) != 0 and
+                (mem_properties.memory_types[i].property_flags.intersect(properties)) == properties)
+            {
+                return @intCast(i);
+            }
+        }
+        @panic(""); // TODO
+    }
+
+    fn probeImageMemoryTypeBits(d: Device, format: vk.Format, usage: vk.ImageUsageFlags) u32 { // TODO: cache this
+        const ici: vk.ImageCreateInfo = .{
+            .image_type = .@"2d",
+            .format = format,
+            .extent = .{ .width = 16, .height = 16, .depth = 1 },
+            .mip_levels = 1,
+            .array_layers = 1,
+            .samples = .{ .@"1_bit" = true },
+            .tiling = .optimal,
+            .usage = usage,
+            .sharing_mode = .exclusive,
+            .initial_layout = .undefined,
+        };
+        var req: vk.MemoryRequirements2 = .{ .memory_requirements = undefined };
+        d.device.getDeviceImageMemoryRequirements(&.{ .plane_aspect = .{}, .p_create_info = &ici }, &req);
+        return req.memory_requirements.memory_type_bits;
+    }
+};
+
+pub const Memory = enum(u8) {
+    default,
+    gpu,
+    readback,
 };
 
 pub fn createLogicalDevice(
