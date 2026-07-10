@@ -612,6 +612,10 @@ pub const Semaphore = struct {
         return .{ .semaphore = semaphore };
     }
 
+    pub fn destroy(semaphore: Semaphore, d: Device) void {
+        d.device.destroySemaphore(semaphore.semaphore, null);
+    }
+
     pub fn wait(semaphore: Semaphore, d: Device, value: u64) !void {
         const wait_info: vk.SemaphoreWaitInfo = .{
             .semaphore_count = 1,

@@ -36,6 +36,7 @@ pub fn main(init: std.process.Init) !void {
 
     var surface: gpu.vk.SurfaceKHR = undefined;
     if (!c.SDL_Vulkan_CreateSurface(window, @ptrFromInt(@intFromEnum(device.instance.handle)), null, @ptrCast(&surface))) return error.engine_init_failure;
+    defer c.SDL_Vulkan_DestroySurface(@ptrFromInt(@intFromEnum(device.instance.handle)), @ptrFromInt(@intFromEnum(surface)), null);
 
     const queue: gpu.Queue = .create(device, .graphics);
 
@@ -54,7 +55,7 @@ pub fn main(init: std.process.Init) !void {
     _ = swapchain; // autofix
 
     const frame_semaphore: gpu.Semaphore = try .create(device, 0);
-    _ = frame_semaphore; // autofix
+    defer frame_semaphore.destroy(device);
     var frame_index: u64 = 1;
 
     // _ = try device.rawAlloc(1024, .@"32", .default);
