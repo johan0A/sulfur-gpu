@@ -24,6 +24,7 @@ pub fn main(init: std.process.Init) !void {
         @ptrCast(c.SDL_Vulkan_GetVkGetInstanceProcAddr()),
         @ptrCast(sdl_required_extensions),
     );
+    defer instance.destroy(gpa);
 
     const adapters = try gpu.enumerateAdapters(arena, instance);
 
@@ -56,9 +57,9 @@ pub fn main(init: std.process.Init) !void {
     _ = frame_semaphore; // autofix
     var frame_index: u64 = 1;
 
-    _ = try device.rawAlloc(1024, .@"32", .default);
-    _ = try device.rawAlloc(1024, .@"32", .gpu);
-    _ = try device.rawAlloc(1024, .@"32", .readback);
+    // _ = try device.rawAlloc(1024, .@"32", .default);
+    // _ = try device.rawAlloc(1024, .@"32", .gpu);
+    // _ = try device.rawAlloc(1024, .@"32", .readback);
 
     var quit: bool = false;
     while (!quit) {

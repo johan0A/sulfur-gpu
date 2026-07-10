@@ -55,7 +55,7 @@ pub const Instance = struct {
         return .{ .instance = instance };
     }
 
-    pub fn destroy(instance: *Instance, gpa: std.mem.Allocator) void {
+    pub fn destroy(instance: Instance, gpa: std.mem.Allocator) void {
         instance.instance.destroyInstance(null);
         gpa.destroy(instance.instance.wrapper);
     }
@@ -92,11 +92,8 @@ pub const Device = struct {
         defer arena_impl.deinit();
         const arena = arena_impl.allocator();
 
-        var init_arena_state: std.heap.ArenaAllocator = .init(gpa);
-        const init_arena = init_arena_state.allocator();
-
         const device_handle = try createLogicalDevice(arena, adapter.physical_device, instance.instance.wrapper);
-        const device_dispatch = try init_arena.create(vk.DeviceWrapper);
+        const device_dispatch = try gpa.create(vk.DeviceWrapper);
         device_dispatch.* = .load(device_handle, instance.instance.wrapper.dispatch.vkGetDeviceProcAddr.?);
         const device: vk.DeviceProxy = .init(device_handle, device_dispatch);
 
@@ -139,8 +136,10 @@ pub const Device = struct {
     }
 
     pub fn destroy(self: Device) void {
-        _ = self;
-        // TODO
+        self.device.deviceWaitIdle() catch {};
+        self.device.destroyDevice(null);
+        self.gpa.destroy(self.device.wrapper);
+        self.instance.destroyDebugUtilsMessengerEXT(self.debug_messenger, null);
     }
 
     pub fn surfaceCapabilities(d: Device, gpa: std.mem.Allocator, surface: vk.SurfaceKHR) !SurfaceCapabilities {
@@ -253,6 +252,7 @@ pub const Device = struct {
         };
         _ = cpu_ptr; // autofix
 
+        // TODO:
         // return .{
         //     .buffer = buffer,
         //     .memory = buffer_memory,
