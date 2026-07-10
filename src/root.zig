@@ -153,7 +153,7 @@ pub const Device = struct {
         for (vk_formats) |vk_format| formats.appendAssumeCapacity(vk_to_gpu.format(vk_format.format) orelse continue);
 
         const vk_modes = try d.instance.getPhysicalDeviceSurfacePresentModesAllocKHR(d.physical_device, surface, arena);
-        var modes: std.ArrayList(PresentMode) = try .initCapacity(arena, vk_formats.len);
+        var modes: std.ArrayList(PresentMode) = try .initCapacity(arena, vk_modes.len);
         errdefer modes.deinit(gpa);
         for (vk_modes) |vk_mode| modes.appendAssumeCapacity(vk_to_gpu.presentMode(vk_mode) orelse continue);
 
