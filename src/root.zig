@@ -83,17 +83,52 @@ pub const Device = struct {
     debug_messenger: vk.DebugUtilsMessengerEXT,
     gpa: std.mem.Allocator,
 
-    heap: std.ArrayList(HeapEntry),
+    heap: Heap,
 
-    const HeapEntry = struct {
-        buffer: vk.Buffer,
-        memory: vk.DeviceMemory,
-        size: usize,
-        gpu_addr: usize,
-        cpu_addr: ?usize,
+    const Heap = struct {
+        entries: std.ArrayList(Entry),
 
-        /// for binary search
-        fn order(addr: usize, item: HeapEntry) std.math.Order {
+        const Entry = struct {
+            buffer: vk.Buffer,
+            memory: vk.DeviceMemory,
+            size: usize,
+            gpu_addr: usize,
+            cpu_addr: ?usize,
+
+            fn destroy(entry: Entry, d: Device) !void {
+                d.device.destroyBuffer(entry.buffer, null);
+                d.device.freeMemory(entry.memory, null);
+            }
+        };
+
+        fn entryFromAddr(heap: *Heap, gpu_addr: usize) *Entry {
+            return heap.entries.items[heap.indexFromAddr(gpu_addr)];
+        }
+
+        fn indexFromAddr(heap: *Heap, gpu_addr: usize) usize {
+            return std.sort.binarySearch(
+                Entry,
+                heap.entries.items,
+                gpu_addr,
+                order,
+            ) orelse unreachable;
+        }
+
+        fn insert(
+            heap: *Heap,
+            gpa: std.mem.Allocator,
+            entry: Entry,
+        ) !void {
+            const insert_index = std.sort.upperBound(
+                Entry,
+                heap.entries.items,
+                entry.gpu_addr,
+                order,
+            );
+            try heap.entries.insert(gpa, insert_index, entry);
+        }
+
+        fn order(addr: usize, item: Entry) std.math.Order {
             return std.math.order(addr, item.gpu_addr);
         }
     };
@@ -147,17 +182,19 @@ pub const Device = struct {
             .debug_messenger = debug_messenger,
             .physical_device = adapter.physical_device,
             .gpa = gpa,
-            .heap = .empty,
+            .heap = .{ .entries = .empty },
         };
     }
 
-    pub fn destroy(self: *Device) void {
-        self.device.deviceWaitIdle() catch {};
-        self.device.destroyDevice(null);
-        self.gpa.destroy(self.device.wrapper);
-        self.instance.destroyDebugUtilsMessengerEXT(self.debug_messenger, null);
-        // TODO: free heap entries? yes probably
-        self.heap.deinit(self.gpa);
+    pub fn destroy(d: *Device) void {
+        d.device.deviceWaitIdle() catch {};
+        d.device.destroyDevice(null);
+        d.gpa.destroy(d.device.wrapper);
+        d.instance.destroyDebugUtilsMessengerEXT(d.debug_messenger, null);
+        // TODO: make a debug gpa and uncomment next line
+        // TODO: can we destroy all of them at once?
+        // for (d.heap.entries.items) |entry| entry.destroy(d);
+        d.heap.entries.deinit(d.gpa);
     }
 
     pub fn surfaceCapabilities(d: Device, gpa: std.mem.Allocator, surface: vk.SurfaceKHR) !SurfaceCapabilities {
@@ -236,7 +273,7 @@ pub const Device = struct {
 
         const properties: vk.MemoryPropertyFlags = switch (memory) {
             .default => .{
-                .device_local_bit = true, // TODO: if ReBAR is not available dont use device_local_bit
+                // .device_local_bit = true, // TODO: if ReBAR is available use device_local_bit
                 .host_visible_bit = true,
                 .host_coherent_bit = true,
             },
@@ -269,13 +306,7 @@ pub const Device = struct {
             .gpu => null,
         };
 
-        const insert_index = std.sort.upperBound(
-            HeapEntry,
-            d.heap.items,
-            gpu_addr,
-            HeapEntry.order,
-        );
-        try d.heap.insert(d.gpa, insert_index, .{
+        try d.heap.insert(d.gpa, .{
             .buffer = buffer,
             .memory = buffer_memory,
             .size = bytes,
@@ -287,15 +318,9 @@ pub const Device = struct {
     }
 
     pub fn rawFree(d: *Device, gpu_ptr: *anyopaque) void {
-        const index = std.sort.binarySearch(
-            HeapEntry,
-            d.heap.items,
-            @intFromPtr(gpu_ptr),
-            HeapEntry.order,
-        ) orelse unreachable;
-        const entry = d.heap.orderedRemove(index);
-        d.device.destroyBuffer(entry.buffer, null);
-        d.device.freeMemory(entry.memory, null);
+        const index = d.heap.indexFromAddr(@intFromPtr(gpu_ptr));
+        const entry = d.heap.entries.orderedRemove(index);
+        entry.destroy(d);
     }
 
     fn findMemoryType(d: Device, type_filter: u32, properties: vk.MemoryPropertyFlags) u32 {
