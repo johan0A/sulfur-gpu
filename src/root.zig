@@ -83,6 +83,21 @@ pub const Device = struct {
     debug_messenger: vk.DebugUtilsMessengerEXT,
     gpa: std.mem.Allocator,
 
+    heap: std.ArrayList(HeapEntry),
+
+    const HeapEntry = struct {
+        buffer: vk.Buffer,
+        memory: vk.DeviceMemory,
+        size: usize,
+        gpu_addr: usize,
+        cpu_addr: ?usize,
+
+        /// for binary search
+        fn order(addr: usize, item: HeapEntry) std.math.Order {
+            return std.math.order(addr, item.gpu_addr);
+        }
+    };
+
     pub fn create(
         gpa: std.mem.Allocator,
         instance: Instance,
@@ -132,14 +147,17 @@ pub const Device = struct {
             .debug_messenger = debug_messenger,
             .physical_device = adapter.physical_device,
             .gpa = gpa,
+            .heap = .empty,
         };
     }
 
-    pub fn destroy(self: Device) void {
+    pub fn destroy(self: *Device) void {
         self.device.deviceWaitIdle() catch {};
         self.device.destroyDevice(null);
         self.gpa.destroy(self.device.wrapper);
         self.instance.destroyDebugUtilsMessengerEXT(self.debug_messenger, null);
+        // TODO: free heap entries? yes probably
+        self.heap.deinit(self.gpa);
     }
 
     pub fn surfaceCapabilities(d: Device, gpa: std.mem.Allocator, surface: vk.SurfaceKHR) !SurfaceCapabilities {
@@ -166,7 +184,7 @@ pub const Device = struct {
     }
 
     pub fn rawAlloc(
-        d: Device,
+        d: *Device,
         bytes: usize,
         alignment: std.mem.Alignment,
         memory: Memory,
@@ -204,8 +222,8 @@ pub const Device = struct {
         const buffer_memory_requirements = d.device.getBufferMemoryRequirements(buffer);
 
         // TODO: cache this
-        const color_bits = probeImageMemoryTypeBits(d, .r8g8b8a8_unorm, .{ .sampled_bit = true, .transfer_dst_bit = true, .color_attachment_bit = true });
-        const depth_bits = probeImageMemoryTypeBits(d, .d32_sfloat, .{ .depth_stencil_attachment_bit = true, .sampled_bit = true });
+        const color_bits = probeImageMemoryTypeBits(d.*, .r8g8b8a8_unorm, .{ .sampled_bit = true, .transfer_dst_bit = true, .color_attachment_bit = true });
+        const depth_bits = probeImageMemoryTypeBits(d.*, .d32_sfloat, .{ .depth_stencil_attachment_bit = true, .sampled_bit = true });
 
         const memory_requirements: vk.MemoryRequirements = .{
             .size = buffer_memory_requirements.size,
@@ -235,7 +253,7 @@ pub const Device = struct {
             .flags = .{ .device_address_bit = true },
             .device_mask = 0,
         };
-        const index = findMemoryType(d, memory_requirements.memory_type_bits, properties);
+        const index = findMemoryType(d.*, memory_requirements.memory_type_bits, properties);
         const alloc_info: vk.MemoryAllocateInfo = .{
             .p_next = &alloc_flags,
             .allocation_size = memory_requirements.size,
@@ -245,23 +263,39 @@ pub const Device = struct {
         const buffer_memory = try d.device.allocateMemory(&alloc_info, null);
         try d.device.bindBufferMemory(buffer, buffer_memory, 0);
 
-        const gpu_ptr = d.device.getBufferDeviceAddress(&.{ .buffer = buffer });
-        const cpu_ptr = switch (memory) {
-            .readback, .default => try d.device.mapMemory(buffer_memory, 0, vk.WHOLE_SIZE, .{}),
+        const gpu_addr: usize = @intCast(d.device.getBufferDeviceAddress(&.{ .buffer = buffer })); // TODO: does it always fit usize?
+        const cpu_addr: ?usize = switch (memory) {
+            .readback, .default => @intFromPtr(try d.device.mapMemory(buffer_memory, 0, vk.WHOLE_SIZE, .{})),
             .gpu => null,
         };
-        _ = cpu_ptr; // autofix
 
-        // TODO:
-        // return .{
-        //     .buffer = buffer,
-        //     .memory = buffer_memory,
-        //     .size = bytes,
-        //     .gpu_ptr = gpu_ptr,
-        //     .cpu_ptr = cpu_ptr,
-        // };
+        const insert_index = std.sort.upperBound(
+            HeapEntry,
+            d.heap.items,
+            gpu_addr,
+            HeapEntry.order,
+        );
+        try d.heap.insert(d.gpa, insert_index, .{
+            .buffer = buffer,
+            .memory = buffer_memory,
+            .size = bytes,
+            .gpu_addr = gpu_addr,
+            .cpu_addr = cpu_addr,
+        });
 
-        return @ptrFromInt(gpu_ptr);
+        return @ptrFromInt(gpu_addr);
+    }
+
+    pub fn rawFree(d: *Device, gpu_ptr: *anyopaque) void {
+        const index = std.sort.binarySearch(
+            HeapEntry,
+            d.heap.items,
+            @intFromPtr(gpu_ptr),
+            HeapEntry.order,
+        ) orelse unreachable;
+        const entry = d.heap.orderedRemove(index);
+        d.device.destroyBuffer(entry.buffer, null);
+        d.device.freeMemory(entry.memory, null);
     }
 
     fn findMemoryType(d: Device, type_filter: u32, properties: vk.MemoryPropertyFlags) u32 {

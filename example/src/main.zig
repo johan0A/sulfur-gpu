@@ -31,7 +31,7 @@ pub fn main(init: std.process.Init) !void {
     // TODO: pick adapter
     const adapter = adapters[0];
 
-    const device = try gpu.Device.create(gpa, instance, adapter);
+    var device = try gpu.Device.create(gpa, instance, adapter);
     defer device.destroy();
 
     var surface: gpu.vk.SurfaceKHR = undefined;
@@ -58,9 +58,12 @@ pub fn main(init: std.process.Init) !void {
     defer frame_semaphore.destroy(device);
     var frame_index: u64 = 1;
 
-    // _ = try device.rawAlloc(1024, .@"32", .default);
-    // _ = try device.rawAlloc(1024, .@"32", .gpu);
-    // _ = try device.rawAlloc(1024, .@"32", .readback);
+    const alloc_a = try device.rawAlloc(1024, .@"32", .default);
+    defer device.rawFree(alloc_a);
+    const alloc_b = try device.rawAlloc(1024, .@"32", .gpu);
+    defer device.rawFree(alloc_b);
+    const alloc_c = try device.rawAlloc(1024, .@"32", .readback);
+    defer device.rawFree(alloc_c);
 
     var quit: bool = false;
     while (!quit) {
