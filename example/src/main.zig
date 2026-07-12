@@ -65,6 +65,17 @@ pub fn main(init: std.process.Init) !void {
     const alloc_c = try device.rawAlloc(1024, .@"32", .readback);
     defer device.rawFree(alloc_c);
 
+    const texture_config: gpu.Texture.Config = .{
+        .dimensions = .{ 512, 512, 1 },
+        .format = .rgba8_unorm,
+        .usage = .{ .sampled = true },
+    };
+    const texture_size_align = gpu.Texture.sizeAndAlign(device, texture_config);
+    const texture_ptr = try device.rawAlloc(texture_size_align.size, texture_size_align.alignement, .gpu);
+    defer device.rawFree(texture_ptr);
+    const texture: gpu.Texture = try .create(&device, texture_config, texture_ptr);
+    defer texture.destroy(device);
+
     var quit: bool = false;
     while (!quit) {
         var event: c.SDL_Event = undefined;

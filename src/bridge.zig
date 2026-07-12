@@ -105,10 +105,8 @@ pub const vk_to_gpu = struct {
         };
     }
 
-    pub fn usageFlags(flags: vk.ImageUsageFlags) gpu.UsageFlags {
+    pub fn usageFlags(flags: vk.ImageUsageFlags) gpu.Texture.Usage {
         return .{
-            .transfer_src = flags.transfer_src_bit,
-            .transfer_dst = flags.transfer_dst_bit,
             .sampled = flags.sampled_bit,
             .storage = flags.storage_bit,
             .color_attachment = flags.color_attachment_bit,
@@ -270,19 +268,18 @@ pub const gpu_to_vk = struct {
         return out;
     }
 
-    pub fn textureType(tex: gpu.TextureType) vk.ImageType {
+    pub fn textureType(tex: gpu.Texture.Type) vk.ImageType {
         return switch (tex) {
-            .tex1d => .@"1d",
-            .tex2d => .@"2d",
-            .tex3d => .@"3d",
-            .tex_cube, .tex2d_array, .tex_cube_array => .@"2d",
+            .@"1d" => .@"1d",
+            .@"2d" => .@"2d",
+            .@"3d" => .@"3d",
         };
     }
 
-    pub fn usageFlags(flags: gpu.UsageFlags) vk.ImageUsageFlags {
+    pub fn usageFlags(flags: gpu.Texture.Usage) vk.ImageUsageFlags {
         return .{
-            .transfer_src_bit = flags.transfer_src,
-            .transfer_dst_bit = flags.transfer_dst,
+            .transfer_src_bit = true,
+            .transfer_dst_bit = true,
             .sampled_bit = flags.sampled,
             .storage_bit = flags.storage,
             .color_attachment_bit = flags.color_attachment,

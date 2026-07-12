@@ -95,14 +95,20 @@ pub const Device = struct {
             gpu_addr: usize,
             cpu_addr: ?usize,
 
-            fn destroy(entry: Entry, d: Device) !void {
+            fn destroy(entry: Entry, d: Device) void {
                 d.device.destroyBuffer(entry.buffer, null);
                 d.device.freeMemory(entry.memory, null);
             }
         };
 
-        fn entryFromAddr(heap: *Heap, gpu_addr: usize) *Entry {
+        fn entryFromAddr(heap: *Heap, gpu_addr: usize) Entry {
             return heap.entries.items[heap.indexFromAddr(gpu_addr)];
+        }
+
+        fn entryAndOffsetFromAddr(heap: *Heap, gpu_addr: usize) struct { Entry, u32 } {
+            const entry = heap.entryFromAddr(gpu_addr);
+            const offset = gpu_addr - entry.gpu_addr;
+            return .{ entry, @intCast(offset) };
         }
 
         fn indexFromAddr(heap: *Heap, gpu_addr: usize) usize {
@@ -320,7 +326,7 @@ pub const Device = struct {
     pub fn rawFree(d: *Device, gpu_ptr: *anyopaque) void {
         const index = d.heap.indexFromAddr(@intFromPtr(gpu_ptr));
         const entry = d.heap.entries.orderedRemove(index);
-        entry.destroy(d);
+        entry.destroy(d.*);
     }
 
     fn findMemoryType(d: Device, type_filter: u32, properties: vk.MemoryPropertyFlags) u32 {
@@ -508,7 +514,7 @@ pub const Swapchain = struct {
     const SwapchainOptions = struct {
         format: Format,
         present_mode: PresentMode,
-        usage: UsageFlags = .{ .color_attachment = true },
+        usage: Texture.Usage = .{ .color_attachment = true },
         frames_in_flight: u32 = 2,
         min_image_count: u32,
     };
@@ -531,19 +537,9 @@ pub const Swapchain = struct {
 };
 
 pub const SurfaceCapabilities = struct {
-    usages: UsageFlags,
+    usages: Texture.Usage,
     formats: []const Format,
     present_modes: []const PresentMode,
-};
-
-pub const UsageFlags = packed struct(u8) {
-    sampled: bool = false,
-    storage: bool = false,
-    color_attachment: bool = false,
-    depth_stencil_attachment: bool = false,
-    transfer_src: bool = false,
-    transfer_dst: bool = false,
-    padding: u2 = undefined,
 };
 
 pub const Format = enum(u32) {
@@ -682,6 +678,91 @@ pub const Semaphore = struct {
             .p_values = &.{value},
         };
         _ = try d.device.waitSemaphores(&wait_info, std.math.maxInt(u64)); // TODO: handle result?
+    }
+};
+
+pub const Texture = struct {
+    image: vk.Image,
+
+    pub const Type = enum {
+        @"1d",
+        @"2d",
+        @"3d",
+    };
+
+    pub const Usage = packed struct(u16) {
+        sampled: bool = false,
+        storage: bool = false,
+        color_attachment: bool = false,
+        depth_stencil_attachment: bool = false,
+        padding: u12 = 0,
+    };
+
+    // TODO: Config or Descriptor?
+    pub const Config = struct {
+        type: Type = .@"2d",
+        dimensions: [3]u32,
+        mip_count: u32 = 1,
+        layer_count: u32 = 1,
+        // sample_count: u32 = 1, TODO
+        format: Format = .none,
+        usage: Usage = .{},
+    };
+
+    pub const SizeAndAlign = struct {
+        size: usize,
+        alignement: std.mem.Alignment,
+    };
+
+    pub fn sizeAndAlign(d: Device, config: Config) SizeAndAlign {
+        const image_create_info: vk.ImageCreateInfo = .{
+            .image_type = gpu_to_vk.textureType(config.type),
+            .format = gpu_to_vk.format(config.format),
+            .extent = .{ .width = config.dimensions[0], .height = config.dimensions[1], .depth = config.dimensions[2] },
+            .mip_levels = config.mip_count,
+            .array_layers = config.layer_count,
+            .samples = .{ .@"1_bit" = true },
+            .tiling = .optimal,
+            .usage = gpu_to_vk.usageFlags(config.usage),
+            .sharing_mode = .exclusive,
+            .initial_layout = .undefined,
+        };
+        const info: vk.DeviceImageMemoryRequirements = .{
+            .p_create_info = &image_create_info,
+            .plane_aspect = gpu_to_vk.aspectsForFormat(config.format),
+        };
+        var req: vk.MemoryRequirements2 = .{ .memory_requirements = undefined };
+        d.device.getDeviceImageMemoryRequirements(&info, &req);
+        return .{
+            .size = req.memory_requirements.size,
+            .alignement = .fromByteUnits(req.memory_requirements.alignment),
+        };
+    }
+
+    pub fn create(d: *Device, config: Config, texture_ptr: *anyopaque) !Texture {
+        const info: vk.ImageCreateInfo = .{
+            .image_type = gpu_to_vk.textureType(config.type),
+            .format = gpu_to_vk.format(config.format),
+            .extent = .{ .width = config.dimensions[0], .height = config.dimensions[1], .depth = config.dimensions[2] },
+            .mip_levels = config.mip_count,
+            .array_layers = config.layer_count,
+            .samples = .{ .@"1_bit" = true },
+            .tiling = .optimal,
+            .usage = gpu_to_vk.usageFlags(config.usage),
+            .sharing_mode = .exclusive,
+            .initial_layout = .undefined,
+        };
+
+        const image = try d.device.createImage(&info, null);
+
+        const entry, const offset = d.heap.entryAndOffsetFromAddr(@intFromPtr(texture_ptr));
+        try d.device.bindImageMemory(image, entry.memory, offset);
+
+        return .{ .image = image };
+    }
+
+    pub fn destroy(texture: Texture, d: Device) void {
+        d.device.destroyImage(texture.image, null);
     }
 };
 
