@@ -60,7 +60,8 @@ pub fn main(init: std.process.Init) !void {
     data_cpu.output_texture = 0;
 
     const spirv align(@alignOf(u32)) = @embedFile("generate_texture.spv").*;
-    _ = spirv; // autofix
+    const pipeline: gpu.Pipeline = try .createCompute(device, @ptrCast(&spirv));
+    defer pipeline.destroy(device);
 }
 
 const Data = extern struct {

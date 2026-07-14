@@ -87,15 +87,8 @@ pub const Device = struct {
 
     descriptor_buffer_properties: ?vk.PhysicalDeviceDescriptorBufferPropertiesEXT,
 
-    fn descriptorBufferProperties(d: *Device) *vk.PhysicalDeviceDescriptorBufferPropertiesEXT {
-        if (d.descriptor_buffer_properties == null) {
-            var buffer_properties = std.mem.zeroInit(vk.PhysicalDeviceDescriptorBufferPropertiesEXT, .{});
-            var properties_2: vk.PhysicalDeviceProperties2 = .{ .p_next = &buffer_properties, .properties = undefined };
-            d.instance.getPhysicalDeviceProperties2(d.physical_device, &properties_2);
-            d.descriptor_buffer_properties = buffer_properties;
-        }
-        return &d.descriptor_buffer_properties.?;
-    }
+    descriptor_set_layout: vk.DescriptorSetLayout,
+    pipeline_layout: vk.PipelineLayout,
 
     const Heap = struct {
         entries: std.ArrayList(Entry),
@@ -193,6 +186,56 @@ pub const Device = struct {
         };
         const debug_messenger = try instance.instance.createDebugUtilsMessengerEXT(&debug_messenger_info, null);
 
+        const binding: vk.DescriptorSetLayoutBinding = .{
+            .binding = 0,
+            .descriptor_type = .mutable_ext,
+            .descriptor_count = 65536, // TODO: how to pick the correct size here?
+            .stage_flags = .{ .compute_bit = true },
+            .p_immutable_samplers = null,
+        };
+        const allowed_types: []const vk.DescriptorType = &.{ .storage_image, .sampled_image };
+        const mutable_type_list: vk.MutableDescriptorTypeListEXT = .{
+            .descriptor_type_count = allowed_types.len,
+            .p_descriptor_types = allowed_types.ptr,
+        };
+        const mutable_info: vk.MutableDescriptorTypeCreateInfoEXT = .{
+            .mutable_descriptor_type_list_count = 1,
+            .p_mutable_descriptor_type_lists = &.{mutable_type_list},
+        };
+        const binding_flags: vk.DescriptorBindingFlags = .{ .partially_bound_bit = true };
+        const binding_flags_info: vk.DescriptorSetLayoutBindingFlagsCreateInfo = .{
+            .p_next = &mutable_info,
+            .binding_count = 1,
+            .p_binding_flags = &.{binding_flags},
+        };
+        const layout_info: vk.DescriptorSetLayoutCreateInfo = .{
+            .p_next = &binding_flags_info,
+            .flags = .{ .descriptor_buffer_bit_ext = true },
+            .binding_count = 1,
+            .p_bindings = &.{binding},
+        };
+        const descriptor_set_layout = try device.createDescriptorSetLayout(&layout_info, null);
+
+        const push_constant_ranges: []const vk.PushConstantRange = &.{
+            .{
+                .stage_flags = .{ .vertex_bit = true, .fragment_bit = true },
+                .offset = 0,
+                .size = 2 * @sizeOf(vk.DeviceAddress),
+            },
+            .{
+                .stage_flags = .{ .compute_bit = true },
+                .offset = 0,
+                .size = @sizeOf(vk.DeviceAddress),
+            },
+        };
+        const create_info: vk.PipelineLayoutCreateInfo = .{
+            .push_constant_range_count = push_constant_ranges.len,
+            .p_push_constant_ranges = push_constant_ranges.ptr,
+            .set_layout_count = 1,
+            .p_set_layouts = &.{descriptor_set_layout},
+        };
+        const pipeline_layout = try device.createPipelineLayout(&create_info, null);
+
         return .{
             .instance = instance.instance,
             .device = device,
@@ -202,11 +245,15 @@ pub const Device = struct {
             .gpa = gpa,
             .heap = .{ .entries = .empty },
             .descriptor_buffer_properties = null,
+            .descriptor_set_layout = descriptor_set_layout,
+            .pipeline_layout = pipeline_layout,
         };
     }
 
     pub fn destroy(d: *Device) void {
         d.device.deviceWaitIdle() catch {};
+        d.device.destroyPipelineLayout(d.pipeline_layout, null);
+        d.device.destroyDescriptorSetLayout(d.descriptor_set_layout, null);
         d.device.destroyDevice(null);
         d.gpa.destroy(d.device.wrapper);
         d.instance.destroyDebugUtilsMessengerEXT(d.debug_messenger, null);
@@ -374,6 +421,16 @@ pub const Device = struct {
         var req: vk.MemoryRequirements2 = .{ .memory_requirements = undefined };
         d.device.getDeviceImageMemoryRequirements(&.{ .plane_aspect = .{}, .p_create_info = &ici }, &req);
         return req.memory_requirements.memory_type_bits;
+    }
+
+    fn descriptorBufferProperties(d: *Device) *vk.PhysicalDeviceDescriptorBufferPropertiesEXT {
+        if (d.descriptor_buffer_properties == null) {
+            var buffer_properties = std.mem.zeroInit(vk.PhysicalDeviceDescriptorBufferPropertiesEXT, .{});
+            var properties_2: vk.PhysicalDeviceProperties2 = .{ .p_next = &buffer_properties, .properties = undefined };
+            d.instance.getPhysicalDeviceProperties2(d.physical_device, &properties_2);
+            d.descriptor_buffer_properties = buffer_properties;
+        }
+        return &d.descriptor_buffer_properties.?;
     }
 };
 
@@ -790,7 +847,7 @@ pub const Texture = struct {
             const mips_level = if (view_desc.mip_count == ViewDesc.all_mips) vk.REMAINING_MIP_LEVELS else view_desc.base_mip;
             const layer_count = if (view_desc.layer_count == ViewDesc.all_layers) vk.REMAINING_ARRAY_LAYERS else view_desc.layer_count;
             const format = if (view_desc.format == .none) texture.config.format else view_desc.format;
-            const view = try d.device.createImageView(&.{
+            const info: vk.ImageViewCreateInfo = .{
                 .image = texture.image,
                 .view_type = gpu_to_vk.viewType(texture.config.type),
                 .format = gpu_to_vk.format(format),
@@ -802,7 +859,8 @@ pub const Texture = struct {
                     .layer_count = layer_count,
                 },
                 .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
-            }, null);
+            };
+            const view = try d.device.createImageView(&info, null);
             try texture.views.put(d.gpa, view_desc, view);
             break :blk view;
         };
@@ -822,9 +880,8 @@ pub const Texture = struct {
     }
 
     pub fn sizeAndAlign(d: Device, config: Config) SizeAndAlign {
-        const image_create_info = textureInfo(config);
         const info: vk.DeviceImageMemoryRequirements = .{
-            .p_create_info = &image_create_info,
+            .p_create_info = &textureInfo(config),
             .plane_aspect = gpu_to_vk.aspectsForFormat(config.format),
         };
         var req: vk.MemoryRequirements2 = .{ .memory_requirements = undefined };
@@ -836,8 +893,7 @@ pub const Texture = struct {
     }
 
     pub fn create(d: *Device, config: Config, texture_ptr: *anyopaque) !Texture {
-        const info = textureInfo(config);
-        const image = try d.device.createImage(&info, null);
+        const image = try d.device.createImage(&textureInfo(config), null);
 
         const entry, const offset = d.heap.entryAndOffsetFromAddr(@intFromPtr(texture_ptr));
         try d.device.bindImageMemory(image, entry.memory, offset);
@@ -847,6 +903,13 @@ pub const Texture = struct {
             .config = config,
             .views = .empty,
         };
+    }
+
+    pub fn destroy(texture: *Texture, d: Device) void {
+        d.device.destroyImage(texture.image, null);
+        var it = texture.views.valueIterator();
+        while (it.next()) |view| d.device.destroyImageView(view.*, null);
+        texture.views.deinit(d.gpa);
     }
 
     fn textureInfo(config: Config) vk.ImageCreateInfo {
@@ -863,12 +926,32 @@ pub const Texture = struct {
             .initial_layout = .undefined,
         };
     }
+};
 
-    pub fn destroy(texture: *Texture, d: Device) void {
-        d.device.destroyImage(texture.image, null);
-        var it = texture.views.valueIterator();
-        while (it.next()) |view| d.device.destroyImageView(view.*, null);
-        texture.views.deinit(d.gpa);
+pub const Pipeline = struct {
+    pipeline: vk.Pipeline,
+
+    pub fn createCompute(d: Device, source: []const u32) !Pipeline {
+        const module_info: vk.ShaderModuleCreateInfo = .{
+            .code_size = source.len * @sizeOf(u32),
+            .p_code = source.ptr,
+        };
+        const module = try d.device.createShaderModule(&module_info, null);
+        defer d.device.destroyShaderModule(module, null);
+
+        const info: vk.ComputePipelineCreateInfo = .{
+            .stage = .{ .stage = .{ .compute_bit = true }, .module = module, .p_name = "main" },
+            .layout = d.pipeline_layout,
+            .base_pipeline_index = -1,
+        };
+        var pipeline: vk.Pipeline = undefined;
+        _ = try d.device.createComputePipelines(.null_handle, &.{info}, null, (&pipeline)[0..1]); // TODO: handle returned vk.Result
+
+        return .{ .pipeline = pipeline };
+    }
+
+    pub fn destroy(pipeline: Pipeline, d: Device) void {
+        d.device.destroyPipeline(pipeline.pipeline, null);
     }
 };
 

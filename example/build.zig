@@ -44,6 +44,9 @@ pub fn build(b: *std.Build) void {
     root_module.addAnonymousImport("hello_triangle.vert.spv", .{ .root_source_file = vert });
     root_module.addAnonymousImport("hello_triangle.frag.spv", .{ .root_source_file = frag });
 
+    const compute = compileShader(b, "src/shaders/generate_texture.slang", "main");
+    root_module.addAnonymousImport("generate_texture.spv", .{ .root_source_file = compute });
+
     {
         const exe = b.addExecutable(.{ .name = @tagName(zon.name), .root_module = root_module });
         b.installArtifact(exe);
