@@ -287,14 +287,11 @@ pub const gpu_to_vk = struct {
         };
     }
 
-    pub fn bridgeViewType(tex: gpu.TextureType) vk.ImageViewType {
+    pub fn viewType(tex: gpu.Texture.Type) vk.ImageViewType {
         return switch (tex) {
             .@"1d" => .@"1d",
             .@"2d" => .@"2d",
             .@"3d" => .@"3d",
-            .cube => .cube,
-            .@"2d_array" => .@"2d_array",
-            .cube_array => .cube_array,
         };
     }
 

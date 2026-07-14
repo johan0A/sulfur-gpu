@@ -2,15 +2,13 @@ pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
     const arena = init.arena.allocator();
 
-    const window_width = 720;
-    const window_height = 720;
-
     const window = c.SDL_CreateWindow(
         "title",
-        window_width,
-        window_height,
+        100,
+        100,
         c.SDL_WINDOW_VULKAN | c.SDL_WINDOW_RESIZABLE,
     ) orelse @panic("");
+    _ = window; // autofix
 
     const sdl_required_extensions = blk: {
         var sdl_required_extensions_count: u32 = undefined;
@@ -31,39 +29,11 @@ pub fn main(init: std.process.Init) !void {
     // TODO: pick adapter
     const adapter = adapters[0];
 
-    var device = try gpu.Device.create(gpa, instance, adapter);
+    var device: gpu.Device = try .create(gpa, instance, adapter);
     defer device.destroy();
 
-    var surface: gpu.vk.SurfaceKHR = undefined;
-    if (!c.SDL_Vulkan_CreateSurface(window, @ptrFromInt(@intFromEnum(device.instance.handle)), null, @ptrCast(&surface))) return error.engine_init_failure;
-    defer c.SDL_Vulkan_DestroySurface(@ptrFromInt(@intFromEnum(device.instance.handle)), @ptrFromInt(@intFromEnum(surface)), null);
-
     const queue: gpu.Queue = .create(device, .graphics);
-
-    const surface_capabilities = try device.surfaceCapabilities(arena, surface);
-    const swapchain_format = for (surface_capabilities.formats) |f| {
-        if (f == .rgba8_unorm_srgb or f == .bgra8_unorm_srgb) {
-            break f;
-        }
-    } else surface_capabilities.formats[0];
-
-    const swapchain: gpu.Swapchain = try .create(device, queue, surface, .{
-        .format = swapchain_format,
-        .present_mode = .fifo,
-        .min_image_count = 3,
-    });
-    _ = swapchain; // autofix
-
-    const frame_semaphore: gpu.Semaphore = try .create(device, 0);
-    defer frame_semaphore.destroy(device);
-    var frame_index: u64 = 1;
-
-    const alloc_a = try device.rawAlloc(1024, .@"32", .default);
-    defer device.rawFree(alloc_a);
-    const alloc_b = try device.rawAlloc(1024, .@"32", .gpu);
-    defer device.rawFree(alloc_b);
-    const alloc_c = try device.rawAlloc(1024, .@"32", .readback);
-    defer device.rawFree(alloc_c);
+    _ = queue; // autofix
 
     const texture_config: gpu.Texture.Config = .{
         .dimensions = .{ 512, 512, 1 },
@@ -73,23 +43,29 @@ pub fn main(init: std.process.Init) !void {
     const texture_size_align = gpu.Texture.sizeAndAlign(device, texture_config);
     const texture_ptr = try device.rawAlloc(texture_size_align.size, texture_size_align.alignement, .gpu);
     defer device.rawFree(texture_ptr);
-    const texture: gpu.Texture = try .create(&device, texture_config, texture_ptr);
+    var texture: gpu.Texture = try .create(&device, texture_config, texture_ptr);
     defer texture.destroy(device);
 
-    var quit: bool = false;
-    while (!quit) {
-        var event: c.SDL_Event = undefined;
-        while (c.SDL_PollEvent(&event) != false) switch (event.type) {
-            c.SDL_EVENT_QUIT => quit = true,
-            else => {},
-        };
+    const descriptor_size_and_align = gpu.Texture.Descriptor.sizeAndHeapAlign(&device);
+    const heap_gpu = try device.rawAlloc(descriptor_size_and_align.size * 1024, descriptor_size_and_align.alignement, .default);
+    defer device.rawFree(heap_gpu);
+    const heap = device.deviceToHostPointer(heap_gpu);
 
-        // if (frame_index > FRAMES_IN_FLIGHT)
-        //     try frame_semaphore.wait(device, frame_index - FRAMES_IN_FLIGHT);
+    const descriptor = try texture.RwTextureViewDescriptor(&device, .{});
+    descriptor.store(&device, heap, 0);
 
-        frame_index += 1;
-    }
+    const data_gpu = try device.rawAlloc(@sizeOf(Data), .of(Data), .default);
+    defer device.rawFree(data_gpu);
+    const data_cpu: *Data = @ptrCast(@alignCast(device.deviceToHostPointer(data_gpu)));
+    data_cpu.output_texture = 0;
+
+    const spirv align(@alignOf(u32)) = @embedFile("generate_texture.spv").*;
+    _ = spirv; // autofix
 }
+
+const Data = extern struct {
+    output_texture: u32 align(16),
+};
 
 const FRAMES_IN_FLIGHT = 2;
 

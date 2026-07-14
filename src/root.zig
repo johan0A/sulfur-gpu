@@ -85,6 +85,18 @@ pub const Device = struct {
 
     heap: Heap,
 
+    descriptor_buffer_properties: ?vk.PhysicalDeviceDescriptorBufferPropertiesEXT,
+
+    fn descriptorBufferProperties(d: *Device) *vk.PhysicalDeviceDescriptorBufferPropertiesEXT {
+        if (d.descriptor_buffer_properties == null) {
+            var buffer_properties = std.mem.zeroInit(vk.PhysicalDeviceDescriptorBufferPropertiesEXT, .{});
+            var properties_2: vk.PhysicalDeviceProperties2 = .{ .p_next = &buffer_properties, .properties = undefined };
+            d.instance.getPhysicalDeviceProperties2(d.physical_device, &properties_2);
+            d.descriptor_buffer_properties = buffer_properties;
+        }
+        return &d.descriptor_buffer_properties.?;
+    }
+
     const Heap = struct {
         entries: std.ArrayList(Entry),
 
@@ -101,7 +113,7 @@ pub const Device = struct {
             }
         };
 
-        fn entryFromAddr(heap: *Heap, gpu_addr: usize) Entry {
+        fn entryFromAddr(heap: *const Heap, gpu_addr: usize) Entry {
             return heap.entries.items[heap.indexFromAddr(gpu_addr)];
         }
 
@@ -111,7 +123,7 @@ pub const Device = struct {
             return .{ entry, @intCast(offset) };
         }
 
-        fn indexFromAddr(heap: *Heap, gpu_addr: usize) usize {
+        fn indexFromAddr(heap: *const Heap, gpu_addr: usize) usize {
             return std.sort.binarySearch(
                 Entry,
                 heap.entries.items,
@@ -189,6 +201,7 @@ pub const Device = struct {
             .physical_device = adapter.physical_device,
             .gpa = gpa,
             .heap = .{ .entries = .empty },
+            .descriptor_buffer_properties = null,
         };
     }
 
@@ -323,6 +336,10 @@ pub const Device = struct {
         return @ptrFromInt(gpu_addr);
     }
 
+    pub fn deviceToHostPointer(d: Device, ptr: *anyopaque) *anyopaque {
+        return @ptrFromInt(d.heap.entryFromAddr(@intFromPtr(ptr)).cpu_addr.?);
+    }
+
     pub fn rawFree(d: *Device, gpu_ptr: *anyopaque) void {
         const index = d.heap.indexFromAddr(@intFromPtr(gpu_ptr));
         const entry = d.heap.entries.orderedRemove(index);
@@ -383,7 +400,15 @@ pub fn createLogicalDevice(
         };
     }
 
+    var mutable_descriptor_features: vk.PhysicalDeviceMutableDescriptorTypeFeaturesEXT = .{
+        .mutable_descriptor_type = .true,
+    };
+    var descriptor_buffer_features: vk.PhysicalDeviceDescriptorBufferFeaturesEXT = .{
+        .p_next = &mutable_descriptor_features,
+        .descriptor_buffer = .true,
+    };
     var device_features_vk13: vk.PhysicalDeviceVulkan13Features = .{
+        .p_next = &descriptor_buffer_features,
         .dynamic_rendering = .true,
         .synchronization_2 = .true,
     };
@@ -407,7 +432,12 @@ pub fn createLogicalDevice(
         .storage_buffer_16_bit_access = .true,
         .uniform_and_storage_buffer_16_bit_access = .true,
     };
-    const required_device_extensions = [_][*:0]const u8{vk.extensions.khr_swapchain.name};
+    const required_device_extensions = [_][*:0]const u8{
+        vk.extensions.khr_swapchain.name,
+        vk.extensions.ext_descriptor_buffer.name,
+        vk.extensions.ext_mutable_descriptor_type.name,
+        // vk.extensions.khr_unified_image_layouts.name, TODO
+    };
     return try instance_dispatch.createDevice(physical_device, &.{
         .p_next = &device_features_vk11,
         .p_queue_create_infos = queue_infos.ptr,
@@ -683,6 +713,8 @@ pub const Semaphore = struct {
 
 pub const Texture = struct {
     image: vk.Image,
+    config: Config,
+    views: std.hash_map.AutoHashMapUnmanaged(ViewDesc, vk.ImageView),
 
     pub const Type = enum {
         @"1d",
@@ -714,19 +746,83 @@ pub const Texture = struct {
         alignement: std.mem.Alignment,
     };
 
-    pub fn sizeAndAlign(d: Device, config: Config) SizeAndAlign {
-        const image_create_info: vk.ImageCreateInfo = .{
-            .image_type = gpu_to_vk.textureType(config.type),
-            .format = gpu_to_vk.format(config.format),
-            .extent = .{ .width = config.dimensions[0], .height = config.dimensions[1], .depth = config.dimensions[2] },
-            .mip_levels = config.mip_count,
-            .array_layers = config.layer_count,
-            .samples = .{ .@"1_bit" = true },
-            .tiling = .optimal,
-            .usage = gpu_to_vk.usageFlags(config.usage),
-            .sharing_mode = .exclusive,
-            .initial_layout = .undefined,
+    pub const Descriptor = struct {
+        pub fn sizeAndHeapAlign(d: *Device) SizeAndAlign {
+            const buffer_properties = d.descriptorBufferProperties();
+            return .{
+                .size = descriptorSize(buffer_properties.*),
+                .alignement = .fromByteUnits(buffer_properties.descriptor_buffer_offset_alignment),
+            };
+        }
+
+        pub fn store(descriptor: Descriptor, d: *Device, heap: *anyopaque, index: usize) void {
+            const buffer_properties = d.descriptorBufferProperties();
+            const size = descriptorSize(buffer_properties.*);
+            @memcpy(
+                @as([*]u8, @ptrCast(heap)) + size * index,
+                descriptor.data[0..size],
+            );
+        }
+
+        fn descriptorSize(buffer_properties: vk.PhysicalDeviceDescriptorBufferPropertiesEXT) usize {
+            return @max(
+                buffer_properties.sampled_image_descriptor_size,
+                buffer_properties.storage_image_descriptor_size,
+            );
+        }
+
+        data: [64]u8,
+    };
+
+    const ViewDesc = struct {
+        const all_mips = std.math.maxInt(u8);
+        const all_layers = std.math.maxInt(u16);
+
+        format: Format = .none,
+        base_mip: u8 = 0,
+        mip_count: u8 = all_mips,
+        base_layer: u16 = 0,
+        layer_count: u16 = all_layers,
+    };
+
+    pub fn RwTextureViewDescriptor(texture: *Texture, d: *Device, view_desc: ViewDesc) !Descriptor {
+        const view = texture.views.get(view_desc) orelse blk: {
+            const mips_level = if (view_desc.mip_count == ViewDesc.all_mips) vk.REMAINING_MIP_LEVELS else view_desc.base_mip;
+            const layer_count = if (view_desc.layer_count == ViewDesc.all_layers) vk.REMAINING_ARRAY_LAYERS else view_desc.layer_count;
+            const format = if (view_desc.format == .none) texture.config.format else view_desc.format;
+            const view = try d.device.createImageView(&.{
+                .image = texture.image,
+                .view_type = gpu_to_vk.viewType(texture.config.type),
+                .format = gpu_to_vk.format(format),
+                .subresource_range = .{
+                    .aspect_mask = gpu_to_vk.aspectsForFormat(texture.config.format),
+                    .base_mip_level = view_desc.base_mip,
+                    .level_count = mips_level,
+                    .base_array_layer = view_desc.base_layer,
+                    .layer_count = layer_count,
+                },
+                .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
+            }, null);
+            try texture.views.put(d.gpa, view_desc, view);
+            break :blk view;
         };
+        const image_info: vk.DescriptorImageInfo = .{
+            .image_view = view,
+            .image_layout = .general,
+            .sampler = .null_handle,
+        };
+        const get_info: vk.DescriptorGetInfoEXT = .{
+            .type = .sampled_image,
+            .data = .{ .p_sampled_image = &image_info },
+        };
+        const buffer_properties = d.descriptorBufferProperties();
+        var descriptor: Descriptor = .{ .data = @splat(0) };
+        d.device.getDescriptorEXT(&get_info, buffer_properties.sampled_image_descriptor_size, @ptrCast(&descriptor.data));
+        return descriptor;
+    }
+
+    pub fn sizeAndAlign(d: Device, config: Config) SizeAndAlign {
+        const image_create_info = textureInfo(config);
         const info: vk.DeviceImageMemoryRequirements = .{
             .p_create_info = &image_create_info,
             .plane_aspect = gpu_to_vk.aspectsForFormat(config.format),
@@ -740,7 +836,21 @@ pub const Texture = struct {
     }
 
     pub fn create(d: *Device, config: Config, texture_ptr: *anyopaque) !Texture {
-        const info: vk.ImageCreateInfo = .{
+        const info = textureInfo(config);
+        const image = try d.device.createImage(&info, null);
+
+        const entry, const offset = d.heap.entryAndOffsetFromAddr(@intFromPtr(texture_ptr));
+        try d.device.bindImageMemory(image, entry.memory, offset);
+
+        return .{
+            .image = image,
+            .config = config,
+            .views = .empty,
+        };
+    }
+
+    fn textureInfo(config: Config) vk.ImageCreateInfo {
+        return .{
             .image_type = gpu_to_vk.textureType(config.type),
             .format = gpu_to_vk.format(config.format),
             .extent = .{ .width = config.dimensions[0], .height = config.dimensions[1], .depth = config.dimensions[2] },
@@ -752,17 +862,13 @@ pub const Texture = struct {
             .sharing_mode = .exclusive,
             .initial_layout = .undefined,
         };
-
-        const image = try d.device.createImage(&info, null);
-
-        const entry, const offset = d.heap.entryAndOffsetFromAddr(@intFromPtr(texture_ptr));
-        try d.device.bindImageMemory(image, entry.memory, offset);
-
-        return .{ .image = image };
     }
 
-    pub fn destroy(texture: Texture, d: Device) void {
+    pub fn destroy(texture: *Texture, d: Device) void {
         d.device.destroyImage(texture.image, null);
+        var it = texture.views.valueIterator();
+        while (it.next()) |view| d.device.destroyImageView(view.*, null);
+        texture.views.deinit(d.gpa);
     }
 };
 
