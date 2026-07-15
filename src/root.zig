@@ -1049,6 +1049,53 @@ pub const CommandBuffer = struct {
             grid_dimensions[2],
         );
     }
+
+    pub const Stage = packed struct {
+        transfer: bool = false,
+        compute: bool = false,
+        raster_color_out: bool = false,
+        raster_depth_out: bool = false,
+        pixel_shader: bool = false,
+        vertex_shader: bool = false,
+    };
+
+    pub const Hazard = packed struct {
+        draw_arguments: bool = false,
+        descriptors: bool = false,
+        depth_stencil: bool = false,
+    };
+
+    pub fn barrier(
+        command_buffer: CommandBuffer,
+        d: Device,
+        before: Stage,
+        after: Stage,
+        hazards: Hazard,
+    ) void {
+        const src_stage = gpu_to_vk.pipelineStage(before);
+        var dst_stage = gpu_to_vk.pipelineStage(after);
+        if (hazards.draw_arguments) {
+            dst_stage.draw_indirect_bit = true;
+        }
+        if (hazards.depth_stencil) {
+            dst_stage.early_fragment_tests_bit = true;
+            dst_stage.late_fragment_tests_bit = true;
+        }
+        const memory_barrier: vk.MemoryBarrier2 = .{
+            .src_stage_mask = src_stage,
+            .src_access_mask = .{ .memory_write_bit = true },
+            .dst_stage_mask = dst_stage,
+            .dst_access_mask = .{
+                .memory_read_bit = true,
+                .memory_write_bit = true,
+            },
+        };
+        const dependency_info: vk.DependencyInfo = .{
+            .memory_barrier_count = 1,
+            .p_memory_barriers = (&memory_barrier)[0..1],
+        };
+        d.device.cmdPipelineBarrier2(command_buffer.command_buffer, &dependency_info);
+    }
 };
 
 const std = @import("std");

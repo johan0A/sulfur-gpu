@@ -66,6 +66,8 @@ pub fn main(init: std.process.Init) !void {
     cb.setActiveTextureHeapPtr(device, heap_gpu);
     cb.setPipeline(device, pipeline);
     cb.dispatch(device, data_gpu, .{ 1, 1, 1 });
+
+    cb.barrier(device, .{ .compute = true }, .{ .transfer = true }, .{});
 }
 
 const Data = extern struct {

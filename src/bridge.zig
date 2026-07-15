@@ -255,16 +255,17 @@ pub const gpu_to_vk = struct {
         };
     }
 
-    pub fn pipelineStage(stage: gpu.StageFlags) vk.PipelineStageFlags2 {
+    pub fn pipelineStage(stage: gpu.CommandBuffer.Stage) vk.PipelineStageFlags2 {
         var out: vk.PipelineStageFlags2 = .{};
-        out.merge(if (stage.indirect_arguments) .{ .draw_indirect_bit = true } else .{});
-        out.merge(if (stage.transfer) .{ .transfer_bit = true } else .{});
-        out.merge(if (stage.compute) .{ .compute_shader_bit = true } else .{});
-        out.merge(if (stage.raster_color_out) .{ .color_attachment_output_bit = true } else .{});
-        out.merge(if (stage.pixel_shader) .{ .fragment_shader_bit = true, .early_fragment_tests_bit = true, .late_fragment_tests_bit = true } else .{});
-        out.merge(if (stage.fragment_tests) .{ .late_fragment_tests_bit = true, .early_fragment_tests_bit = true } else .{});
-        out.merge(if (stage.vertex_shader) .{ .vertex_shader_bit = true, .vertex_input_bit = true } else .{});
-        out.merge(if (stage.host) .{ .host_bit = true } else .{});
+        if (stage.transfer) out.all_transfer_bit = true;
+        if (stage.compute) out.compute_shader_bit = true;
+        if (stage.raster_color_out) out.color_attachment_output_bit = true;
+        if (stage.raster_depth_out) {
+            out.early_fragment_tests_bit = true;
+            out.late_fragment_tests_bit = true;
+        }
+        if (stage.pixel_shader) out.fragment_shader_bit = true;
+        if (stage.vertex_shader) out.vertex_shader_bit = true;
         return out;
     }
 
