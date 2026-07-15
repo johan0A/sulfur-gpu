@@ -35,18 +35,18 @@ pub fn main(init: std.process.Init) !void {
     const queue: gpu.Queue = .create(device, .graphics);
 
     const texture_config: gpu.Texture.Config = .{
-        .dimensions = .{ 512, 512, 1 },
+        .dimensions = .{ 8, 8, 1 },
         .format = .rgba8_unorm,
-        .usage = .{ .sampled = true },
+        .usage = .{ .storage = true },
     };
     const texture_size_align = gpu.Texture.sizeAndAlign(device, texture_config);
-    const texture_ptr = try device.rawAlloc(texture_size_align.size, texture_size_align.alignement, .gpu);
-    defer device.rawFree(texture_ptr);
-    var texture: gpu.Texture = try .create(&device, texture_config, texture_ptr);
+    const texture_gpu = try device.rawAlloc(texture_size_align.size, texture_size_align.alignement, .gpu);
+    defer device.rawFree(texture_gpu);
+    var texture: gpu.Texture = try .create(&device, texture_config, texture_gpu);
     defer texture.destroy(device);
 
     const descriptor_size_and_align = gpu.Texture.Descriptor.sizeAndHeapAlign(&device);
-    const heap_gpu = try device.rawAlloc(descriptor_size_and_align.size * 1024, descriptor_size_and_align.alignement, .default);
+    const heap_gpu = try device.rawAlloc(descriptor_size_and_align.size * 65536, descriptor_size_and_align.alignement, .default);
     defer device.rawFree(heap_gpu);
     const heap = device.deviceToHostPointer(heap_gpu);
 
@@ -58,6 +58,11 @@ pub fn main(init: std.process.Init) !void {
     const data_cpu: *Data = @ptrCast(@alignCast(device.deviceToHostPointer(data_gpu)));
     data_cpu.output_texture = 0;
 
+    const readback_gpu = try device.rawAlloc(8 * 8 * 4, .@"1", .readback); // TODO: what alignement?
+    defer device.rawFree(readback_gpu);
+    const readback_cpu: [*]u8 = @ptrCast(device.deviceToHostPointer(readback_gpu));
+    _ = readback_cpu; // autofix
+
     const spirv align(@alignOf(u32)) = @embedFile("generate_texture.spv").*;
     const pipeline: gpu.Pipeline = try .createCompute(device, @ptrCast(&spirv));
     defer pipeline.destroy(device);
@@ -68,6 +73,7 @@ pub fn main(init: std.process.Init) !void {
     cb.dispatch(device, data_gpu, .{ 1, 1, 1 });
 
     cb.barrier(device, .{ .compute = true }, .{ .transfer = true }, .{});
+    cb.copyFromTexture(&device, readback_gpu, texture_gpu, texture);
 }
 
 const Data = extern struct {

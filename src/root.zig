@@ -112,19 +112,18 @@ pub const Device = struct {
             return heap.entries.items[heap.indexFromAddr(gpu_addr)];
         }
 
-        fn entryAndOffsetFromAddr(heap: *Heap, gpu_addr: usize) struct { Entry, u32 } {
+        fn entryAndOffsetFromAddr(heap: *const Heap, gpu_addr: usize) struct { Entry, vk.DeviceSize } {
             const entry = heap.entryFromAddr(gpu_addr);
-            const offset = gpu_addr - entry.gpu_addr;
-            return .{ entry, @intCast(offset) };
+            return .{ entry, @intCast(gpu_addr - entry.gpu_addr) };
         }
 
         fn indexFromAddr(heap: *const Heap, gpu_addr: usize) usize {
-            return std.sort.binarySearch(
+            return std.sort.upperBound(
                 Entry,
                 heap.entries.items,
                 gpu_addr,
                 order,
-            ) orelse unreachable;
+            ) - 1;
         }
 
         fn insert(
@@ -204,7 +203,10 @@ pub const Device = struct {
             .mutable_descriptor_type_list_count = 1,
             .p_mutable_descriptor_type_lists = &.{mutable_type_list},
         };
-        const binding_flags: vk.DescriptorBindingFlags = .{ .partially_bound_bit = true };
+        const binding_flags: vk.DescriptorBindingFlags = .{
+            .partially_bound_bit = true,
+            .variable_descriptor_count_bit = true,
+        };
         const binding_flags_info: vk.DescriptorSetLayoutBindingFlagsCreateInfo = .{
             .p_next = &mutable_info,
             .binding_count = 1,
@@ -397,7 +399,10 @@ pub const Device = struct {
     }
 
     pub fn deviceToHostPointer(d: Device, ptr: *anyopaque) *anyopaque {
-        return @ptrFromInt(d.heap.entryFromAddr(@intFromPtr(ptr)).cpu_addr.?);
+        const address = @intFromPtr(ptr);
+        const entry = d.heap.entryFromAddr(address);
+        const offset = address - entry.gpu_addr;
+        return @ptrFromInt(entry.cpu_addr.? + offset);
     }
 
     pub fn rawFree(d: *Device, gpu_ptr: *anyopaque) void {
@@ -487,6 +492,7 @@ pub fn createLogicalDevice(
         .buffer_device_address = .true,
         .runtime_descriptor_array = .true,
         .descriptor_binding_partially_bound = .true,
+        .descriptor_binding_variable_descriptor_count = .true,
         .descriptor_binding_sampled_image_update_after_bind = .true,
         .descriptor_binding_storage_buffer_update_after_bind = .true,
         .scalar_block_layout = .true,
@@ -1095,6 +1101,42 @@ pub const CommandBuffer = struct {
             .p_memory_barriers = (&memory_barrier)[0..1],
         };
         d.device.cmdPipelineBarrier2(command_buffer.command_buffer, &dependency_info);
+    }
+
+    pub fn copyFromTexture(
+        command_buffer: CommandBuffer,
+        d: *Device,
+        dest_gpu: *anyopaque,
+        src_gpu: *anyopaque,
+        texture: Texture,
+    ) void {
+        _ = src_gpu;
+        const entry, const offset = d.heap.entryAndOffsetFromAddr(@intFromPtr(dest_gpu));
+        const region: vk.BufferImageCopy2 = .{
+            .buffer_offset = offset,
+            .buffer_row_length = 0,
+            .buffer_image_height = 0,
+            .image_subresource = .{
+                .aspect_mask = .{ .color_bit = true },
+                .mip_level = 0,
+                .base_array_layer = 0,
+                .layer_count = texture.config.layer_count,
+            },
+            .image_offset = .{ .x = 0, .y = 0, .z = 0 },
+            .image_extent = .{
+                .width = texture.config.dimensions[0],
+                .height = texture.config.dimensions[1],
+                .depth = texture.config.dimensions[2],
+            },
+        };
+        const info: vk.CopyImageToBufferInfo2 = .{
+            .src_image = texture.image,
+            .src_image_layout = .general,
+            .dst_buffer = entry.buffer,
+            .region_count = 1,
+            .p_regions = (&region)[0..1],
+        };
+        d.device.cmdCopyImageToBuffer2(command_buffer.command_buffer, &info);
     }
 };
 
