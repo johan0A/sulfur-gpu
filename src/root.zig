@@ -316,6 +316,7 @@ pub const Device = struct {
                 .indirect_buffer_bit = true,
                 .transfer_src_bit = true,
                 .shader_device_address_bit = true,
+                .resource_descriptor_buffer_bit_ext = true,
             },
             .gpu => .{
                 .storage_buffer_bit = true,
@@ -984,6 +985,36 @@ pub const CommandBuffer = struct {
         try d.device.beginCommandBuffer(command_buffer, &begin_info);
 
         return .{ .command_buffer = command_buffer };
+    }
+
+    pub fn setActiveTextureHeapPtr(command_buffer: CommandBuffer, d: Device, heap_address: *anyopaque) void {
+        const binding_info: vk.DescriptorBufferBindingInfoEXT = .{
+            .address = @intFromPtr(heap_address),
+            .usage = .{ .resource_descriptor_buffer_bit_ext = true },
+        };
+        d.device.cmdBindDescriptorBuffersEXT(
+            command_buffer.command_buffer,
+            &.{binding_info},
+        );
+
+        const indices = [_]u32{0};
+        const offsets = [_]vk.DeviceSize{0};
+        d.device.cmdSetDescriptorBufferOffsetsEXT(
+            command_buffer.command_buffer,
+            .compute,
+            d.pipeline_layout,
+            0,
+            &indices,
+            &offsets,
+        );
+        d.device.cmdSetDescriptorBufferOffsetsEXT(
+            command_buffer.command_buffer,
+            .graphics,
+            d.pipeline_layout,
+            0,
+            &indices,
+            &offsets,
+        );
     }
 };
 
