@@ -2,26 +2,10 @@ pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
     const arena = init.arena.allocator();
 
-    const window = c.SDL_CreateWindow(
-        "title",
-        100,
-        100,
-        c.SDL_WINDOW_VULKAN | c.SDL_WINDOW_RESIZABLE,
-    ) orelse @panic("");
-    _ = window; // autofix
+    var loader = try VulkanLoader.open();
+    defer loader.close();
 
-    const sdl_required_extensions = blk: {
-        var sdl_required_extensions_count: u32 = undefined;
-        const sdl_required_extensions_ptr = c.SDL_Vulkan_GetInstanceExtensions(&sdl_required_extensions_count) orelse
-            return error.SDL_Vulkan_GetInstanceExtensionsFailed;
-        break :blk sdl_required_extensions_ptr[0..sdl_required_extensions_count];
-    };
-
-    const instance: gpu.Instance = try .create(
-        gpa,
-        @ptrCast(c.SDL_Vulkan_GetVkGetInstanceProcAddr()),
-        @ptrCast(sdl_required_extensions),
-    );
+    const instance: gpu.Instance = try .create(gpa, loader.proc, &.{});
     defer instance.destroy(gpa);
 
     const adapters = try gpu.enumerateAdapters(arena, instance);
@@ -89,8 +73,6 @@ const Data = extern struct {
     output_texture: u32 align(16),
 };
 
-const FRAMES_IN_FLIGHT = 2;
-
 const std = @import("std");
 const gpu = @import("sulfur");
-const c = @import("c");
+const VulkanLoader = @import("VulkanLoader");

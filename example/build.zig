@@ -16,33 +16,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     root_module.addImport("sulfur", sulfur_dep.module("sulfur"));
-
-    {
-        const sdl_dep = b.dependency("sdl", .{
-            .target = target,
-            .optimize = optimize,
-            .preferred_link_mode = .static,
-        });
-        const sdl_lib = sdl_dep.artifact("SDL3");
-        root_module.linkLibrary(sdl_lib);
-
-        const translate_c = b.addTranslateC(.{
-            .root_source_file = b.addWriteFiles().add("stub.h",
-                \\#include <SDL3/SDL.h>
-                \\#include <SDL3/SDL_vulkan.h>
-            ),
-            .target = target,
-            .optimize = optimize,
-        });
-        translate_c.addIncludePath(sdl_lib.getEmittedIncludeTree());
-        root_module.addImport("c", translate_c.createModule());
-    }
-
-    const vert = compileShader(b, "src/shaders/hello_triangle.slang", "vertexMain");
-    const frag = compileShader(b, "src/shaders/hello_triangle.slang", "fragmentMain");
-
-    root_module.addAnonymousImport("hello_triangle.vert.spv", .{ .root_source_file = vert });
-    root_module.addAnonymousImport("hello_triangle.frag.spv", .{ .root_source_file = frag });
+    root_module.addImport("VulkanLoader", sulfur_dep.module("VulkanLoader"));
 
     const compute = compileShader(b, "src/shaders/generate_texture.slang", "main");
     root_module.addAnonymousImport("generate_texture.spv", .{ .root_source_file = compute });

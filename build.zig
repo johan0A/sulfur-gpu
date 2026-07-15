@@ -10,12 +10,20 @@ pub fn build(b: *std.Build) void {
         .target = target,
     });
 
+    const vulkan_loader_module = b.addModule("VulkanLoader", .{
+        .root_source_file = b.path("src/VulkanLoader.zig"),
+        .optimize = optimize,
+        .target = target,
+        .link_libc = true,
+    });
+
     const vulkan_headers_dep = b.dependency("vulkan_headers", .{});
 
     const vulkan = b.dependency("vulkan", .{
         .registry = vulkan_headers_dep.path("registry/vk.xml"),
     });
     root_module.addImport("vulkan", vulkan.module("vulkan-zig"));
+    vulkan_loader_module.addImport("vulkan", vulkan.module("vulkan-zig"));
 
     {
         const sdl_dep = b.dependency("sdl", .{

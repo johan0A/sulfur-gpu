@@ -1,5 +1,6 @@
 pub const Instance = struct {
     instance: vk.InstanceProxy,
+    presentation_supported: bool,
 
     pub fn create(
         gpa: std.mem.Allocator,
@@ -52,7 +53,10 @@ pub const Instance = struct {
         const instance_dispatch = try gpa.create(vk.InstanceWrapper);
         instance_dispatch.* = .load(instance_handle, base_dispatch.dispatch.vkGetInstanceProcAddr.?);
         const instance: vk.InstanceProxy = .init(instance_handle, instance_dispatch);
-        return .{ .instance = instance };
+        return .{
+            .instance = instance,
+            .presentation_supported = required_surface_extensions.len != 0,
+        };
     }
 
     pub fn destroy(instance: Instance, gpa: std.mem.Allocator) void {
@@ -157,7 +161,7 @@ pub const Device = struct {
         defer arena_impl.deinit();
         const arena = arena_impl.allocator();
 
-        const device_handle = try createLogicalDevice(arena, adapter.physical_device, instance.instance.wrapper);
+        const device_handle = try createLogicalDevice(arena, adapter.physical_device, instance.instance.wrapper, instance.presentation_supported);
         const device_dispatch = try gpa.create(vk.DeviceWrapper);
         device_dispatch.* = .load(device_handle, instance.instance.wrapper.dispatch.vkGetDeviceProcAddr.?);
         const device: vk.DeviceProxy = .init(device_handle, device_dispatch);
@@ -455,6 +459,149 @@ pub const Device = struct {
         }
         return &d.descriptor_buffer_properties.?;
     }
+
+    fn createLogicalDevice(
+        arena: std.mem.Allocator,
+        physical_device: vk.PhysicalDevice,
+        instance_dispatch: *const vk.InstanceWrapper,
+        presentation_supported: bool,
+    ) !vk.Device {
+        var queue_family_count: u32 = undefined;
+        instance_dispatch.getPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, null);
+
+        const queue_infos = try arena.alloc(vk.DeviceQueueCreateInfo, queue_family_count);
+        for (queue_infos, 0..) |*queue_info, i| {
+            queue_info.* = .{
+                .queue_family_index = @intCast(i),
+                .queue_count = 1,
+                .p_queue_priorities = &.{1},
+            };
+        }
+
+        var mutable_descriptor_features: vk.PhysicalDeviceMutableDescriptorTypeFeaturesEXT = .{
+            .mutable_descriptor_type = .true,
+        };
+        var descriptor_buffer_features: vk.PhysicalDeviceDescriptorBufferFeaturesEXT = .{
+            .p_next = &mutable_descriptor_features,
+            .descriptor_buffer = .true,
+        };
+        var device_features_vk13: vk.PhysicalDeviceVulkan13Features = .{
+            .p_next = &descriptor_buffer_features,
+            .dynamic_rendering = .true,
+            .synchronization_2 = .true,
+        };
+        var device_features_vk12: vk.PhysicalDeviceVulkan12Features = .{
+            .p_next = &device_features_vk13,
+            .buffer_device_address = .true,
+            .runtime_descriptor_array = .true,
+            .descriptor_binding_partially_bound = .true,
+            .descriptor_binding_variable_descriptor_count = .true,
+            .descriptor_binding_sampled_image_update_after_bind = .true,
+            .descriptor_binding_storage_buffer_update_after_bind = .true,
+            .scalar_block_layout = .true,
+            .timeline_semaphore = .true,
+            .shader_float_16 = .true,
+            .shader_int_8 = .true,
+            .storage_buffer_8_bit_access = .true,
+            .uniform_and_storage_buffer_8_bit_access = .true,
+        };
+        const device_features_vk11: vk.PhysicalDeviceVulkan11Features = .{
+            .p_next = &device_features_vk12,
+            .shader_draw_parameters = .true,
+            .storage_buffer_16_bit_access = .true,
+            .uniform_and_storage_buffer_16_bit_access = .true,
+        };
+
+        var required_device_extensions_buff: [64][*:0]const u8 = undefined;
+        var required_device_extensions: std.ArrayList([*:0]const u8) = .initBuffer(&required_device_extensions_buff);
+        required_device_extensions.appendSliceAssumeCapacity(&.{
+            vk.extensions.ext_descriptor_buffer.name,
+            vk.extensions.ext_mutable_descriptor_type.name,
+            // vk.extensions.khr_unified_image_layouts.name, TODO
+        });
+        if (presentation_supported) required_device_extensions.appendAssumeCapacity(
+            vk.extensions.khr_swapchain.name,
+        );
+
+        return try instance_dispatch.createDevice(physical_device, &.{
+            .p_next = &device_features_vk11,
+            .p_queue_create_infos = queue_infos.ptr,
+            .queue_create_info_count = @intCast(queue_infos.len),
+            .pp_enabled_extension_names = required_device_extensions.items.ptr,
+            .enabled_extension_count = @intCast(required_device_extensions.items.len),
+            .p_enabled_features = &.{
+                .shader_int_64 = .true,
+                .shader_int_16 = .true,
+                .sampler_anisotropy = .true,
+                .multi_draw_indirect = .true,
+                // .robust_buffer_access = .true, TODO: consider
+            },
+        }, null);
+    }
+
+    fn findQueueFamilies(
+        arena: std.mem.Allocator,
+        physical_device: vk.PhysicalDevice,
+        instance_dispatch: *const vk.InstanceWrapper,
+    ) !struct {
+        queue_family_indices: std.EnumArray(QueueType, u32),
+        queue_indices: std.EnumArray(QueueType, u32),
+    } {
+        const queue_family_indices = try instance_dispatch.getPhysicalDeviceQueueFamilyPropertiesAlloc(physical_device, arena);
+
+        var graphics: u32 = std.math.maxInt(u32);
+        for (queue_family_indices, 0..) |family, i| {
+            if (family.queue_flags.graphics_bit) {
+                graphics = @intCast(i);
+                break;
+            }
+        }
+
+        var compute = graphics;
+        for (queue_family_indices, 0..) |family, i| {
+            if (family.queue_flags.compute_bit and !family.queue_flags.graphics_bit) {
+                compute = @intCast(i);
+                break;
+            }
+        }
+
+        var transfer = compute;
+        for (queue_family_indices, 0..) |family, i| {
+            if (family.queue_flags.transfer_bit and
+                !family.queue_flags.graphics_bit and
+                !family.queue_flags.compute_bit)
+            {
+                transfer = @intCast(i);
+                break;
+            }
+        }
+
+        const next_index = try arena.alloc(u32, queue_family_indices.len);
+        @memset(next_index, 0);
+
+        const local = struct {
+            fn claim(idx: []u32, families: []const vk.QueueFamilyProperties, fam: u32) u32 {
+                if (fam == std.math.maxInt(u32)) return std.math.maxInt(u32);
+                const max = families[fam].queue_count;
+                const i = @min(idx[fam], max - 1);
+                idx[fam] += 1;
+                return i;
+            }
+        };
+
+        return .{
+            .queue_family_indices = .init(.{
+                .graphics = graphics,
+                .compute = compute,
+                .transfer = transfer,
+            }),
+            .queue_indices = .init(.{
+                .graphics = local.claim(next_index, queue_family_indices, graphics),
+                .compute = local.claim(next_index, queue_family_indices, compute),
+                .transfer = local.claim(next_index, queue_family_indices, transfer),
+            }),
+        };
+    }
 };
 
 pub const Memory = enum(u8) {
@@ -462,142 +609,6 @@ pub const Memory = enum(u8) {
     gpu,
     readback,
 };
-
-pub fn createLogicalDevice(
-    arena: std.mem.Allocator,
-    physical_device: vk.PhysicalDevice,
-    instance_dispatch: *const vk.InstanceWrapper,
-) !vk.Device {
-    var queue_family_count: u32 = undefined;
-    instance_dispatch.getPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, null);
-
-    const queue_infos = try arena.alloc(vk.DeviceQueueCreateInfo, queue_family_count);
-    for (queue_infos, 0..) |*queue_info, i| {
-        queue_info.* = .{
-            .queue_family_index = @intCast(i),
-            .queue_count = 1,
-            .p_queue_priorities = &.{1},
-        };
-    }
-
-    var mutable_descriptor_features: vk.PhysicalDeviceMutableDescriptorTypeFeaturesEXT = .{
-        .mutable_descriptor_type = .true,
-    };
-    var descriptor_buffer_features: vk.PhysicalDeviceDescriptorBufferFeaturesEXT = .{
-        .p_next = &mutable_descriptor_features,
-        .descriptor_buffer = .true,
-    };
-    var device_features_vk13: vk.PhysicalDeviceVulkan13Features = .{
-        .p_next = &descriptor_buffer_features,
-        .dynamic_rendering = .true,
-        .synchronization_2 = .true,
-    };
-    var device_features_vk12: vk.PhysicalDeviceVulkan12Features = .{
-        .p_next = &device_features_vk13,
-        .buffer_device_address = .true,
-        .runtime_descriptor_array = .true,
-        .descriptor_binding_partially_bound = .true,
-        .descriptor_binding_variable_descriptor_count = .true,
-        .descriptor_binding_sampled_image_update_after_bind = .true,
-        .descriptor_binding_storage_buffer_update_after_bind = .true,
-        .scalar_block_layout = .true,
-        .timeline_semaphore = .true,
-        .shader_float_16 = .true,
-        .shader_int_8 = .true,
-        .storage_buffer_8_bit_access = .true,
-        .uniform_and_storage_buffer_8_bit_access = .true,
-    };
-    const device_features_vk11: vk.PhysicalDeviceVulkan11Features = .{
-        .p_next = &device_features_vk12,
-        .shader_draw_parameters = .true,
-        .storage_buffer_16_bit_access = .true,
-        .uniform_and_storage_buffer_16_bit_access = .true,
-    };
-    const required_device_extensions = [_][*:0]const u8{
-        vk.extensions.khr_swapchain.name,
-        vk.extensions.ext_descriptor_buffer.name,
-        vk.extensions.ext_mutable_descriptor_type.name,
-        // vk.extensions.khr_unified_image_layouts.name, TODO
-    };
-    return try instance_dispatch.createDevice(physical_device, &.{
-        .p_next = &device_features_vk11,
-        .p_queue_create_infos = queue_infos.ptr,
-        .queue_create_info_count = @intCast(queue_infos.len),
-        .pp_enabled_extension_names = &required_device_extensions,
-        .enabled_extension_count = required_device_extensions.len,
-        .p_enabled_features = &.{
-            .shader_int_64 = .true,
-            .shader_int_16 = .true,
-            .sampler_anisotropy = .true,
-            .multi_draw_indirect = .true,
-            // .robust_buffer_access = .true, TODO: consider
-        },
-    }, null);
-}
-
-fn findQueueFamilies(
-    arena: std.mem.Allocator,
-    physical_device: vk.PhysicalDevice,
-    instance_dispatch: *const vk.InstanceWrapper,
-) !struct {
-    queue_family_indices: std.EnumArray(QueueType, u32),
-    queue_indices: std.EnumArray(QueueType, u32),
-} {
-    const queue_family_indices = try instance_dispatch.getPhysicalDeviceQueueFamilyPropertiesAlloc(physical_device, arena);
-
-    var graphics: u32 = std.math.maxInt(u32);
-    for (queue_family_indices, 0..) |family, i| {
-        if (family.queue_flags.graphics_bit) {
-            graphics = @intCast(i);
-            break;
-        }
-    }
-
-    var compute = graphics;
-    for (queue_family_indices, 0..) |family, i| {
-        if (family.queue_flags.compute_bit and !family.queue_flags.graphics_bit) {
-            compute = @intCast(i);
-            break;
-        }
-    }
-
-    var transfer = compute;
-    for (queue_family_indices, 0..) |family, i| {
-        if (family.queue_flags.transfer_bit and
-            !family.queue_flags.graphics_bit and
-            !family.queue_flags.compute_bit)
-        {
-            transfer = @intCast(i);
-            break;
-        }
-    }
-
-    const next_index = try arena.alloc(u32, queue_family_indices.len);
-    @memset(next_index, 0);
-
-    const local = struct {
-        fn claim(idx: []u32, families: []const vk.QueueFamilyProperties, fam: u32) u32 {
-            if (fam == std.math.maxInt(u32)) return std.math.maxInt(u32);
-            const max = families[fam].queue_count;
-            const i = @min(idx[fam], max - 1);
-            idx[fam] += 1;
-            return i;
-        }
-    };
-
-    return .{
-        .queue_family_indices = .init(.{
-            .graphics = graphics,
-            .compute = compute,
-            .transfer = transfer,
-        }),
-        .queue_indices = .init(.{
-            .graphics = local.claim(next_index, queue_family_indices, graphics),
-            .compute = local.claim(next_index, queue_family_indices, compute),
-            .transfer = local.claim(next_index, queue_family_indices, transfer),
-        }),
-    };
-}
 
 pub const QueueType = enum {
     graphics,
