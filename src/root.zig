@@ -944,6 +944,7 @@ pub const Texture = struct {
 
 pub const Pipeline = struct {
     pipeline: vk.Pipeline,
+    bind_point: vk.PipelineBindPoint,
 
     pub fn createCompute(d: Device, source: []const u32) !Pipeline {
         const module_info: vk.ShaderModuleCreateInfo = .{
@@ -954,14 +955,18 @@ pub const Pipeline = struct {
         defer d.device.destroyShaderModule(module, null);
 
         const info: vk.ComputePipelineCreateInfo = .{
-            .stage = .{ .stage = .{ .compute_bit = true }, .module = module, .p_name = "main" },
+            .stage = .{
+                .stage = .{ .compute_bit = true },
+                .module = module,
+                .p_name = "main",
+            },
             .layout = d.pipeline_layout,
             .base_pipeline_index = -1,
         };
         var pipeline: vk.Pipeline = undefined;
         _ = try d.device.createComputePipelines(.null_handle, &.{info}, null, (&pipeline)[0..1]); // TODO: handle returned vk.Result
 
-        return .{ .pipeline = pipeline };
+        return .{ .pipeline = pipeline, .bind_point = .compute };
     }
 
     pub fn destroy(pipeline: Pipeline, d: Device) void {
@@ -987,7 +992,11 @@ pub const CommandBuffer = struct {
         return .{ .command_buffer = command_buffer };
     }
 
-    pub fn setActiveTextureHeapPtr(command_buffer: CommandBuffer, d: Device, heap_address: *anyopaque) void {
+    pub fn setActiveTextureHeapPtr(
+        command_buffer: CommandBuffer,
+        d: Device,
+        heap_address: *anyopaque,
+    ) void {
         const binding_info: vk.DescriptorBufferBindingInfoEXT = .{
             .address = @intFromPtr(heap_address),
             .usage = .{ .resource_descriptor_buffer_bit_ext = true },
@@ -1014,6 +1023,18 @@ pub const CommandBuffer = struct {
             0,
             &indices,
             &offsets,
+        );
+    }
+
+    pub fn setPipeline(
+        command_buffer: CommandBuffer,
+        d: Device,
+        pipeline: Pipeline,
+    ) void {
+        d.device.cmdBindPipeline(
+            command_buffer.command_buffer,
+            pipeline.bind_point,
+            pipeline.pipeline,
         );
     }
 };

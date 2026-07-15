@@ -64,6 +64,7 @@ pub fn main(init: std.process.Init) !void {
 
     const cb: gpu.CommandBuffer = try .startRecording(queue, device);
     cb.setActiveTextureHeapPtr(device, heap_gpu);
+    cb.setPipeline(device, pipeline);
 }
 
 const Data = extern struct {
