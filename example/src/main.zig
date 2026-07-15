@@ -33,7 +33,6 @@ pub fn main(init: std.process.Init) !void {
     defer device.destroy();
 
     const queue: gpu.Queue = .create(device, .graphics);
-    _ = queue; // autofix
 
     const texture_config: gpu.Texture.Config = .{
         .dimensions = .{ 512, 512, 1 },
@@ -62,6 +61,9 @@ pub fn main(init: std.process.Init) !void {
     const spirv align(@alignOf(u32)) = @embedFile("generate_texture.spv").*;
     const pipeline: gpu.Pipeline = try .createCompute(device, @ptrCast(&spirv));
     defer pipeline.destroy(device);
+
+    const cb: gpu.CommandBuffer = try .startRecording(queue, device);
+    _ = cb; // autofix
 }
 
 const Data = extern struct {

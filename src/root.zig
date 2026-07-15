@@ -78,7 +78,9 @@ pub const Device = struct {
     device: vk.DeviceProxy,
     physical_device: vk.PhysicalDevice,
 
-    queue_families: QueueFamilies,
+    queue_family_indices: std.EnumArray(QueueType, u32),
+    queue_indices: std.EnumArray(QueueType, u32),
+    command_pools: std.EnumArray(QueueType, vk.CommandPool),
 
     debug_messenger: vk.DebugUtilsMessengerEXT,
     gpa: std.mem.Allocator,
@@ -236,10 +238,24 @@ pub const Device = struct {
         };
         const pipeline_layout = try device.createPipelineLayout(&create_info, null);
 
+        const queue_families = try findQueueFamilies(arena, adapter.physical_device, instance.instance.wrapper);
+
+        var command_pools: std.EnumArray(QueueType, vk.CommandPool) = .initUndefined();
+        var it = command_pools.iterator();
+        while (it.next()) |entry| {
+            const info: vk.CommandPoolCreateInfo = .{
+                .flags = .{ .transient_bit = true, .reset_command_buffer_bit = true },
+                .queue_family_index = queue_families.queue_family_indices.get(entry.key),
+            };
+            entry.value.* = try device.createCommandPool(&info, null);
+        }
+
         return .{
             .instance = instance.instance,
             .device = device,
-            .queue_families = try findQueueFamilies(arena, adapter.physical_device, instance.instance.wrapper),
+            .queue_family_indices = queue_families.queue_family_indices,
+            .queue_indices = queue_families.queue_indices,
+            .command_pools = command_pools,
             .debug_messenger = debug_messenger,
             .physical_device = adapter.physical_device,
             .gpa = gpa,
@@ -252,6 +268,7 @@ pub const Device = struct {
 
     pub fn destroy(d: *Device) void {
         d.device.deviceWaitIdle() catch {};
+        for (d.command_pools.values) |pool| d.device.destroyCommandPool(pool, null);
         d.device.destroyPipelineLayout(d.pipeline_layout, null);
         d.device.destroyDescriptorSetLayout(d.descriptor_set_layout, null);
         d.device.destroyDevice(null);
@@ -511,24 +528,18 @@ pub fn createLogicalDevice(
     }, null);
 }
 
-pub const QueueFamilies = struct {
-    graphics: u32,
-    graphics_index: u32,
-    compute: u32,
-    compute_index: u32,
-    transfer: u32,
-    transfer_index: u32,
-};
-
 fn findQueueFamilies(
     arena: std.mem.Allocator,
     physical_device: vk.PhysicalDevice,
     instance_dispatch: *const vk.InstanceWrapper,
-) !QueueFamilies {
-    const queue_families = try instance_dispatch.getPhysicalDeviceQueueFamilyPropertiesAlloc(physical_device, arena);
+) !struct {
+    queue_family_indices: std.EnumArray(QueueType, u32),
+    queue_indices: std.EnumArray(QueueType, u32),
+} {
+    const queue_family_indices = try instance_dispatch.getPhysicalDeviceQueueFamilyPropertiesAlloc(physical_device, arena);
 
     var graphics: u32 = std.math.maxInt(u32);
-    for (queue_families, 0..) |family, i| {
+    for (queue_family_indices, 0..) |family, i| {
         if (family.queue_flags.graphics_bit) {
             graphics = @intCast(i);
             break;
@@ -536,7 +547,7 @@ fn findQueueFamilies(
     }
 
     var compute = graphics;
-    for (queue_families, 0..) |family, i| {
+    for (queue_family_indices, 0..) |family, i| {
         if (family.queue_flags.compute_bit and !family.queue_flags.graphics_bit) {
             compute = @intCast(i);
             break;
@@ -544,7 +555,7 @@ fn findQueueFamilies(
     }
 
     var transfer = compute;
-    for (queue_families, 0..) |family, i| {
+    for (queue_family_indices, 0..) |family, i| {
         if (family.queue_flags.transfer_bit and
             !family.queue_flags.graphics_bit and
             !family.queue_flags.compute_bit)
@@ -554,7 +565,7 @@ fn findQueueFamilies(
         }
     }
 
-    const next_index = try arena.alloc(u32, queue_families.len);
+    const next_index = try arena.alloc(u32, queue_family_indices.len);
     @memset(next_index, 0);
 
     const local = struct {
@@ -568,12 +579,16 @@ fn findQueueFamilies(
     };
 
     return .{
-        .graphics = graphics,
-        .graphics_index = local.claim(next_index, queue_families, graphics),
-        .compute = compute,
-        .compute_index = local.claim(next_index, queue_families, compute),
-        .transfer = transfer,
-        .transfer_index = local.claim(next_index, queue_families, transfer),
+        .queue_family_indices = .init(.{
+            .graphics = graphics,
+            .compute = compute,
+            .transfer = transfer,
+        }),
+        .queue_indices = .init(.{
+            .graphics = local.claim(next_index, queue_family_indices, graphics),
+            .compute = local.claim(next_index, queue_family_indices, compute),
+            .transfer = local.claim(next_index, queue_family_indices, transfer),
+        }),
     };
 }
 
@@ -585,15 +600,13 @@ pub const QueueType = enum {
 
 pub const Queue = struct {
     queue: vk.Queue,
+    queue_type: QueueType,
 
-    pub fn create(d: Device, @"type": QueueType) Queue {
-        const queue_family, const queue_index = switch (@"type") {
-            .graphics => .{ d.queue_families.graphics, d.queue_families.graphics_index },
-            .compute => .{ d.queue_families.compute, d.queue_families.compute_index },
-            .transfer => .{ d.queue_families.transfer, d.queue_families.transfer_index },
-        };
-        const queue = d.device.getDeviceQueue(queue_family, queue_index);
-        return .{ .queue = queue };
+    pub fn create(d: Device, queue_type: QueueType) Queue {
+        const queue_family_index = d.queue_family_indices.get(queue_type);
+        const queue_index = d.queue_indices.get(queue_type);
+        const queue = d.device.getDeviceQueue(queue_family_index, queue_index);
+        return .{ .queue = queue, .queue_type = queue_type };
     }
 };
 
@@ -952,6 +965,25 @@ pub const Pipeline = struct {
 
     pub fn destroy(pipeline: Pipeline, d: Device) void {
         d.device.destroyPipeline(pipeline.pipeline, null);
+    }
+};
+
+pub const CommandBuffer = struct {
+    command_buffer: vk.CommandBuffer,
+
+    pub fn startRecording(queue: Queue, d: Device) !CommandBuffer {
+        const alloc_info: vk.CommandBufferAllocateInfo = .{
+            .command_pool = d.command_pools.get(queue.queue_type),
+            .level = .primary,
+            .command_buffer_count = 1,
+        };
+        var command_buffer: vk.CommandBuffer = undefined;
+        try d.device.allocateCommandBuffers(&alloc_info, (&command_buffer)[0..1]);
+
+        const begin_info: vk.CommandBufferBeginInfo = .{ .flags = .{ .one_time_submit_bit = true } };
+        try d.device.beginCommandBuffer(command_buffer, &begin_info);
+
+        return .{ .command_buffer = command_buffer };
     }
 };
 
