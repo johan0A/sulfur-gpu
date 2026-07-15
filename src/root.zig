@@ -92,6 +92,8 @@ pub const Device = struct {
     descriptor_set_layout: vk.DescriptorSetLayout,
     pipeline_layout: vk.PipelineLayout,
 
+    undefined_layout_textures: std.ArrayList(struct { vk.Image, Texture.Config }),
+
     const Heap = struct {
         entries: std.ArrayList(Entry),
 
@@ -114,7 +116,8 @@ pub const Device = struct {
 
         fn entryAndOffsetFromAddr(heap: *const Heap, gpu_addr: usize) struct { Entry, vk.DeviceSize } {
             const entry = heap.entryFromAddr(gpu_addr);
-            return .{ entry, @intCast(gpu_addr - entry.gpu_addr) };
+            const offset = gpu_addr - entry.gpu_addr;
+            return .{ entry, @intCast(offset) };
         }
 
         fn indexFromAddr(heap: *const Heap, gpu_addr: usize) usize {
@@ -260,6 +263,7 @@ pub const Device = struct {
             .descriptor_buffer_properties = null,
             .descriptor_set_layout = descriptor_set_layout,
             .pipeline_layout = pipeline_layout,
+            .undefined_layout_textures = .empty,
         };
     }
 
@@ -275,6 +279,7 @@ pub const Device = struct {
         // TODO: can we destroy all of them at once?
         // for (d.heap.entries.items) |entry| entry.destroy(d);
         d.heap.entries.deinit(d.gpa);
+        d.undefined_layout_textures.deinit(d.gpa);
     }
 
     pub fn surfaceCapabilities(d: Device, gpa: std.mem.Allocator, surface: vk.SurfaceKHR) !SurfaceCapabilities {
@@ -610,32 +615,43 @@ pub const Queue = struct {
         const queue = d.device.getDeviceQueue(queue_family_index, queue_index);
         return .{ .queue = queue, .queue_type = queue_type };
     }
-};
 
-pub const Swapchain = struct {
-    const SwapchainOptions = struct {
-        format: Format,
-        present_mode: PresentMode,
-        usage: Texture.Usage = .{ .color_attachment = true },
-        frames_in_flight: u32 = 2,
-        min_image_count: u32,
-    };
-
-    pub fn create(
-        d: Device,
+    pub fn submitSignal(
         queue: Queue,
-        surface: vk.SurfaceKHR,
-        options: SwapchainOptions,
-    ) !Swapchain {
-        _ = queue; // autofix
-        _ = d; // autofix
-        _ = options; // autofix
-        _ = surface; // autofix
+        d: *Device,
+        command_buffers: []const CommandBuffer,
+        signal_semaphore: Semaphore,
+        signal_value: u64,
+    ) !void {
+        const submit_buffers = try d.gpa.alloc(vk.CommandBufferSubmitInfo, command_buffers.len);
+        defer d.gpa.free(submit_buffers);
+        for (command_buffers, submit_buffers) |command_buffer, *submit_buffer| {
+            try d.device.endCommandBuffer(command_buffer.command_buffer);
 
-        return .{};
+            submit_buffer.* = .{
+                .command_buffer = command_buffer.command_buffer,
+                .device_mask = 0,
+            };
+        }
+
+        const signal_info: vk.SemaphoreSubmitInfo = .{
+            .semaphore = signal_semaphore.semaphore,
+            .value = signal_value,
+            .stage_mask = .{ .all_commands_bit = true },
+            .device_index = 0,
+        };
+        const submit_info: vk.SubmitInfo2 = .{
+            .command_buffer_info_count = @intCast(submit_buffers.len),
+            .p_command_buffer_infos = submit_buffers.ptr,
+            .signal_semaphore_info_count = 1,
+            .p_signal_semaphore_infos = (&signal_info)[0..1],
+        };
+        try d.device.queueSubmit2(
+            queue.queue,
+            &.{submit_info},
+            .null_handle,
+        );
     }
-
-    // pub fn acquireNextTexture(swapchain: Swapchain) Texture {}
 };
 
 pub const SurfaceCapabilities = struct {
@@ -859,7 +875,7 @@ pub const Texture = struct {
 
     pub fn RwTextureViewDescriptor(texture: *Texture, d: *Device, view_desc: ViewDesc) !Descriptor {
         const view = texture.views.get(view_desc) orelse blk: {
-            const mips_level = if (view_desc.mip_count == ViewDesc.all_mips) vk.REMAINING_MIP_LEVELS else view_desc.base_mip;
+            const mips_level = if (view_desc.mip_count == ViewDesc.all_mips) vk.REMAINING_MIP_LEVELS else view_desc.mip_count;
             const layer_count = if (view_desc.layer_count == ViewDesc.all_layers) vk.REMAINING_ARRAY_LAYERS else view_desc.layer_count;
             const format = if (view_desc.format == .none) texture.config.format else view_desc.format;
             const info: vk.ImageViewCreateInfo = .{
@@ -885,12 +901,12 @@ pub const Texture = struct {
             .sampler = .null_handle,
         };
         const get_info: vk.DescriptorGetInfoEXT = .{
-            .type = .sampled_image,
+            .type = .storage_image,
             .data = .{ .p_sampled_image = &image_info },
         };
         const buffer_properties = d.descriptorBufferProperties();
         var descriptor: Descriptor = .{ .data = @splat(0) };
-        d.device.getDescriptorEXT(&get_info, buffer_properties.sampled_image_descriptor_size, @ptrCast(&descriptor.data));
+        d.device.getDescriptorEXT(&get_info, buffer_properties.storage_image_descriptor_size, @ptrCast(&descriptor.data));
         return descriptor;
     }
 
@@ -913,6 +929,7 @@ pub const Texture = struct {
         const entry, const offset = d.heap.entryAndOffsetFromAddr(@intFromPtr(texture_ptr));
         try d.device.bindImageMemory(image, entry.memory, offset);
 
+        try d.undefined_layout_textures.append(d.gpa, .{ image, config }); // TODO: remove from the list if destroyed before transition
         return .{
             .image = image,
             .config = config,
@@ -979,7 +996,7 @@ pub const Pipeline = struct {
 pub const CommandBuffer = struct {
     command_buffer: vk.CommandBuffer,
 
-    pub fn startRecording(queue: Queue, d: Device) !CommandBuffer {
+    pub fn startRecording(queue: Queue, d: *Device) !CommandBuffer {
         const alloc_info: vk.CommandBufferAllocateInfo = .{
             .command_pool = d.command_pools.get(queue.queue_type),
             .level = .primary,
@@ -990,6 +1007,47 @@ pub const CommandBuffer = struct {
 
         const begin_info: vk.CommandBufferBeginInfo = .{ .flags = .{ .one_time_submit_bit = true } };
         try d.device.beginCommandBuffer(command_buffer, &begin_info);
+
+        const images = d.undefined_layout_textures.items;
+        if (images.len != 0) {
+            const barriers = try d.gpa.alloc(vk.ImageMemoryBarrier2, images.len);
+            defer d.gpa.free(barriers);
+
+            for (images, barriers) |item, *b| {
+                const image, const config = item;
+                b.* = .{
+                    .src_stage_mask = .{},
+                    .src_access_mask = .{},
+                    .dst_stage_mask = .{ .all_commands_bit = true },
+                    .dst_access_mask = .{
+                        .memory_read_bit = true,
+                        .memory_write_bit = true,
+                    },
+                    .old_layout = .undefined,
+                    .new_layout = .general,
+                    .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                    .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                    .image = image,
+                    .subresource_range = .{
+                        .aspect_mask = gpu_to_vk.aspectsForFormat(config.format),
+                        .base_mip_level = 0,
+                        .level_count = config.mip_count,
+                        .base_array_layer = 0,
+                        .layer_count = config.layer_count,
+                    },
+                };
+            }
+
+            const dependency_info: vk.DependencyInfo = .{
+                .image_memory_barrier_count = @intCast(barriers.len),
+                .p_image_memory_barriers = barriers.ptr,
+            };
+            d.device.cmdPipelineBarrier2(
+                command_buffer,
+                &dependency_info,
+            );
+            d.undefined_layout_textures.clearRetainingCapacity();
+        }
 
         return .{ .command_buffer = command_buffer };
     }

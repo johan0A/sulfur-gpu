@@ -61,19 +61,28 @@ pub fn main(init: std.process.Init) !void {
     const readback_gpu = try device.rawAlloc(8 * 8 * 4, .@"1", .readback); // TODO: what alignement?
     defer device.rawFree(readback_gpu);
     const readback_cpu: [*]u8 = @ptrCast(device.deviceToHostPointer(readback_gpu));
-    _ = readback_cpu; // autofix
 
     const spirv align(@alignOf(u32)) = @embedFile("generate_texture.spv").*;
     const pipeline: gpu.Pipeline = try .createCompute(device, @ptrCast(&spirv));
     defer pipeline.destroy(device);
 
-    const cb: gpu.CommandBuffer = try .startRecording(queue, device);
+    const cb: gpu.CommandBuffer = try .startRecording(queue, &device);
     cb.setActiveTextureHeapPtr(device, heap_gpu);
     cb.setPipeline(device, pipeline);
     cb.dispatch(device, data_gpu, .{ 1, 1, 1 });
 
     cb.barrier(device, .{ .compute = true }, .{ .transfer = true }, .{});
     cb.copyFromTexture(&device, readback_gpu, texture_gpu, texture);
+
+    const done: gpu.Semaphore = try .create(device, 0);
+    defer done.destroy(device);
+    try queue.submitSignal(&device, &.{cb}, done, 1);
+    try done.wait(device, 1);
+
+    for (0..4) |i| {
+        const p = readback_cpu + i * 4;
+        std.debug.print("pixel {} = {{{}, {}, {}, {}}}\n", .{ i, p[0], p[1], p[2], p[3] });
+    }
 }
 
 const Data = extern struct {
