@@ -220,11 +220,6 @@ pub const Device = struct {
 
         const push_constant_ranges: []const vk.PushConstantRange = &.{
             .{
-                .stage_flags = .{ .vertex_bit = true, .fragment_bit = true },
-                .offset = 0,
-                .size = 2 * @sizeOf(vk.DeviceAddress),
-            },
-            .{
                 .stage_flags = .{ .compute_bit = true },
                 .offset = 0,
                 .size = @sizeOf(vk.DeviceAddress),
@@ -955,6 +950,7 @@ pub const Pipeline = struct {
         defer d.device.destroyShaderModule(module, null);
 
         const info: vk.ComputePipelineCreateInfo = .{
+            .flags = .{ .descriptor_buffer_bit_ext = true },
             .stage = .{
                 .stage = .{ .compute_bit = true },
                 .module = module,
@@ -992,11 +988,7 @@ pub const CommandBuffer = struct {
         return .{ .command_buffer = command_buffer };
     }
 
-    pub fn setActiveTextureHeapPtr(
-        command_buffer: CommandBuffer,
-        d: Device,
-        heap_address: *anyopaque,
-    ) void {
+    pub fn setActiveTextureHeapPtr(command_buffer: CommandBuffer, d: Device, heap_address: *anyopaque) void {
         const binding_info: vk.DescriptorBufferBindingInfoEXT = .{
             .address = @intFromPtr(heap_address),
             .usage = .{ .resource_descriptor_buffer_bit_ext = true },
@@ -1026,15 +1018,35 @@ pub const CommandBuffer = struct {
         );
     }
 
-    pub fn setPipeline(
-        command_buffer: CommandBuffer,
-        d: Device,
-        pipeline: Pipeline,
-    ) void {
+    pub fn setPipeline(command_buffer: CommandBuffer, d: Device, pipeline: Pipeline) void {
         d.device.cmdBindPipeline(
             command_buffer.command_buffer,
             pipeline.bind_point,
             pipeline.pipeline,
+        );
+    }
+
+    pub fn dispatch(
+        command_buffer: CommandBuffer,
+        d: Device,
+        data_gpu: *anyopaque,
+        grid_dimensions: [3]u32,
+    ) void {
+        const address: vk.DeviceAddress = @intFromPtr(data_gpu);
+        d.device.cmdPushConstants(
+            command_buffer.command_buffer,
+            d.pipeline_layout,
+            .{ .compute_bit = true },
+            0,
+            @sizeOf(vk.DeviceAddress),
+            std.mem.asBytes(&address),
+        );
+
+        d.device.cmdDispatch(
+            command_buffer.command_buffer,
+            grid_dimensions[0],
+            grid_dimensions[1],
+            grid_dimensions[2],
         );
     }
 };
