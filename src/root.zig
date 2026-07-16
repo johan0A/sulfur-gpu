@@ -1,3 +1,131 @@
+const std = @import("std");
+pub const vk = @import("vulkan");
+const vk_to_gpu = @import("bridge.zig").vk_to_gpu;
+const gpu_to_vk = @import("bridge.zig").gpu_to_vk;
+
+pub const SizeAndAlignment = struct {
+    size: usize,
+    alignment: std.mem.Alignment,
+};
+
+pub const Memory = enum(u8) {
+    default,
+    gpu,
+    readback,
+};
+
+pub const Format = enum(u32) {
+    none,
+    r8_unorm,
+    r8_snorm,
+    r8_uint,
+    r8_sint,
+    r16_unorm,
+    r16_snorm,
+    r16_uint,
+    r16_sint,
+    r16_float,
+    rg8_unorm,
+    rg8_snorm,
+    rg8_uint,
+    rg8_sint,
+    r32_float,
+    r32_uint,
+    r32_sint,
+    rg16_unorm,
+    rg16_snorm,
+    rg16_uint,
+    rg16_sint,
+    rg16_float,
+    rgba8_unorm,
+    rgba8_unorm_srgb,
+    rgba8_snorm,
+    rgba8_uint,
+    rgba8_sint,
+    bgra8_unorm,
+    bgra8_unorm_srgb,
+    rgb10a2_uint,
+    rgb10a2_unorm,
+    rg11b10_ufloat,
+    rgb9e5_ufloat,
+    rg32_float,
+    rg32_uint,
+    rg32_sint,
+    rgba16_unorm,
+    rgba16_snorm,
+    rgba16_uint,
+    rgba16_sint,
+    rgba16_float,
+    rgba32_float,
+    rgba32_uint,
+    rgba32_sint,
+    stencil8,
+    depth16_unorm,
+    depth24_plus,
+    depth24_plus_stencil8,
+    depth32_float,
+    depth32_float_stencil8,
+    bc1rgba_unorm,
+    bc1rgba_unorm_srgb,
+    bc2rgba_unorm,
+    bc2rgba_unorm_srgb,
+    bc3rgba_unorm,
+    bc3rgba_unorm_srgb,
+    bc4r_unorm,
+    bc4r_snorm,
+    bc5rg_unorm,
+    bc5rg_snorm,
+    bc6hrgb_ufloat,
+    bc6hrgb_float,
+    bc7rgba_unorm,
+    bc7rgba_unorm_srgb,
+    etc2rgb8_unorm,
+    etc2rgb8_unorm_srgb,
+    etc2rgb8a1_unorm,
+    etc2rgb8a1_unorm_srgb,
+    etc2rgba8_unorm,
+    etc2rgba8_unorm_srgb,
+    eacr11_unorm,
+    eacr11_snorm,
+    eacrg11_unorm,
+    eacrg11_snorm,
+    astc4x4_unorm,
+    astc4x4_unorm_srgb,
+    astc5x4_unorm,
+    astc5x4_unorm_srgb,
+    astc5x5_unorm,
+    astc5x5_unorm_srgb,
+    astc6x5_unorm,
+    astc6x5_unorm_srgb,
+    astc6x6_unorm,
+    astc6x6_unorm_srgb,
+    astc8x5_unorm,
+    astc8x5_unorm_srgb,
+    astc8x6_unorm,
+    astc8x6_unorm_srgb,
+    astc8x8_unorm,
+    astc8x8_unorm_srgb,
+    astc10x5_unorm,
+    astc10x5_unorm_srgb,
+    astc10x6_unorm,
+    astc10x6_unorm_srgb,
+    astc10x8_unorm,
+    astc10x8_unorm_srgb,
+    astc10x10_unorm,
+    astc10x10_unorm_srgb,
+    astc12x10_unorm,
+    astc12x10_unorm_srgb,
+    astc12x12_unorm,
+    astc12x12_unorm_srgb,
+};
+
+pub const PresentMode = enum(u8) {
+    immediate,
+    mailbox,
+    fifo,
+    fifo_relaxed,
+};
+
 pub const Instance = struct {
     instance: vk.InstanceProxy,
     presentation_enabled: bool,
@@ -55,31 +183,10 @@ pub const Instance = struct {
         instance_dispatch.* = .load(instance_handle, base_dispatch.dispatch.vkGetInstanceProcAddr.?);
         const instance: vk.InstanceProxy = .init(instance_handle, instance_dispatch);
 
-        const debug_callback = struct {
-            fn debugCallback(
-                message_severity: vk.DebugUtilsMessageSeverityFlagsEXT,
-                message_types: vk.DebugUtilsMessageTypeFlagsEXT,
-                p_callback_data: ?*const vk.DebugUtilsMessengerCallbackDataEXT,
-                p_user_data: ?*anyopaque,
-            ) callconv(vk.vulkan_call_conv) vk.Bool32 {
-                _ = .{ message_types, p_user_data };
-                const callback_data = p_callback_data orelse @panic("");
-                const message = std.mem.span(callback_data.p_message orelse "no message");
-                if (message_severity.error_bit_ext) {
-                    std.log.err("Validation: {s}", .{message});
-                } else if (message_severity.warning_bit_ext) {
-                    std.log.warn("Validation: {s}", .{message});
-                } else {
-                    std.log.info("Validation: {s}", .{message});
-                }
-                std.debug.dumpCurrentStackTrace(.{});
-                return .false;
-            }
-        };
         const debug_messenger_info: vk.DebugUtilsMessengerCreateInfoEXT = .{
             .message_severity = .{ .verbose_bit_ext = true, .warning_bit_ext = true, .error_bit_ext = true },
             .message_type = .{ .general_bit_ext = true, .validation_bit_ext = true, .performance_bit_ext = true },
-            .pfn_user_callback = debug_callback.debugCallback,
+            .pfn_user_callback = debugCallback,
         };
         const debug_messenger = try instance.createDebugUtilsMessengerEXT(&debug_messenger_info, null);
 
@@ -108,6 +215,12 @@ pub const Instance = struct {
 
 pub const Adapter = struct {
     physical_device: vk.PhysicalDevice,
+};
+
+pub const SurfaceCapabilities = struct {
+    usages: Texture.Usage,
+    formats: []const Format,
+    present_modes: []const PresentMode,
 };
 
 pub const Device = struct {
@@ -150,14 +263,14 @@ pub const Device = struct {
             }
         };
 
-        fn entryFromAddr(heap: *const Heap, gpu_addr: usize) Entry {
-            return heap.entries.items[heap.indexFromAddr(gpu_addr)];
-        }
-
         fn entryAndOffsetFromAddr(heap: *const Heap, gpu_addr: usize) struct { Entry, vk.DeviceSize } {
             const entry = heap.entryFromAddr(gpu_addr);
             const offset = gpu_addr - entry.gpu_addr;
             return .{ entry, @intCast(offset) };
+        }
+
+        fn entryFromAddr(heap: *const Heap, gpu_addr: usize) Entry {
+            return heap.entries.items[heap.indexFromAddr(gpu_addr)];
         }
 
         fn indexFromAddr(heap: *const Heap, gpu_addr: usize) usize {
@@ -329,6 +442,13 @@ pub const Device = struct {
         };
     }
 
+    pub fn deviceToHostPointer(d: Device, ptr: *anyopaque) *anyopaque {
+        const address = @intFromPtr(ptr);
+        const entry = d.heap.entryFromAddr(address);
+        const offset = address - entry.gpu_addr;
+        return @ptrFromInt(entry.cpu_addr.? + offset);
+    }
+
     // TODO: make gpu pointer a distinct u64-sized type
     pub fn rawAlloc(
         d: *Device,
@@ -440,13 +560,6 @@ pub const Device = struct {
         });
 
         return @ptrFromInt(gpu_addr);
-    }
-
-    pub fn deviceToHostPointer(d: Device, ptr: *anyopaque) *anyopaque {
-        const address = @intFromPtr(ptr);
-        const entry = d.heap.entryFromAddr(address);
-        const offset = address - entry.gpu_addr;
-        return @ptrFromInt(entry.cpu_addr.? + offset);
     }
 
     pub fn rawFree(d: *Device, gpu_ptr: *anyopaque) void {
@@ -640,12 +753,6 @@ pub const Device = struct {
     }
 };
 
-pub const Memory = enum(u8) {
-    default,
-    gpu,
-    readback,
-};
-
 pub const Queue = struct {
     queue: vk.Queue,
     queue_type: Type,
@@ -661,43 +768,6 @@ pub const Queue = struct {
         const queue_index = d.queue_indices.get(queue_type);
         const queue = d.device.getDeviceQueue(queue_family_index, queue_index);
         return .{ .queue = queue, .queue_type = queue_type };
-    }
-
-    pub fn submitAndSignal(
-        queue: Queue,
-        d: *Device,
-        command_buffers: []const CommandBuffer,
-        signal_semaphore: Semaphore,
-        signal_value: u64,
-    ) !void {
-        const submit_buffers = try d.gpa.alloc(vk.CommandBufferSubmitInfo, command_buffers.len);
-        defer d.gpa.free(submit_buffers);
-        for (command_buffers, submit_buffers) |command_buffer, *submit_buffer| {
-            try d.device.endCommandBuffer(command_buffer.command_buffer);
-
-            submit_buffer.* = .{
-                .command_buffer = command_buffer.command_buffer,
-                .device_mask = 0,
-            };
-        }
-
-        const signal_info: vk.SemaphoreSubmitInfo = .{
-            .semaphore = signal_semaphore.semaphore,
-            .value = signal_value,
-            .stage_mask = .{ .all_commands_bit = true },
-            .device_index = 0,
-        };
-        const submit_info: vk.SubmitInfo2 = .{
-            .command_buffer_info_count = @intCast(submit_buffers.len),
-            .p_command_buffer_infos = submit_buffers.ptr,
-            .signal_semaphore_info_count = 1,
-            .p_signal_semaphore_infos = (&signal_info)[0..1],
-        };
-        try d.device.queueSubmit2(
-            queue.queue,
-            &.{submit_info},
-            .null_handle,
-        );
     }
 
     pub fn startRecording(queue: Queue, d: *Device) !CommandBuffer {
@@ -758,124 +828,43 @@ pub const Queue = struct {
 
         return .{ .command_buffer = command_buffer };
     }
-};
 
-pub const SurfaceCapabilities = struct {
-    usages: Texture.Usage,
-    formats: []const Format,
-    present_modes: []const PresentMode,
-};
+    pub fn submitAndSignal(
+        queue: Queue,
+        d: *Device,
+        command_buffers: []const CommandBuffer,
+        signal_semaphore: Semaphore,
+        signal_value: u64,
+    ) !void {
+        const submit_buffers = try d.gpa.alloc(vk.CommandBufferSubmitInfo, command_buffers.len);
+        defer d.gpa.free(submit_buffers);
+        for (command_buffers, submit_buffers) |command_buffer, *submit_buffer| {
+            try d.device.endCommandBuffer(command_buffer.command_buffer);
 
-pub const Format = enum(u32) {
-    none,
-    r8_unorm,
-    r8_snorm,
-    r8_uint,
-    r8_sint,
-    r16_unorm,
-    r16_snorm,
-    r16_uint,
-    r16_sint,
-    r16_float,
-    rg8_unorm,
-    rg8_snorm,
-    rg8_uint,
-    rg8_sint,
-    r32_float,
-    r32_uint,
-    r32_sint,
-    rg16_unorm,
-    rg16_snorm,
-    rg16_uint,
-    rg16_sint,
-    rg16_float,
-    rgba8_unorm,
-    rgba8_unorm_srgb,
-    rgba8_snorm,
-    rgba8_uint,
-    rgba8_sint,
-    bgra8_unorm,
-    bgra8_unorm_srgb,
-    rgb10a2_uint,
-    rgb10a2_unorm,
-    rg11b10_ufloat,
-    rgb9e5_ufloat,
-    rg32_float,
-    rg32_uint,
-    rg32_sint,
-    rgba16_unorm,
-    rgba16_snorm,
-    rgba16_uint,
-    rgba16_sint,
-    rgba16_float,
-    rgba32_float,
-    rgba32_uint,
-    rgba32_sint,
-    stencil8,
-    depth16_unorm,
-    depth24_plus,
-    depth24_plus_stencil8,
-    depth32_float,
-    depth32_float_stencil8,
-    bc1rgba_unorm,
-    bc1rgba_unorm_srgb,
-    bc2rgba_unorm,
-    bc2rgba_unorm_srgb,
-    bc3rgba_unorm,
-    bc3rgba_unorm_srgb,
-    bc4r_unorm,
-    bc4r_snorm,
-    bc5rg_unorm,
-    bc5rg_snorm,
-    bc6hrgb_ufloat,
-    bc6hrgb_float,
-    bc7rgba_unorm,
-    bc7rgba_unorm_srgb,
-    etc2rgb8_unorm,
-    etc2rgb8_unorm_srgb,
-    etc2rgb8a1_unorm,
-    etc2rgb8a1_unorm_srgb,
-    etc2rgba8_unorm,
-    etc2rgba8_unorm_srgb,
-    eacr11_unorm,
-    eacr11_snorm,
-    eacrg11_unorm,
-    eacrg11_snorm,
-    astc4x4_unorm,
-    astc4x4_unorm_srgb,
-    astc5x4_unorm,
-    astc5x4_unorm_srgb,
-    astc5x5_unorm,
-    astc5x5_unorm_srgb,
-    astc6x5_unorm,
-    astc6x5_unorm_srgb,
-    astc6x6_unorm,
-    astc6x6_unorm_srgb,
-    astc8x5_unorm,
-    astc8x5_unorm_srgb,
-    astc8x6_unorm,
-    astc8x6_unorm_srgb,
-    astc8x8_unorm,
-    astc8x8_unorm_srgb,
-    astc10x5_unorm,
-    astc10x5_unorm_srgb,
-    astc10x6_unorm,
-    astc10x6_unorm_srgb,
-    astc10x8_unorm,
-    astc10x8_unorm_srgb,
-    astc10x10_unorm,
-    astc10x10_unorm_srgb,
-    astc12x10_unorm,
-    astc12x10_unorm_srgb,
-    astc12x12_unorm,
-    astc12x12_unorm_srgb,
-};
+            submit_buffer.* = .{
+                .command_buffer = command_buffer.command_buffer,
+                .device_mask = 0,
+            };
+        }
 
-pub const PresentMode = enum(u8) {
-    immediate,
-    mailbox,
-    fifo,
-    fifo_relaxed,
+        const signal_info: vk.SemaphoreSubmitInfo = .{
+            .semaphore = signal_semaphore.semaphore,
+            .value = signal_value,
+            .stage_mask = .{ .all_commands_bit = true },
+            .device_index = 0,
+        };
+        const submit_info: vk.SubmitInfo2 = .{
+            .command_buffer_info_count = @intCast(submit_buffers.len),
+            .p_command_buffer_infos = submit_buffers.ptr,
+            .signal_semaphore_info_count = 1,
+            .p_signal_semaphore_infos = (&signal_info)[0..1],
+        };
+        try d.device.queueSubmit2(
+            queue.queue,
+            &.{submit_info},
+            .null_handle,
+        );
+    }
 };
 
 pub const Semaphore = struct {
@@ -903,202 +892,6 @@ pub const Semaphore = struct {
             .p_values = &.{value},
         };
         _ = try d.device.waitSemaphores(&wait_info, std.math.maxInt(u64));
-    }
-};
-
-pub const SizeAndAlignment = struct {
-    size: usize,
-    alignment: std.mem.Alignment,
-};
-
-pub const Texture = struct {
-    image: vk.Image,
-    config: Info,
-    views: std.hash_map.AutoHashMapUnmanaged(ViewInfo, vk.ImageView),
-
-    pub const Type = enum {
-        @"1d",
-        @"2d",
-        @"3d",
-    };
-
-    pub const Usage = packed struct(u16) {
-        sampled: bool = false,
-        storage: bool = false,
-        color_attachment: bool = false,
-        depth_stencil_attachment: bool = false,
-        padding: u12 = 0,
-    };
-
-    pub const Info = struct {
-        type: Type = .@"2d",
-        dimensions: [3]u32,
-        mip_count: u32 = 1,
-        layer_count: u32 = 1,
-        // sample_count: u32 = 1, TODO
-        format: Format = .none,
-        usage: Usage = .{},
-    };
-
-    pub const Descriptor = struct {
-        pub fn sizeAndHeapAlign(d: *Device) SizeAndAlignment {
-            const buffer_properties = d.descriptorBufferProperties();
-            return .{
-                .size = descriptorSize(buffer_properties.*),
-                .alignment = .fromByteUnits(buffer_properties.descriptor_buffer_offset_alignment),
-            };
-        }
-
-        pub fn store(descriptor: Descriptor, d: *Device, heap: *anyopaque, index: usize) void {
-            const buffer_properties = d.descriptorBufferProperties();
-            const size = descriptorSize(buffer_properties.*);
-            @memcpy(
-                @as([*]u8, @ptrCast(heap)) + size * index,
-                descriptor.data[0..size],
-            );
-        }
-
-        fn descriptorSize(buffer_properties: vk.PhysicalDeviceDescriptorBufferPropertiesEXT) usize {
-            return @max(
-                buffer_properties.sampled_image_descriptor_size,
-                buffer_properties.storage_image_descriptor_size,
-            );
-        }
-
-        data: [64]u8,
-    };
-
-    pub const ViewInfo = struct {
-        const all_mips = std.math.maxInt(u8);
-        const all_layers = std.math.maxInt(u16);
-
-        format: Format = .none,
-        base_mip: u8 = 0,
-        mip_count: u8 = all_mips,
-        base_layer: u16 = 0,
-        layer_count: u16 = all_layers,
-    };
-
-    pub fn storageDescriptor(texture: *Texture, d: *Device, view_info: ViewInfo) !Descriptor {
-        const view = texture.views.get(view_info) orelse blk: {
-            const mips_level = if (view_info.mip_count == ViewInfo.all_mips) vk.REMAINING_MIP_LEVELS else view_info.mip_count;
-            const layer_count = if (view_info.layer_count == ViewInfo.all_layers) vk.REMAINING_ARRAY_LAYERS else view_info.layer_count;
-            const format = if (view_info.format == .none) texture.config.format else view_info.format;
-            const info: vk.ImageViewCreateInfo = .{
-                .image = texture.image,
-                .view_type = gpu_to_vk.viewType(texture.config.type),
-                .format = gpu_to_vk.format(format),
-                .subresource_range = .{
-                    .aspect_mask = gpu_to_vk.aspectsForFormat(texture.config.format),
-                    .base_mip_level = view_info.base_mip,
-                    .level_count = mips_level,
-                    .base_array_layer = view_info.base_layer,
-                    .layer_count = layer_count,
-                },
-                .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
-            };
-            const view = try d.device.createImageView(&info, null);
-            try texture.views.put(d.gpa, view_info, view);
-            break :blk view;
-        };
-        const image_info: vk.DescriptorImageInfo = .{
-            .image_view = view,
-            .image_layout = .general,
-            .sampler = .null_handle,
-        };
-        const get_info: vk.DescriptorGetInfoEXT = .{
-            .type = .storage_image,
-            .data = .{ .p_sampled_image = &image_info },
-        };
-        const buffer_properties = d.descriptorBufferProperties();
-        var descriptor: Descriptor = .{ .data = @splat(0) };
-        d.device.getDescriptorEXT(&get_info, buffer_properties.storage_image_descriptor_size, @ptrCast(&descriptor.data));
-        return descriptor;
-    }
-
-    pub fn sizeAndAlign(d: Device, info: Info) SizeAndAlignment {
-        const device_image_memory_requirements: vk.DeviceImageMemoryRequirements = .{
-            .p_create_info = &vkImageInfo(info),
-            .plane_aspect = gpu_to_vk.aspectsForFormat(info.format),
-        };
-        var req: vk.MemoryRequirements2 = .{ .memory_requirements = undefined };
-        d.device.getDeviceImageMemoryRequirements(&device_image_memory_requirements, &req);
-        return .{
-            .size = req.memory_requirements.size,
-            .alignment = .fromByteUnits(req.memory_requirements.alignment),
-        };
-    }
-
-    pub fn create(d: *Device, info: Info, texture_ptr: *anyopaque) !Texture {
-        const image = try d.device.createImage(&vkImageInfo(info), null);
-
-        const entry, const offset = d.heap.entryAndOffsetFromAddr(@intFromPtr(texture_ptr));
-        try d.device.bindImageMemory(image, entry.memory, offset);
-
-        try d.undefined_layout_textures.put(d.gpa, image, info);
-        return .{
-            .image = image,
-            .config = info,
-            .views = .empty,
-        };
-    }
-
-    pub fn destroy(texture: *Texture, d: *Device) void {
-        _ = d.undefined_layout_textures.swapRemove(texture.image);
-        d.device.destroyImage(texture.image, null);
-        var it = texture.views.valueIterator();
-        while (it.next()) |view| d.device.destroyImageView(view.*, null);
-        texture.views.deinit(d.gpa);
-        texture.* = undefined;
-    }
-
-    fn vkImageInfo(config: Info) vk.ImageCreateInfo {
-        return .{
-            .image_type = gpu_to_vk.textureType(config.type),
-            .format = gpu_to_vk.format(config.format),
-            .extent = .{ .width = config.dimensions[0], .height = config.dimensions[1], .depth = config.dimensions[2] },
-            .mip_levels = config.mip_count,
-            .array_layers = config.layer_count,
-            .samples = .{ .@"1_bit" = true },
-            .tiling = .optimal,
-            .usage = gpu_to_vk.usageFlags(config.usage),
-            .sharing_mode = .exclusive,
-            .initial_layout = .undefined,
-        };
-    }
-};
-
-pub const Pipeline = struct {
-    pipeline: vk.Pipeline,
-    bind_point: vk.PipelineBindPoint,
-
-    pub fn createCompute(d: Device, source: []const u32) !Pipeline {
-        const module_info: vk.ShaderModuleCreateInfo = .{
-            .code_size = source.len * @sizeOf(u32),
-            .p_code = source.ptr,
-        };
-        const module = try d.device.createShaderModule(&module_info, null);
-        defer d.device.destroyShaderModule(module, null);
-
-        const info: vk.ComputePipelineCreateInfo = .{
-            .flags = .{ .descriptor_buffer_bit_ext = true },
-            .stage = .{
-                .stage = .{ .compute_bit = true },
-                .module = module,
-                .p_name = "main",
-            },
-            .layout = d.pipeline_layout,
-            .base_pipeline_index = -1,
-        };
-        var pipeline: vk.Pipeline = undefined;
-        _ = try d.device.createComputePipelines(.null_handle, &.{info}, null, (&pipeline)[0..1]);
-
-        return .{ .pipeline = pipeline, .bind_point = .compute };
-    }
-
-    pub fn destroy(pipeline: *Pipeline, d: Device) void {
-        d.device.destroyPipeline(pipeline.pipeline, null);
-        pipeline.* = undefined;
     }
 };
 
@@ -1253,7 +1046,213 @@ pub const CommandBuffer = struct {
     }
 };
 
-const std = @import("std");
-pub const vk = @import("vulkan");
-const vk_to_gpu = @import("bridge.zig").vk_to_gpu;
-const gpu_to_vk = @import("bridge.zig").gpu_to_vk;
+pub const Texture = struct {
+    image: vk.Image,
+    config: Info,
+    views: std.hash_map.AutoHashMapUnmanaged(ViewInfo, vk.ImageView),
+
+    pub const Type = enum {
+        @"1d",
+        @"2d",
+        @"3d",
+    };
+
+    pub const Usage = packed struct(u16) {
+        sampled: bool = false,
+        storage: bool = false,
+        color_attachment: bool = false,
+        depth_stencil_attachment: bool = false,
+        padding: u12 = 0,
+    };
+
+    pub const Info = struct {
+        type: Type = .@"2d",
+        dimensions: [3]u32,
+        mip_count: u32 = 1,
+        layer_count: u32 = 1,
+        // sample_count: u32 = 1, TODO
+        format: Format = .none,
+        usage: Usage = .{},
+    };
+
+    pub const ViewInfo = struct {
+        const all_mips = std.math.maxInt(u8);
+        const all_layers = std.math.maxInt(u16);
+
+        format: Format = .none,
+        base_mip: u8 = 0,
+        mip_count: u8 = all_mips,
+        base_layer: u16 = 0,
+        layer_count: u16 = all_layers,
+    };
+
+    pub const Descriptor = struct {
+        data: [64]u8,
+
+        pub fn sizeAndHeapAlign(d: *Device) SizeAndAlignment {
+            const buffer_properties = d.descriptorBufferProperties();
+            return .{
+                .size = descriptorSize(buffer_properties.*),
+                .alignment = .fromByteUnits(buffer_properties.descriptor_buffer_offset_alignment),
+            };
+        }
+
+        pub fn store(descriptor: Descriptor, d: *Device, heap: *anyopaque, index: usize) void {
+            const buffer_properties = d.descriptorBufferProperties();
+            const size = descriptorSize(buffer_properties.*);
+            @memcpy(
+                @as([*]u8, @ptrCast(heap)) + size * index,
+                descriptor.data[0..size],
+            );
+        }
+
+        fn descriptorSize(buffer_properties: vk.PhysicalDeviceDescriptorBufferPropertiesEXT) usize {
+            return @max(
+                buffer_properties.sampled_image_descriptor_size,
+                buffer_properties.storage_image_descriptor_size,
+            );
+        }
+    };
+
+    pub fn sizeAndAlign(d: Device, info: Info) SizeAndAlignment {
+        const device_image_memory_requirements: vk.DeviceImageMemoryRequirements = .{
+            .p_create_info = &vkImageInfo(info),
+            .plane_aspect = gpu_to_vk.aspectsForFormat(info.format),
+        };
+        var req: vk.MemoryRequirements2 = .{ .memory_requirements = undefined };
+        d.device.getDeviceImageMemoryRequirements(&device_image_memory_requirements, &req);
+        return .{
+            .size = req.memory_requirements.size,
+            .alignment = .fromByteUnits(req.memory_requirements.alignment),
+        };
+    }
+
+    pub fn create(d: *Device, info: Info, texture_ptr: *anyopaque) !Texture {
+        const image = try d.device.createImage(&vkImageInfo(info), null);
+
+        const entry, const offset = d.heap.entryAndOffsetFromAddr(@intFromPtr(texture_ptr));
+        try d.device.bindImageMemory(image, entry.memory, offset);
+
+        try d.undefined_layout_textures.put(d.gpa, image, info);
+        return .{
+            .image = image,
+            .config = info,
+            .views = .empty,
+        };
+    }
+
+    pub fn destroy(texture: *Texture, d: *Device) void {
+        _ = d.undefined_layout_textures.swapRemove(texture.image);
+        d.device.destroyImage(texture.image, null);
+        var it = texture.views.valueIterator();
+        while (it.next()) |view| d.device.destroyImageView(view.*, null);
+        texture.views.deinit(d.gpa);
+        texture.* = undefined;
+    }
+
+    pub fn storageDescriptor(texture: *Texture, d: *Device, view_info: ViewInfo) !Descriptor {
+        const view = texture.views.get(view_info) orelse blk: {
+            const mips_level = if (view_info.mip_count == ViewInfo.all_mips) vk.REMAINING_MIP_LEVELS else view_info.mip_count;
+            const layer_count = if (view_info.layer_count == ViewInfo.all_layers) vk.REMAINING_ARRAY_LAYERS else view_info.layer_count;
+            const format = if (view_info.format == .none) texture.config.format else view_info.format;
+            const info: vk.ImageViewCreateInfo = .{
+                .image = texture.image,
+                .view_type = gpu_to_vk.viewType(texture.config.type),
+                .format = gpu_to_vk.format(format),
+                .subresource_range = .{
+                    .aspect_mask = gpu_to_vk.aspectsForFormat(texture.config.format),
+                    .base_mip_level = view_info.base_mip,
+                    .level_count = mips_level,
+                    .base_array_layer = view_info.base_layer,
+                    .layer_count = layer_count,
+                },
+                .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
+            };
+            const view = try d.device.createImageView(&info, null);
+            try texture.views.put(d.gpa, view_info, view);
+            break :blk view;
+        };
+        const image_info: vk.DescriptorImageInfo = .{
+            .image_view = view,
+            .image_layout = .general,
+            .sampler = .null_handle,
+        };
+        const get_info: vk.DescriptorGetInfoEXT = .{
+            .type = .storage_image,
+            .data = .{ .p_sampled_image = &image_info },
+        };
+        const buffer_properties = d.descriptorBufferProperties();
+        var descriptor: Descriptor = .{ .data = @splat(0) };
+        d.device.getDescriptorEXT(&get_info, buffer_properties.storage_image_descriptor_size, @ptrCast(&descriptor.data));
+        return descriptor;
+    }
+
+    fn vkImageInfo(config: Info) vk.ImageCreateInfo {
+        return .{
+            .image_type = gpu_to_vk.textureType(config.type),
+            .format = gpu_to_vk.format(config.format),
+            .extent = .{ .width = config.dimensions[0], .height = config.dimensions[1], .depth = config.dimensions[2] },
+            .mip_levels = config.mip_count,
+            .array_layers = config.layer_count,
+            .samples = .{ .@"1_bit" = true },
+            .tiling = .optimal,
+            .usage = gpu_to_vk.usageFlags(config.usage),
+            .sharing_mode = .exclusive,
+            .initial_layout = .undefined,
+        };
+    }
+};
+
+pub const Pipeline = struct {
+    pipeline: vk.Pipeline,
+    bind_point: vk.PipelineBindPoint,
+
+    pub fn createCompute(d: Device, source: []const u32) !Pipeline {
+        const module_info: vk.ShaderModuleCreateInfo = .{
+            .code_size = source.len * @sizeOf(u32),
+            .p_code = source.ptr,
+        };
+        const module = try d.device.createShaderModule(&module_info, null);
+        defer d.device.destroyShaderModule(module, null);
+
+        const info: vk.ComputePipelineCreateInfo = .{
+            .flags = .{ .descriptor_buffer_bit_ext = true },
+            .stage = .{
+                .stage = .{ .compute_bit = true },
+                .module = module,
+                .p_name = "main",
+            },
+            .layout = d.pipeline_layout,
+            .base_pipeline_index = -1,
+        };
+        var pipeline: vk.Pipeline = undefined;
+        _ = try d.device.createComputePipelines(.null_handle, &.{info}, null, (&pipeline)[0..1]);
+
+        return .{ .pipeline = pipeline, .bind_point = .compute };
+    }
+
+    pub fn destroy(pipeline: *Pipeline, d: Device) void {
+        d.device.destroyPipeline(pipeline.pipeline, null);
+        pipeline.* = undefined;
+    }
+};
+
+fn debugCallback(
+    message_severity: vk.DebugUtilsMessageSeverityFlagsEXT,
+    message_types: vk.DebugUtilsMessageTypeFlagsEXT,
+    p_callback_data: ?*const vk.DebugUtilsMessengerCallbackDataEXT,
+    p_user_data: ?*anyopaque,
+) callconv(vk.vulkan_call_conv) vk.Bool32 {
+    _ = .{ message_types, p_user_data };
+    const callback_data = p_callback_data orelse @panic("");
+    const message = std.mem.span(callback_data.p_message orelse "no message");
+    if (message_severity.error_bit_ext) {
+        std.log.err("Validation: {s}", .{message});
+    } else if (message_severity.warning_bit_ext) {
+        std.log.warn("Validation: {s}", .{message});
+    } else {
+        std.log.info("Validation: {s}", .{message});
+    }
+    std.debug.dumpCurrentStackTrace(.{});
+    return .false;
+}
