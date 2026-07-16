@@ -19,18 +19,20 @@ pub fn main(init: std.process.Init) !void {
     const queue: gpu.Queue = .create(device, .graphics);
 
     const dimensions: [3]u32 = .{ 256, 256, 1 };
-    const texture_config: gpu.Texture.Info = .{
+    const texture_info: gpu.Texture.Info = .{
         .dimensions = dimensions,
         .format = .rgba8_unorm,
         .usage = .{ .storage = true },
     };
-    const texture_size_align = gpu.Texture.sizeAndAlign(device, texture_config);
+
+    const texture_size_align = gpu.Texture.sizeAndAlignment(device, texture_info);
     const texture_gpu = try device.rawAlloc(texture_size_align.size, texture_size_align.alignment, .gpu);
     defer device.rawFree(texture_gpu);
-    var texture: gpu.Texture = try .create(&device, texture_config, texture_gpu);
+
+    var texture: gpu.Texture = try .create(&device, texture_info, texture_gpu);
     defer texture.destroy(&device);
 
-    const descriptor_size_and_align = gpu.Texture.Descriptor.sizeAndHeapAlign(&device);
+    const descriptor_size_and_align = gpu.Texture.Descriptor.sizeAndHeapAlignment(&device);
     const heap_gpu = try device.rawAlloc(descriptor_size_and_align.size * 65536, descriptor_size_and_align.alignment, .default);
     defer device.rawFree(heap_gpu);
     const heap = device.deviceToHostPointer(heap_gpu);
@@ -62,7 +64,7 @@ pub fn main(init: std.process.Init) !void {
     });
 
     cb.barrier(device, .{ .compute = true }, .{ .transfer = true }, .{});
-    cb.copyTextureToBuffer(&device, readback_gpu, texture_gpu, texture);
+    cb.copyTextureToBuffer(&device, .alignCast(readback_gpu), texture_gpu, texture);
 
     var done: gpu.Semaphore = try .create(device, 0);
     defer done.destroy(device);

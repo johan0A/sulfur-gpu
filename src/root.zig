@@ -126,6 +126,80 @@ pub const PresentMode = enum(u8) {
     fifo_relaxed,
 };
 
+pub const PointerAttributes = struct {
+    @"const": bool = false,
+    @"volatile": bool = false,
+    @"allowzero": bool = false,
+    @"align": ?std.mem.Alignment = null,
+};
+
+pub const PointerInfo = struct {
+    size: std.builtin.Type.Pointer.Size,
+    Element: type,
+    attributes: PointerAttributes,
+};
+
+pub fn Pointer(
+    size: std.builtin.Type.Pointer.Size,
+    Element: type,
+    attributes: PointerAttributes,
+) type {
+    return extern struct {
+        addr: u64,
+        len: switch (size) {
+            .many, .one, .c => void,
+            .slice => u64,
+        },
+
+        pub const info: PointerInfo = .{
+            .size = size,
+            .Element = Element,
+            .attributes = attributes,
+        };
+
+        const alignement: ?std.mem.Alignment = if (attributes.@"align") |a| a else switch (Element) {
+            anyopaque => null,
+            else => .of(Element),
+        };
+
+        pub const Host = @Pointer(size, .{
+            .@"const" = attributes.@"const",
+            .@"volatile" = attributes.@"volatile",
+            .@"allowzero" = attributes.@"allowzero",
+            .@"align" = if (attributes.@"align") |a| a.toByteUnits() else null,
+        }, Element, null);
+
+        pub fn fromInt(addr: u64) @This() {
+            const result: @This() = .{ .addr = addr, .len = {} };
+            result.assertAlignment();
+            return result;
+        }
+
+        pub fn alignCast(ptr: anytype) @This() {
+            comptime {
+                var ptr_info = @TypeOf(ptr).info;
+                ptr_info.attributes.@"align" = attributes.@"align";
+                checkInfoEqual(ptr_info, info);
+            }
+            const result: @This() = .{ .addr = ptr.addr, .len = {} };
+            result.assertAlignment();
+            return result;
+        }
+
+        fn checkInfoEqual(comptime info_a: PointerInfo, comptime info_b: PointerInfo) void {
+            if (info_a.size != info_b.size) @compileError("size mismatch");
+            if (info_a.Element != info_b.Element) @compileError("element type mismatch");
+            if (info_a.attributes.@"const" != info_b.attributes.@"const") @compileError("constness mismatch");
+            if (info_a.attributes.@"volatile" != info_b.attributes.@"volatile") @compileError("volatility mismatch");
+            if (info_a.attributes.@"allowzero" != info_b.attributes.@"allowzero") @compileError("allowzero mismatch");
+        }
+
+        fn assertAlignment(ptr: @This()) void {
+            if (alignement != null) std.debug.assert(std.mem.isAligned(ptr.addr, alignement.?.toByteUnits()));
+        }
+    };
+}
+
 pub const Instance = struct {
     instance: vk.InstanceProxy,
     presentation_enabled: bool,
@@ -218,7 +292,7 @@ pub const Adapter = struct {
 };
 
 pub const SurfaceCapabilities = struct {
-    usages: Texture.Usage,
+    usage: Texture.Usage,
     formats: []const Format,
     present_modes: []const PresentMode,
 };
@@ -241,10 +315,10 @@ pub const Device = struct {
     descriptor_set_layout: vk.DescriptorSetLayout,
     pipeline_layout: vk.PipelineLayout,
 
-    undefined_layout_textures: std.array_hash_map.Auto(vk.Image, Texture.Info),
+    pending_general_layout_transitions: std.array_hash_map.Auto(vk.Image, Texture.Info),
 
     memory_properties: vk.PhysicalDeviceMemoryProperties,
-    memory_supports_host_visible: bool,
+    has_host_visible_device_local: bool,
 
     const Heap = struct {
         entries: std.ArrayList(Entry),
@@ -253,8 +327,8 @@ pub const Device = struct {
             buffer: vk.Buffer,
             memory: vk.DeviceMemory,
             size: usize,
-            gpu_addr: usize,
-            cpu_addr: ?usize,
+            device_addr: u64,
+            host_addr: ?usize,
 
             fn destroy(entry: *Entry, d: Device) void {
                 d.device.destroyBuffer(entry.buffer, null);
@@ -263,21 +337,21 @@ pub const Device = struct {
             }
         };
 
-        fn entryAndOffsetFromAddr(heap: *const Heap, gpu_addr: usize) struct { Entry, vk.DeviceSize } {
-            const entry = heap.entryFromAddr(gpu_addr);
-            const offset = gpu_addr - entry.gpu_addr;
+        fn addrToEntryAndOffset(heap: *const Heap, device_addr: u64) struct { Entry, vk.DeviceSize } {
+            const entry = heap.addrToEntry(device_addr);
+            const offset = device_addr - entry.device_addr;
             return .{ entry, @intCast(offset) };
         }
 
-        fn entryFromAddr(heap: *const Heap, gpu_addr: usize) Entry {
-            return heap.entries.items[heap.indexFromAddr(gpu_addr)];
+        fn addrToEntry(heap: *const Heap, device_addr: u64) Entry {
+            return heap.entries.items[heap.indexFromAddr(device_addr)];
         }
 
-        fn indexFromAddr(heap: *const Heap, gpu_addr: usize) usize {
+        fn indexFromAddr(heap: *const Heap, device_addr: u64) usize {
             return std.sort.upperBound(
                 Entry,
                 heap.entries.items,
-                gpu_addr,
+                device_addr,
                 order,
             ) - 1;
         }
@@ -290,14 +364,14 @@ pub const Device = struct {
             const insert_index = std.sort.upperBound(
                 Entry,
                 heap.entries.items,
-                entry.gpu_addr,
+                entry.device_addr,
                 order,
             );
             try heap.entries.insert(gpa, insert_index, entry);
         }
 
         fn order(addr: usize, item: Entry) std.math.Order {
-            return std.math.order(addr, item.gpu_addr);
+            return std.math.order(addr, item.device_addr);
         }
     };
 
@@ -379,7 +453,7 @@ pub const Device = struct {
 
         const memory_properties = instance.instance.getPhysicalDeviceMemoryProperties(adapter.physical_device);
 
-        const memory_supports_host_visible = for (0..memory_properties.memory_type_count) |i| {
+        const has_host_visible_device_local = for (0..memory_properties.memory_type_count) |i| {
             const t = memory_properties.memory_types[i];
             if (t.property_flags.device_local_bit and t.property_flags.host_visible_bit) {
                 const heap = memory_properties.memory_heaps[t.heap_index];
@@ -399,9 +473,9 @@ pub const Device = struct {
             .descriptor_buffer_properties = null,
             .descriptor_set_layout = descriptor_set_layout,
             .pipeline_layout = pipeline_layout,
-            .undefined_layout_textures = .empty,
+            .pending_general_layout_transitions = .empty,
             .memory_properties = memory_properties,
-            .memory_supports_host_visible = memory_supports_host_visible,
+            .has_host_visible_device_local = has_host_visible_device_local,
         };
     }
 
@@ -415,7 +489,7 @@ pub const Device = struct {
         // TODO: make a debug gpa and uncomment next line
         // for (d.heap.entries.items) |entry| entry.destroy(d);
         d.heap.entries.deinit(d.gpa);
-        d.undefined_layout_textures.deinit(d.gpa);
+        d.pending_general_layout_transitions.deinit(d.gpa);
         d.* = undefined;
     }
 
@@ -436,26 +510,24 @@ pub const Device = struct {
 
         const vk_capabilities = try d.instance.getPhysicalDeviceSurfaceCapabilitiesKHR(d.physical_device, surface);
         return .{
-            .usages = vk_to_gpu.usageFlags(vk_capabilities.supported_usage_flags),
+            .usage = vk_to_gpu.usageFlags(vk_capabilities.supported_usage_flags),
             .formats = try gpa.dupe(Format, formats.items),
             .present_modes = try gpa.dupe(PresentMode, modes.items),
         };
     }
 
-    pub fn deviceToHostPointer(d: Device, ptr: *anyopaque) *anyopaque {
-        const address = @intFromPtr(ptr);
-        const entry = d.heap.entryFromAddr(address);
-        const offset = address - entry.gpu_addr;
-        return @ptrFromInt(entry.cpu_addr.? + offset);
+    pub fn deviceToHostPointer(d: Device, ptr: anytype) @TypeOf(ptr).Host {
+        const entry = d.heap.addrToEntry(ptr.addr);
+        const offset = ptr.addr - entry.device_addr;
+        return @ptrFromInt(entry.host_addr.? + offset);
     }
 
-    // TODO: make gpu pointer a distinct u64-sized type
     pub fn rawAlloc(
         d: *Device,
         bytes: usize,
         alignment: std.mem.Alignment,
         memory: Memory,
-    ) !*anyopaque {
+    ) !Pointer(.one, anyopaque, .{}) {
         const usage: vk.BufferUsageFlags = switch (memory) {
             .default => .{
                 .storage_buffer_bit = true,
@@ -518,7 +590,7 @@ pub const Device = struct {
 
         const properties: vk.MemoryPropertyFlags = switch (memory) {
             .default => .{
-                .device_local_bit = d.memory_supports_host_visible,
+                .device_local_bit = d.has_host_visible_device_local,
                 .host_visible_bit = true,
                 .host_coherent_bit = true,
             },
@@ -545,8 +617,8 @@ pub const Device = struct {
         const buffer_memory = try d.device.allocateMemory(&alloc_info, null);
         try d.device.bindBufferMemory(buffer, buffer_memory, 0);
 
-        const gpu_addr: usize = @intCast(d.device.getBufferDeviceAddress(&.{ .buffer = buffer }));
-        const cpu_addr: ?usize = switch (memory) {
+        const device_addr = d.device.getBufferDeviceAddress(&.{ .buffer = buffer });
+        const host_addr: ?usize = switch (memory) {
             .readback, .default => @intFromPtr(try d.device.mapMemory(buffer_memory, 0, vk.WHOLE_SIZE, .{})),
             .gpu => null,
         };
@@ -555,15 +627,15 @@ pub const Device = struct {
             .buffer = buffer,
             .memory = buffer_memory,
             .size = bytes,
-            .gpu_addr = gpu_addr,
-            .cpu_addr = cpu_addr,
+            .device_addr = device_addr,
+            .host_addr = host_addr,
         });
 
-        return @ptrFromInt(gpu_addr);
+        return .fromInt(device_addr);
     }
 
-    pub fn rawFree(d: *Device, gpu_ptr: *anyopaque) void {
-        const index = d.heap.indexFromAddr(@intFromPtr(gpu_ptr));
+    pub fn rawFree(d: *Device, ptr: Pointer(.one, anyopaque, .{})) void {
+        const index = d.heap.indexFromAddr(ptr.addr);
         var entry = d.heap.entries.orderedRemove(index);
         entry.destroy(d.*);
     }
@@ -782,8 +854,8 @@ pub const Queue = struct {
         const begin_info: vk.CommandBufferBeginInfo = .{ .flags = .{ .one_time_submit_bit = true } };
         try d.device.beginCommandBuffer(command_buffer, &begin_info);
 
-        var image_it = d.undefined_layout_textures.iterator();
-        const image_count = d.undefined_layout_textures.count();
+        var image_it = d.pending_general_layout_transitions.iterator();
+        const image_count = d.pending_general_layout_transitions.count();
         if (image_count != 0) {
             const barriers = try d.gpa.alloc(vk.ImageMemoryBarrier2, image_count);
             defer d.gpa.free(barriers);
@@ -791,7 +863,7 @@ pub const Queue = struct {
             for (barriers) |*b| {
                 const item = image_it.next() orelse break;
                 const image = item.key_ptr.*;
-                const config = item.value_ptr.*;
+                const info = item.value_ptr.*;
                 b.* = .{
                     .src_stage_mask = .{},
                     .src_access_mask = .{},
@@ -806,11 +878,11 @@ pub const Queue = struct {
                     .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
                     .image = image,
                     .subresource_range = .{
-                        .aspect_mask = gpu_to_vk.aspectsForFormat(config.format),
+                        .aspect_mask = gpu_to_vk.aspectsForFormat(info.format),
                         .base_mip_level = 0,
-                        .level_count = config.mip_count,
+                        .level_count = info.mip_count,
                         .base_array_layer = 0,
-                        .layer_count = config.layer_count,
+                        .layer_count = info.layer_count,
                     },
                 };
             }
@@ -823,7 +895,7 @@ pub const Queue = struct {
                 command_buffer,
                 &dependency_info,
             );
-            d.undefined_layout_textures.clearRetainingCapacity();
+            d.pending_general_layout_transitions.clearRetainingCapacity();
         }
 
         return .{ .command_buffer = command_buffer };
@@ -913,9 +985,9 @@ pub const Hazard = packed struct {
 pub const CommandBuffer = struct {
     command_buffer: vk.CommandBuffer,
 
-    pub fn setActiveTextureHeapPtr(command_buffer: CommandBuffer, d: Device, heap_address: *anyopaque) void {
+    pub fn setActiveTextureHeapPtr(command_buffer: CommandBuffer, d: Device, heap: Pointer(.one, anyopaque, .{})) void {
         const binding_info: vk.DescriptorBufferBindingInfoEXT = .{
-            .address = @intFromPtr(heap_address),
+            .address = heap.addr,
             .usage = .{ .resource_descriptor_buffer_bit_ext = true },
         };
         d.device.cmdBindDescriptorBuffersEXT(
@@ -954,10 +1026,10 @@ pub const CommandBuffer = struct {
     pub fn dispatch(
         command_buffer: CommandBuffer,
         d: Device,
-        data_gpu: *anyopaque,
+        data: Pointer(.one, anyopaque, .{}),
         grid_dimensions: [3]u32,
     ) void {
-        const address: vk.DeviceAddress = @intFromPtr(data_gpu);
+        const address: vk.DeviceAddress = data.addr;
         d.device.cmdPushConstants(
             command_buffer.command_buffer,
             d.pipeline_layout,
@@ -980,14 +1052,14 @@ pub const CommandBuffer = struct {
         d: Device,
         before: Stage,
         after: Stage,
-        hazards: Hazard, // TODO: investigate how to handle hazards flags
+        hazard: Hazard, // TODO: investigate how to handle hazards flags
     ) void {
         const src_stage = gpu_to_vk.pipelineStage(before);
         var dst_stage = gpu_to_vk.pipelineStage(after);
-        if (hazards.draw_arguments) {
+        if (hazard.draw_arguments) {
             dst_stage.draw_indirect_bit = true;
         }
-        if (hazards.depth_stencil) {
+        if (hazard.depth_stencil) {
             dst_stage.early_fragment_tests_bit = true;
             dst_stage.late_fragment_tests_bit = true;
         }
@@ -1007,17 +1079,16 @@ pub const CommandBuffer = struct {
         d.device.cmdPipelineBarrier2(command_buffer.command_buffer, &dependency_info);
     }
 
-    /// dest_gpu minimal alignment: 16 bytes
     /// 256 bytes is a typical optimal alignment
     pub fn copyTextureToBuffer(
         command_buffer: CommandBuffer,
         d: *Device,
-        dest_gpu: *anyopaque,
-        src_gpu: *anyopaque,
+        dest: Pointer(.one, anyopaque, .{ .@"align" = .@"16" }),
+        src: Pointer(.one, anyopaque, .{}),
         texture: Texture,
     ) void {
-        _ = src_gpu;
-        const entry, const offset = d.heap.entryAndOffsetFromAddr(@intFromPtr(dest_gpu));
+        _ = src;
+        const entry, const offset = d.heap.addrToEntryAndOffset(dest.addr);
         const region: vk.BufferImageCopy2 = .{
             .buffer_offset = offset,
             .buffer_row_length = 0,
@@ -1026,13 +1097,13 @@ pub const CommandBuffer = struct {
                 .aspect_mask = .{ .color_bit = true },
                 .mip_level = 0,
                 .base_array_layer = 0,
-                .layer_count = texture.config.layer_count,
+                .layer_count = texture.info.layer_count,
             },
             .image_offset = .{ .x = 0, .y = 0, .z = 0 },
             .image_extent = .{
-                .width = texture.config.dimensions[0],
-                .height = texture.config.dimensions[1],
-                .depth = texture.config.dimensions[2],
+                .width = texture.info.dimensions[0],
+                .height = texture.info.dimensions[1],
+                .depth = texture.info.dimensions[2],
             },
         };
         const info: vk.CopyImageToBufferInfo2 = .{
@@ -1048,7 +1119,7 @@ pub const CommandBuffer = struct {
 
 pub const Texture = struct {
     image: vk.Image,
-    config: Info,
+    info: Info,
     views: std.hash_map.AutoHashMapUnmanaged(ViewInfo, vk.ImageView),
 
     pub const Type = enum {
@@ -1089,7 +1160,7 @@ pub const Texture = struct {
     pub const Descriptor = struct {
         data: [64]u8,
 
-        pub fn sizeAndHeapAlign(d: *Device) SizeAndAlignment {
+        pub fn sizeAndHeapAlignment(d: *Device) SizeAndAlignment {
             const buffer_properties = d.descriptorBufferProperties();
             return .{
                 .size = descriptorSize(buffer_properties.*),
@@ -1114,7 +1185,7 @@ pub const Texture = struct {
         }
     };
 
-    pub fn sizeAndAlign(d: Device, info: Info) SizeAndAlignment {
+    pub fn sizeAndAlignment(d: Device, info: Info) SizeAndAlignment {
         const device_image_memory_requirements: vk.DeviceImageMemoryRequirements = .{
             .p_create_info = &vkImageInfo(info),
             .plane_aspect = gpu_to_vk.aspectsForFormat(info.format),
@@ -1127,22 +1198,22 @@ pub const Texture = struct {
         };
     }
 
-    pub fn create(d: *Device, info: Info, texture_ptr: *anyopaque) !Texture {
+    pub fn create(d: *Device, info: Info, texture_ptr: Pointer(.one, anyopaque, .{})) !Texture {
         const image = try d.device.createImage(&vkImageInfo(info), null);
 
-        const entry, const offset = d.heap.entryAndOffsetFromAddr(@intFromPtr(texture_ptr));
+        const entry, const offset = d.heap.addrToEntryAndOffset(texture_ptr.addr);
         try d.device.bindImageMemory(image, entry.memory, offset);
 
-        try d.undefined_layout_textures.put(d.gpa, image, info);
+        try d.pending_general_layout_transitions.put(d.gpa, image, info);
         return .{
             .image = image,
-            .config = info,
+            .info = info,
             .views = .empty,
         };
     }
 
     pub fn destroy(texture: *Texture, d: *Device) void {
-        _ = d.undefined_layout_textures.swapRemove(texture.image);
+        _ = d.pending_general_layout_transitions.swapRemove(texture.image);
         d.device.destroyImage(texture.image, null);
         var it = texture.views.valueIterator();
         while (it.next()) |view| d.device.destroyImageView(view.*, null);
@@ -1154,13 +1225,13 @@ pub const Texture = struct {
         const view = texture.views.get(view_info) orelse blk: {
             const mips_level = if (view_info.mip_count == ViewInfo.all_mips) vk.REMAINING_MIP_LEVELS else view_info.mip_count;
             const layer_count = if (view_info.layer_count == ViewInfo.all_layers) vk.REMAINING_ARRAY_LAYERS else view_info.layer_count;
-            const format = if (view_info.format == .none) texture.config.format else view_info.format;
+            const format = if (view_info.format == .none) texture.info.format else view_info.format;
             const info: vk.ImageViewCreateInfo = .{
                 .image = texture.image,
-                .view_type = gpu_to_vk.viewType(texture.config.type),
+                .view_type = gpu_to_vk.viewType(texture.info.type),
                 .format = gpu_to_vk.format(format),
                 .subresource_range = .{
-                    .aspect_mask = gpu_to_vk.aspectsForFormat(texture.config.format),
+                    .aspect_mask = gpu_to_vk.aspectsForFormat(texture.info.format),
                     .base_mip_level = view_info.base_mip,
                     .level_count = mips_level,
                     .base_array_layer = view_info.base_layer,
@@ -1187,16 +1258,16 @@ pub const Texture = struct {
         return descriptor;
     }
 
-    fn vkImageInfo(config: Info) vk.ImageCreateInfo {
+    fn vkImageInfo(info: Info) vk.ImageCreateInfo {
         return .{
-            .image_type = gpu_to_vk.textureType(config.type),
-            .format = gpu_to_vk.format(config.format),
-            .extent = .{ .width = config.dimensions[0], .height = config.dimensions[1], .depth = config.dimensions[2] },
-            .mip_levels = config.mip_count,
-            .array_layers = config.layer_count,
+            .image_type = gpu_to_vk.textureType(info.type),
+            .format = gpu_to_vk.format(info.format),
+            .extent = .{ .width = info.dimensions[0], .height = info.dimensions[1], .depth = info.dimensions[2] },
+            .mip_levels = info.mip_count,
+            .array_layers = info.layer_count,
             .samples = .{ .@"1_bit" = true },
             .tiling = .optimal,
-            .usage = gpu_to_vk.usageFlags(config.usage),
+            .usage = gpu_to_vk.usageFlags(info.usage),
             .sharing_mode = .exclusive,
             .initial_layout = .undefined,
         };
