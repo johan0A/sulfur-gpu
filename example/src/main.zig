@@ -28,7 +28,7 @@ pub fn main(init: std.process.Init) !void {
     const texture_gpu = try device.rawAlloc(texture_size_align.size, texture_size_align.alignement, .gpu);
     defer device.rawFree(texture_gpu);
     var texture: gpu.Texture = try .create(&device, texture_config, texture_gpu);
-    defer texture.destroy(device);
+    defer texture.destroy(&device);
 
     const descriptor_size_and_align = gpu.Texture.Descriptor.sizeAndHeapAlign(&device);
     const heap_gpu = try device.rawAlloc(descriptor_size_and_align.size * 65536, descriptor_size_and_align.alignement, .default);
