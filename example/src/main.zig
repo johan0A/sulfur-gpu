@@ -18,8 +18,9 @@ pub fn main(init: std.process.Init) !void {
 
     const queue: gpu.Queue = .create(device, .graphics);
 
+    const dimensions: [3]u32 = .{ 256, 256, 1 };
     const texture_config: gpu.Texture.Config = .{
-        .dimensions = .{ 8, 8, 1 },
+        .dimensions = dimensions,
         .format = .rgba8_unorm,
         .usage = .{ .storage = true },
     };
@@ -42,7 +43,8 @@ pub fn main(init: std.process.Init) !void {
     const data_cpu: *Data = @ptrCast(@alignCast(device.deviceToHostPointer(data_gpu)));
     data_cpu.output_texture = 0;
 
-    const readback_gpu = try device.rawAlloc(8 * 8 * 4, .@"1", .readback); // TODO: what alignement?
+    const pixel_buffer_size = dimensions[0] * dimensions[1] * 4;
+    const readback_gpu = try device.rawAlloc(pixel_buffer_size, .fromByteUnits(256), .readback);
     defer device.rawFree(readback_gpu);
     const readback_cpu: [*]u8 = @ptrCast(device.deviceToHostPointer(readback_gpu));
 
@@ -53,7 +55,11 @@ pub fn main(init: std.process.Init) !void {
     const cb: gpu.CommandBuffer = try .startRecording(queue, &device);
     cb.setActiveTextureHeapPtr(device, heap_gpu);
     cb.setPipeline(device, pipeline);
-    cb.dispatch(device, data_gpu, .{ 1, 1, 1 });
+    cb.dispatch(device, data_gpu, .{
+        (dimensions[0] + 7) / 8,
+        (dimensions[1] + 7) / 8,
+        1,
+    });
 
     cb.barrier(device, .{ .compute = true }, .{ .transfer = true }, .{});
     cb.copyFromTexture(&device, readback_gpu, texture_gpu, texture);
@@ -63,10 +69,46 @@ pub fn main(init: std.process.Init) !void {
     try queue.submitSignal(&device, &.{cb}, done, 1);
     try done.wait(device, 1);
 
-    for (0..4) |i| {
-        const p = readback_cpu + i * 4;
-        std.debug.print("pixel {} = {{{}, {}, {}, {}}}\n", .{ i, p[0], p[1], p[2], p[3] });
+    const pixel_buffer = readback_cpu[0..pixel_buffer_size];
+
+    var file = try std.Io.Dir.cwd().createFile(init.io, "out.bmp", .{});
+    defer file.close(init.io);
+    var buf: [4096]u8 = undefined;
+    var fw = file.writer(init.io, &buf);
+    try writeBmp(&fw.interface, pixel_buffer, dimensions[0], dimensions[1]);
+}
+
+pub fn writeBmp(w: *std.Io.Writer, pixels: []const u8, width: u32, height: u32) !void {
+    const row_size = std.mem.alignForward(u32, (width * 3), 4);
+    const data_size = row_size * height;
+    const file_size = 54 + data_size;
+
+    try w.writeAll("BM");
+    try w.writeInt(u32, file_size, .little);
+    try w.writeInt(u32, 0, .little);
+    try w.writeInt(u32, 54, .little);
+    try w.writeInt(u32, 40, .little);
+    try w.writeInt(i32, @intCast(width), .little);
+    try w.writeInt(i32, @intCast(height), .little);
+    try w.writeInt(u16, 1, .little);
+    try w.writeInt(u16, 24, .little);
+    try w.writeInt(u32, 0, .little);
+    try w.writeInt(u32, data_size, .little);
+    try w.writeInt(i32, 0, .little);
+    try w.writeInt(i32, 0, .little);
+    try w.writeInt(u32, 0, .little);
+    try w.writeInt(u32, 0, .little);
+
+    var y: u32 = height;
+    while (y > 0) {
+        y -= 1;
+        for (0..width) |x| {
+            const i = (y * width + x) * 4;
+            try w.writeAll(&.{ pixels[i + 2], pixels[i + 1], pixels[i] });
+        }
+        try w.splatByteAll(0, row_size - width * 3);
     }
+    try w.flush();
 }
 
 const Data = extern struct {
