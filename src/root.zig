@@ -1,6 +1,7 @@
 pub const Instance = struct {
     instance: vk.InstanceProxy,
-    presentation_supported: bool,
+    presentation_enabled: bool,
+    debug_messenger: vk.DebugUtilsMessengerEXT,
 
     pub fn create(
         gpa: std.mem.Allocator,
@@ -53,15 +54,55 @@ pub const Instance = struct {
         const instance_dispatch = try gpa.create(vk.InstanceWrapper);
         instance_dispatch.* = .load(instance_handle, base_dispatch.dispatch.vkGetInstanceProcAddr.?);
         const instance: vk.InstanceProxy = .init(instance_handle, instance_dispatch);
+
+        const debug_callback = struct {
+            fn debugCallback(
+                message_severity: vk.DebugUtilsMessageSeverityFlagsEXT,
+                message_types: vk.DebugUtilsMessageTypeFlagsEXT,
+                p_callback_data: ?*const vk.DebugUtilsMessengerCallbackDataEXT,
+                p_user_data: ?*anyopaque,
+            ) callconv(vk.vulkan_call_conv) vk.Bool32 {
+                _ = .{ message_types, p_user_data };
+                const callback_data = p_callback_data orelse @panic("");
+                const message = std.mem.span(callback_data.p_message orelse "no message");
+                if (message_severity.error_bit_ext) {
+                    std.log.err("Validation: {s}", .{message});
+                } else if (message_severity.warning_bit_ext) {
+                    std.log.warn("Validation: {s}", .{message});
+                } else {
+                    std.log.info("Validation: {s}", .{message});
+                }
+                std.debug.dumpCurrentStackTrace(.{});
+                return .false;
+            }
+        };
+        const debug_messenger_info: vk.DebugUtilsMessengerCreateInfoEXT = .{
+            .message_severity = .{ .verbose_bit_ext = true, .warning_bit_ext = true, .error_bit_ext = true },
+            .message_type = .{ .general_bit_ext = true, .validation_bit_ext = true, .performance_bit_ext = true },
+            .pfn_user_callback = debug_callback.debugCallback,
+        };
+        const debug_messenger = try instance.createDebugUtilsMessengerEXT(&debug_messenger_info, null);
+
         return .{
             .instance = instance,
-            .presentation_supported = required_surface_extensions.len != 0,
+            .presentation_enabled = required_surface_extensions.len != 0,
+            .debug_messenger = debug_messenger,
         };
     }
 
-    pub fn destroy(instance: Instance, gpa: std.mem.Allocator) void {
+    pub fn destroy(instance: *Instance, gpa: std.mem.Allocator) void {
+        instance.instance.destroyDebugUtilsMessengerEXT(instance.debug_messenger, null);
         instance.instance.destroyInstance(null);
         gpa.destroy(instance.instance.wrapper);
+        instance.* = undefined;
+    }
+
+    pub fn enumerateAdaptersAlloc(instance: Instance, gpa: std.mem.Allocator) ![]Adapter {
+        const physical_devices = try instance.instance.enumeratePhysicalDevicesAlloc(gpa);
+        defer gpa.free(physical_devices);
+        const adapters = try gpa.alloc(Adapter, physical_devices.len);
+        for (adapters, physical_devices) |*adapter, physical_device| adapter.* = .{ .physical_device = physical_device };
+        return adapters;
     }
 };
 
@@ -69,24 +110,15 @@ pub const Adapter = struct {
     physical_device: vk.PhysicalDevice,
 };
 
-pub fn enumerateAdapters(gpa: std.mem.Allocator, instance: Instance) ![]Adapter {
-    const physical_devices = try instance.instance.enumeratePhysicalDevicesAlloc(gpa);
-    defer gpa.free(physical_devices);
-    const adapters = try gpa.alloc(Adapter, physical_devices.len);
-    for (adapters, physical_devices) |*adapter, physical_device| adapter.* = .{ .physical_device = physical_device };
-    return adapters;
-}
-
 pub const Device = struct {
     instance: vk.InstanceProxy,
     device: vk.DeviceProxy,
     physical_device: vk.PhysicalDevice,
 
-    queue_family_indices: std.EnumArray(QueueType, u32),
-    queue_indices: std.EnumArray(QueueType, u32),
-    command_pools: std.EnumArray(QueueType, vk.CommandPool),
+    queue_family_indices: std.EnumArray(Queue.Type, u32),
+    queue_indices: std.EnumArray(Queue.Type, u32),
+    command_pools: std.EnumArray(Queue.Type, vk.CommandPool),
 
-    debug_messenger: vk.DebugUtilsMessengerEXT,
     gpa: std.mem.Allocator,
 
     heap: Heap,
@@ -96,7 +128,7 @@ pub const Device = struct {
     descriptor_set_layout: vk.DescriptorSetLayout,
     pipeline_layout: vk.PipelineLayout,
 
-    undefined_layout_textures: std.array_hash_map.Auto(vk.Image, Texture.Config),
+    undefined_layout_textures: std.array_hash_map.Auto(vk.Image, Texture.Info),
 
     memory_properties: vk.PhysicalDeviceMemoryProperties,
     memory_supports_host_visible: bool,
@@ -111,9 +143,10 @@ pub const Device = struct {
             gpu_addr: usize,
             cpu_addr: ?usize,
 
-            fn destroy(entry: Entry, d: Device) void {
+            fn destroy(entry: *Entry, d: Device) void {
                 d.device.destroyBuffer(entry.buffer, null);
                 d.device.freeMemory(entry.memory, null);
+                entry.* = undefined;
             }
         };
 
@@ -164,38 +197,10 @@ pub const Device = struct {
         defer arena_impl.deinit();
         const arena = arena_impl.allocator();
 
-        const device_handle = try createLogicalDevice(arena, adapter.physical_device, instance.instance.wrapper, instance.presentation_supported);
+        const device_handle = try createLogicalDevice(arena, adapter.physical_device, instance.instance.wrapper, instance.presentation_enabled);
         const device_dispatch = try gpa.create(vk.DeviceWrapper);
         device_dispatch.* = .load(device_handle, instance.instance.wrapper.dispatch.vkGetDeviceProcAddr.?);
         const device: vk.DeviceProxy = .init(device_handle, device_dispatch);
-
-        const debug_callback = struct {
-            fn debugCallback(
-                message_severity: vk.DebugUtilsMessageSeverityFlagsEXT,
-                message_types: vk.DebugUtilsMessageTypeFlagsEXT,
-                p_callback_data: ?*const vk.DebugUtilsMessengerCallbackDataEXT,
-                p_user_data: ?*anyopaque,
-            ) callconv(vk.vulkan_call_conv) vk.Bool32 {
-                _ = .{ message_types, p_user_data };
-                const callback_data = p_callback_data orelse @panic("");
-                const message = std.mem.span(callback_data.p_message orelse "no message");
-                if (message_severity.error_bit_ext) {
-                    std.log.err("Validation: {s}", .{message});
-                } else if (message_severity.warning_bit_ext) {
-                    std.log.warn("Validation: {s}", .{message});
-                } else {
-                    std.log.info("Validation: {s}", .{message});
-                }
-                std.debug.dumpCurrentStackTrace(.{});
-                return .false;
-            }
-        };
-        const debug_messenger_info: vk.DebugUtilsMessengerCreateInfoEXT = .{
-            .message_severity = .{ .verbose_bit_ext = true, .warning_bit_ext = true, .error_bit_ext = true },
-            .message_type = .{ .general_bit_ext = true, .validation_bit_ext = true, .performance_bit_ext = true },
-            .pfn_user_callback = debug_callback.debugCallback,
-        };
-        const debug_messenger = try instance.instance.createDebugUtilsMessengerEXT(&debug_messenger_info, null);
 
         var binding: vk.DescriptorSetLayoutBinding = .{
             .binding = 0,
@@ -249,7 +254,7 @@ pub const Device = struct {
 
         const queue_families = try findQueueFamilies(arena, adapter.physical_device, instance.instance.wrapper);
 
-        var command_pools: std.EnumArray(QueueType, vk.CommandPool) = .initUndefined();
+        var command_pools: std.EnumArray(Queue.Type, vk.CommandPool) = .initUndefined();
         var it = command_pools.iterator();
         while (it.next()) |entry| {
             const info: vk.CommandPoolCreateInfo = .{
@@ -275,7 +280,6 @@ pub const Device = struct {
             .queue_family_indices = queue_families.queue_family_indices,
             .queue_indices = queue_families.queue_indices,
             .command_pools = command_pools,
-            .debug_messenger = debug_messenger,
             .physical_device = adapter.physical_device,
             .gpa = gpa,
             .heap = .{ .entries = .empty },
@@ -295,11 +299,11 @@ pub const Device = struct {
         d.device.destroyDescriptorSetLayout(d.descriptor_set_layout, null);
         d.device.destroyDevice(null);
         d.gpa.destroy(d.device.wrapper);
-        d.instance.destroyDebugUtilsMessengerEXT(d.debug_messenger, null);
         // TODO: make a debug gpa and uncomment next line
         // for (d.heap.entries.items) |entry| entry.destroy(d);
         d.heap.entries.deinit(d.gpa);
         d.undefined_layout_textures.deinit(d.gpa);
+        d.* = undefined;
     }
 
     pub fn surfaceCapabilities(d: Device, gpa: std.mem.Allocator, surface: vk.SurfaceKHR) !SurfaceCapabilities {
@@ -447,7 +451,7 @@ pub const Device = struct {
 
     pub fn rawFree(d: *Device, gpu_ptr: *anyopaque) void {
         const index = d.heap.indexFromAddr(@intFromPtr(gpu_ptr));
-        const entry = d.heap.entries.orderedRemove(index);
+        var entry = d.heap.entries.orderedRemove(index);
         entry.destroy(d.*);
     }
 
@@ -496,7 +500,7 @@ pub const Device = struct {
         arena: std.mem.Allocator,
         physical_device: vk.PhysicalDevice,
         instance_dispatch: *const vk.InstanceWrapper,
-        presentation_supported: bool,
+        presentation_enabled: bool,
     ) !vk.Device {
         var queue_family_count: u32 = undefined;
         instance_dispatch.getPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, null);
@@ -551,7 +555,7 @@ pub const Device = struct {
             vk.extensions.ext_mutable_descriptor_type.name,
             // vk.extensions.khr_unified_image_layouts.name, TODO
         });
-        if (presentation_supported) required_device_extensions.appendAssumeCapacity(
+        if (presentation_enabled) required_device_extensions.appendAssumeCapacity(
             vk.extensions.khr_swapchain.name,
         );
 
@@ -576,8 +580,8 @@ pub const Device = struct {
         physical_device: vk.PhysicalDevice,
         instance_dispatch: *const vk.InstanceWrapper,
     ) !struct {
-        queue_family_indices: std.EnumArray(QueueType, u32),
-        queue_indices: std.EnumArray(QueueType, u32),
+        queue_family_indices: std.EnumArray(Queue.Type, u32),
+        queue_indices: std.EnumArray(Queue.Type, u32),
     } {
         const queue_family_indices = try instance_dispatch.getPhysicalDeviceQueueFamilyPropertiesAlloc(physical_device, arena);
 
@@ -642,24 +646,24 @@ pub const Memory = enum(u8) {
     readback,
 };
 
-pub const QueueType = enum {
-    graphics,
-    compute,
-    transfer,
-};
-
 pub const Queue = struct {
     queue: vk.Queue,
-    queue_type: QueueType,
+    queue_type: Type,
 
-    pub fn create(d: Device, queue_type: QueueType) Queue {
+    pub const Type = enum {
+        graphics,
+        compute,
+        transfer,
+    };
+
+    pub fn create(d: Device, queue_type: Type) Queue {
         const queue_family_index = d.queue_family_indices.get(queue_type);
         const queue_index = d.queue_indices.get(queue_type);
         const queue = d.device.getDeviceQueue(queue_family_index, queue_index);
         return .{ .queue = queue, .queue_type = queue_type };
     }
 
-    pub fn submitSignal(
+    pub fn submitAndSignal(
         queue: Queue,
         d: *Device,
         command_buffers: []const CommandBuffer,
@@ -694,6 +698,65 @@ pub const Queue = struct {
             &.{submit_info},
             .null_handle,
         );
+    }
+
+    pub fn startRecording(queue: Queue, d: *Device) !CommandBuffer {
+        const alloc_info: vk.CommandBufferAllocateInfo = .{
+            .command_pool = d.command_pools.get(queue.queue_type),
+            .level = .primary,
+            .command_buffer_count = 1,
+        };
+        var command_buffer: vk.CommandBuffer = undefined;
+        try d.device.allocateCommandBuffers(&alloc_info, (&command_buffer)[0..1]);
+
+        const begin_info: vk.CommandBufferBeginInfo = .{ .flags = .{ .one_time_submit_bit = true } };
+        try d.device.beginCommandBuffer(command_buffer, &begin_info);
+
+        var image_it = d.undefined_layout_textures.iterator();
+        const image_count = d.undefined_layout_textures.count();
+        if (image_count != 0) {
+            const barriers = try d.gpa.alloc(vk.ImageMemoryBarrier2, image_count);
+            defer d.gpa.free(barriers);
+
+            for (barriers) |*b| {
+                const item = image_it.next() orelse break;
+                const image = item.key_ptr.*;
+                const config = item.value_ptr.*;
+                b.* = .{
+                    .src_stage_mask = .{},
+                    .src_access_mask = .{},
+                    .dst_stage_mask = .{ .all_commands_bit = true },
+                    .dst_access_mask = .{
+                        .memory_read_bit = true,
+                        .memory_write_bit = true,
+                    },
+                    .old_layout = .undefined,
+                    .new_layout = .general,
+                    .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                    .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                    .image = image,
+                    .subresource_range = .{
+                        .aspect_mask = gpu_to_vk.aspectsForFormat(config.format),
+                        .base_mip_level = 0,
+                        .level_count = config.mip_count,
+                        .base_array_layer = 0,
+                        .layer_count = config.layer_count,
+                    },
+                };
+            }
+
+            const dependency_info: vk.DependencyInfo = .{
+                .image_memory_barrier_count = @intCast(barriers.len),
+                .p_image_memory_barriers = barriers.ptr,
+            };
+            d.device.cmdPipelineBarrier2(
+                command_buffer,
+                &dependency_info,
+            );
+            d.undefined_layout_textures.clearRetainingCapacity();
+        }
+
+        return .{ .command_buffer = command_buffer };
     }
 };
 
@@ -828,8 +891,9 @@ pub const Semaphore = struct {
         return .{ .semaphore = semaphore };
     }
 
-    pub fn destroy(semaphore: Semaphore, d: Device) void {
+    pub fn destroy(semaphore: *Semaphore, d: Device) void {
         d.device.destroySemaphore(semaphore.semaphore, null);
+        semaphore.* = undefined;
     }
 
     pub fn wait(semaphore: Semaphore, d: Device, value: u64) !void {
@@ -842,10 +906,15 @@ pub const Semaphore = struct {
     }
 };
 
+pub const SizeAndAlignment = struct {
+    size: usize,
+    alignment: std.mem.Alignment,
+};
+
 pub const Texture = struct {
     image: vk.Image,
-    config: Config,
-    views: std.hash_map.AutoHashMapUnmanaged(ViewDesc, vk.ImageView),
+    config: Info,
+    views: std.hash_map.AutoHashMapUnmanaged(ViewInfo, vk.ImageView),
 
     pub const Type = enum {
         @"1d",
@@ -861,8 +930,7 @@ pub const Texture = struct {
         padding: u12 = 0,
     };
 
-    // TODO: Config or Descriptor?
-    pub const Config = struct {
+    pub const Info = struct {
         type: Type = .@"2d",
         dimensions: [3]u32,
         mip_count: u32 = 1,
@@ -872,17 +940,12 @@ pub const Texture = struct {
         usage: Usage = .{},
     };
 
-    pub const SizeAndAlign = struct {
-        size: usize,
-        alignement: std.mem.Alignment,
-    };
-
     pub const Descriptor = struct {
-        pub fn sizeAndHeapAlign(d: *Device) SizeAndAlign {
+        pub fn sizeAndHeapAlign(d: *Device) SizeAndAlignment {
             const buffer_properties = d.descriptorBufferProperties();
             return .{
                 .size = descriptorSize(buffer_properties.*),
-                .alignement = .fromByteUnits(buffer_properties.descriptor_buffer_offset_alignment),
+                .alignment = .fromByteUnits(buffer_properties.descriptor_buffer_offset_alignment),
             };
         }
 
@@ -905,7 +968,7 @@ pub const Texture = struct {
         data: [64]u8,
     };
 
-    const ViewDesc = struct {
+    pub const ViewInfo = struct {
         const all_mips = std.math.maxInt(u8);
         const all_layers = std.math.maxInt(u16);
 
@@ -916,26 +979,26 @@ pub const Texture = struct {
         layer_count: u16 = all_layers,
     };
 
-    pub fn RwTextureViewDescriptor(texture: *Texture, d: *Device, view_desc: ViewDesc) !Descriptor {
-        const view = texture.views.get(view_desc) orelse blk: {
-            const mips_level = if (view_desc.mip_count == ViewDesc.all_mips) vk.REMAINING_MIP_LEVELS else view_desc.mip_count;
-            const layer_count = if (view_desc.layer_count == ViewDesc.all_layers) vk.REMAINING_ARRAY_LAYERS else view_desc.layer_count;
-            const format = if (view_desc.format == .none) texture.config.format else view_desc.format;
+    pub fn storageDescriptor(texture: *Texture, d: *Device, view_info: ViewInfo) !Descriptor {
+        const view = texture.views.get(view_info) orelse blk: {
+            const mips_level = if (view_info.mip_count == ViewInfo.all_mips) vk.REMAINING_MIP_LEVELS else view_info.mip_count;
+            const layer_count = if (view_info.layer_count == ViewInfo.all_layers) vk.REMAINING_ARRAY_LAYERS else view_info.layer_count;
+            const format = if (view_info.format == .none) texture.config.format else view_info.format;
             const info: vk.ImageViewCreateInfo = .{
                 .image = texture.image,
                 .view_type = gpu_to_vk.viewType(texture.config.type),
                 .format = gpu_to_vk.format(format),
                 .subresource_range = .{
                     .aspect_mask = gpu_to_vk.aspectsForFormat(texture.config.format),
-                    .base_mip_level = view_desc.base_mip,
+                    .base_mip_level = view_info.base_mip,
                     .level_count = mips_level,
-                    .base_array_layer = view_desc.base_layer,
+                    .base_array_layer = view_info.base_layer,
                     .layer_count = layer_count,
                 },
                 .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
             };
             const view = try d.device.createImageView(&info, null);
-            try texture.views.put(d.gpa, view_desc, view);
+            try texture.views.put(d.gpa, view_info, view);
             break :blk view;
         };
         const image_info: vk.DescriptorImageInfo = .{
@@ -953,29 +1016,29 @@ pub const Texture = struct {
         return descriptor;
     }
 
-    pub fn sizeAndAlign(d: Device, config: Config) SizeAndAlign {
-        const info: vk.DeviceImageMemoryRequirements = .{
-            .p_create_info = &textureInfo(config),
-            .plane_aspect = gpu_to_vk.aspectsForFormat(config.format),
+    pub fn sizeAndAlign(d: Device, info: Info) SizeAndAlignment {
+        const device_image_memory_requirements: vk.DeviceImageMemoryRequirements = .{
+            .p_create_info = &vkImageInfo(info),
+            .plane_aspect = gpu_to_vk.aspectsForFormat(info.format),
         };
         var req: vk.MemoryRequirements2 = .{ .memory_requirements = undefined };
-        d.device.getDeviceImageMemoryRequirements(&info, &req);
+        d.device.getDeviceImageMemoryRequirements(&device_image_memory_requirements, &req);
         return .{
             .size = req.memory_requirements.size,
-            .alignement = .fromByteUnits(req.memory_requirements.alignment),
+            .alignment = .fromByteUnits(req.memory_requirements.alignment),
         };
     }
 
-    pub fn create(d: *Device, config: Config, texture_ptr: *anyopaque) !Texture {
-        const image = try d.device.createImage(&textureInfo(config), null);
+    pub fn create(d: *Device, info: Info, texture_ptr: *anyopaque) !Texture {
+        const image = try d.device.createImage(&vkImageInfo(info), null);
 
         const entry, const offset = d.heap.entryAndOffsetFromAddr(@intFromPtr(texture_ptr));
         try d.device.bindImageMemory(image, entry.memory, offset);
 
-        try d.undefined_layout_textures.put(d.gpa, image, config);
+        try d.undefined_layout_textures.put(d.gpa, image, info);
         return .{
             .image = image,
-            .config = config,
+            .config = info,
             .views = .empty,
         };
     }
@@ -986,9 +1049,10 @@ pub const Texture = struct {
         var it = texture.views.valueIterator();
         while (it.next()) |view| d.device.destroyImageView(view.*, null);
         texture.views.deinit(d.gpa);
+        texture.* = undefined;
     }
 
-    fn textureInfo(config: Config) vk.ImageCreateInfo {
+    fn vkImageInfo(config: Info) vk.ImageCreateInfo {
         return .{
             .image_type = gpu_to_vk.textureType(config.type),
             .format = gpu_to_vk.format(config.format),
@@ -1032,72 +1096,29 @@ pub const Pipeline = struct {
         return .{ .pipeline = pipeline, .bind_point = .compute };
     }
 
-    pub fn destroy(pipeline: Pipeline, d: Device) void {
+    pub fn destroy(pipeline: *Pipeline, d: Device) void {
         d.device.destroyPipeline(pipeline.pipeline, null);
+        pipeline.* = undefined;
     }
+};
+
+pub const Stage = packed struct {
+    transfer: bool = false,
+    compute: bool = false,
+    raster_color_out: bool = false,
+    raster_depth_out: bool = false,
+    pixel_shader: bool = false,
+    vertex_shader: bool = false,
+};
+
+pub const Hazard = packed struct {
+    draw_arguments: bool = false,
+    descriptors: bool = false,
+    depth_stencil: bool = false,
 };
 
 pub const CommandBuffer = struct {
     command_buffer: vk.CommandBuffer,
-
-    pub fn startRecording(queue: Queue, d: *Device) !CommandBuffer {
-        const alloc_info: vk.CommandBufferAllocateInfo = .{
-            .command_pool = d.command_pools.get(queue.queue_type),
-            .level = .primary,
-            .command_buffer_count = 1,
-        };
-        var command_buffer: vk.CommandBuffer = undefined;
-        try d.device.allocateCommandBuffers(&alloc_info, (&command_buffer)[0..1]);
-
-        const begin_info: vk.CommandBufferBeginInfo = .{ .flags = .{ .one_time_submit_bit = true } };
-        try d.device.beginCommandBuffer(command_buffer, &begin_info);
-
-        var image_it = d.undefined_layout_textures.iterator();
-        const image_count = d.undefined_layout_textures.count();
-        if (image_count != 0) {
-            const barriers = try d.gpa.alloc(vk.ImageMemoryBarrier2, image_count);
-            defer d.gpa.free(barriers);
-
-            for (barriers) |*b| {
-                const item = image_it.next() orelse break;
-                const image = item.key_ptr.*;
-                const config = item.value_ptr.*;
-                b.* = .{
-                    .src_stage_mask = .{},
-                    .src_access_mask = .{},
-                    .dst_stage_mask = .{ .all_commands_bit = true },
-                    .dst_access_mask = .{
-                        .memory_read_bit = true,
-                        .memory_write_bit = true,
-                    },
-                    .old_layout = .undefined,
-                    .new_layout = .general,
-                    .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                    .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                    .image = image,
-                    .subresource_range = .{
-                        .aspect_mask = gpu_to_vk.aspectsForFormat(config.format),
-                        .base_mip_level = 0,
-                        .level_count = config.mip_count,
-                        .base_array_layer = 0,
-                        .layer_count = config.layer_count,
-                    },
-                };
-            }
-
-            const dependency_info: vk.DependencyInfo = .{
-                .image_memory_barrier_count = @intCast(barriers.len),
-                .p_image_memory_barriers = barriers.ptr,
-            };
-            d.device.cmdPipelineBarrier2(
-                command_buffer,
-                &dependency_info,
-            );
-            d.undefined_layout_textures.clearRetainingCapacity();
-        }
-
-        return .{ .command_buffer = command_buffer };
-    }
 
     pub fn setActiveTextureHeapPtr(command_buffer: CommandBuffer, d: Device, heap_address: *anyopaque) void {
         const binding_info: vk.DescriptorBufferBindingInfoEXT = .{
@@ -1161,27 +1182,12 @@ pub const CommandBuffer = struct {
         );
     }
 
-    pub const Stage = packed struct {
-        transfer: bool = false,
-        compute: bool = false,
-        raster_color_out: bool = false,
-        raster_depth_out: bool = false,
-        pixel_shader: bool = false,
-        vertex_shader: bool = false,
-    };
-
-    pub const Hazard = packed struct {
-        draw_arguments: bool = false,
-        descriptors: bool = false,
-        depth_stencil: bool = false,
-    };
-
     pub fn barrier(
         command_buffer: CommandBuffer,
         d: Device,
         before: Stage,
         after: Stage,
-        hazards: Hazard,
+        hazards: Hazard, // TODO: investigate how to handle hazards flags
     ) void {
         const src_stage = gpu_to_vk.pipelineStage(before);
         var dst_stage = gpu_to_vk.pipelineStage(after);
@@ -1208,9 +1214,9 @@ pub const CommandBuffer = struct {
         d.device.cmdPipelineBarrier2(command_buffer.command_buffer, &dependency_info);
     }
 
-    /// dest_gpu minimal alignement: 16 bytes
-    /// 256 bytes is a typical optimal alignement
-    pub fn copyFromTexture(
+    /// dest_gpu minimal alignment: 16 bytes
+    /// 256 bytes is a typical optimal alignment
+    pub fn copyTextureToBuffer(
         command_buffer: CommandBuffer,
         d: *Device,
         dest_gpu: *anyopaque,

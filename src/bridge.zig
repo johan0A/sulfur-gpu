@@ -255,7 +255,7 @@ pub const gpu_to_vk = struct {
         };
     }
 
-    pub fn pipelineStage(stage: gpu.CommandBuffer.Stage) vk.PipelineStageFlags2 {
+    pub fn pipelineStage(stage: gpu.Stage) vk.PipelineStageFlags2 {
         var out: vk.PipelineStageFlags2 = .{};
         if (stage.transfer) out.all_transfer_bit = true;
         if (stage.compute) out.compute_shader_bit = true;
