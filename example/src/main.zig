@@ -16,6 +16,11 @@ pub fn main(init: std.process.Init) !void {
     var device: gpu.Device = try .create(gpa, instance, adapter);
     defer device.destroy();
 
+    const gpu_gpa = gpu.heap.rawDeviceAllocator(&device);
+    var gpu_arena_impl: gpu.heap.FixedBufferAllocator = try .initAlloc(gpu_gpa, .{}, 1024 * 1024);
+    defer gpu_arena_impl.deinit(gpu_gpa);
+    const gpu_arena = gpu_arena_impl.allocator();
+
     const queue: gpu.Queue = .create(device, .graphics);
 
     const dimensions: [3]u32 = .{ 256, 256, 1 };
@@ -26,29 +31,29 @@ pub fn main(init: std.process.Init) !void {
     };
 
     const texture_size_align = gpu.Texture.sizeAndAlignment(device, texture_info);
-    const texture_gpu = try device.rawAlloc(texture_size_align.size, texture_size_align.alignment, .gpu);
-    defer device.rawFree(texture_gpu);
+    const texture_gpu = try gpu_arena.runtimeAlignedAlloc(u8, texture_size_align.alignment, texture_size_align.size, .gpu);
+    defer gpu_arena.runtimeAlignedfree(texture_gpu, texture_size_align.alignment, .gpu);
 
     var texture: gpu.Texture = try .create(&device, texture_info, texture_gpu);
     defer texture.destroy(&device);
 
     const descriptor_size_and_align = gpu.Texture.Descriptor.sizeAndHeapAlignment(&device);
-    const heap_gpu = try device.rawAlloc(descriptor_size_and_align.size * 65536, descriptor_size_and_align.alignment, .default);
-    defer device.rawFree(heap_gpu);
+    const heap_gpu = try gpu_arena.runtimeAlignedAlloc(u8, descriptor_size_and_align.alignment, descriptor_size_and_align.size * 65536, .default);
+    defer gpu_arena.runtimeAlignedfree(heap_gpu, descriptor_size_and_align.alignment, .default);
     const heap = device.deviceToHostPointer(heap_gpu);
 
     const descriptor = try texture.storageDescriptor(&device, .{});
     descriptor.store(&device, heap, 0);
 
-    const data_gpu = try device.rawAlloc(@sizeOf(Data), .of(Data), .default);
-    defer device.rawFree(data_gpu);
-    const data_cpu: *Data = @ptrCast(@alignCast(device.deviceToHostPointer(data_gpu)));
+    const data_gpu = try gpu_arena.create(Data, .default);
+    defer gpu_arena.destroy(data_gpu, .default);
+    const data_cpu: *Data = device.deviceToHostPointer(data_gpu);
     data_cpu.output_texture = 0;
 
     const pixel_buffer_size = dimensions[0] * dimensions[1] * 4;
-    const readback_gpu = try device.rawAlloc(pixel_buffer_size, .fromByteUnits(256), .readback);
-    defer device.rawFree(readback_gpu);
-    const readback_cpu: [*]u8 = @ptrCast(device.deviceToHostPointer(readback_gpu));
+    const readback_gpu = try gpu_arena.alignedAlloc(u8, .fromByteUnits(256), pixel_buffer_size, .readback);
+    defer gpu_arena.free(readback_gpu, .readback);
+    const readback_cpu: []u8 = device.deviceToHostPointer(readback_gpu);
 
     const spirv align(@alignOf(u32)) = @embedFile("generate_texture.spv").*;
     var pipeline: gpu.Pipeline = try .createCompute(device, @ptrCast(&spirv));
@@ -57,14 +62,14 @@ pub fn main(init: std.process.Init) !void {
     const cb = try queue.startRecording(&device);
     cb.setActiveTextureHeapPtr(device, heap_gpu);
     cb.setPipeline(device, pipeline);
-    cb.dispatch(device, data_gpu, .{
+    cb.dispatch(device, .cast(data_gpu), .{
         (dimensions[0] + 7) / 8,
         (dimensions[1] + 7) / 8,
         1,
     });
 
     cb.barrier(device, .{ .compute = true }, .{ .transfer = true }, .{});
-    cb.copyTextureToBuffer(&device, .alignCast(readback_gpu), texture_gpu, texture);
+    cb.copyTextureToBuffer(&device, .from(readback_gpu), texture_gpu, texture);
 
     var done: gpu.Semaphore = try .create(device, 0);
     defer done.destroy(device);
