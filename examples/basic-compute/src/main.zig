@@ -32,27 +32,23 @@ pub fn main(init: std.process.Init) !void {
 
     const texture_size_align = gpu.Texture.sizeAndAlignment(device, texture_info);
     const texture_gpu = try gpu_arena.runtimeAlignedAlloc(u8, texture_size_align.alignment, texture_size_align.size, .gpu);
-    defer gpu_arena.runtimeAlignedfree(texture_gpu, texture_size_align.alignment, .gpu);
 
     var texture: gpu.Texture = try .create(&device, texture_info, texture_gpu);
     defer texture.destroy(&device);
 
     const descriptor_size_and_align = gpu.Texture.Descriptor.sizeAndHeapAlignment(&device);
     const heap_gpu = try gpu_arena.runtimeAlignedAlloc(u8, descriptor_size_and_align.alignment, descriptor_size_and_align.size * 65536, .default);
-    defer gpu_arena.runtimeAlignedfree(heap_gpu, descriptor_size_and_align.alignment, .default);
     const heap = device.deviceToHostPointer(heap_gpu);
 
     const descriptor = try texture.storageDescriptor(&device, .{});
     descriptor.store(&device, heap, 0);
 
     const data_gpu = try gpu_arena.create(Data, .default);
-    defer gpu_arena.destroy(data_gpu, .default);
     const data_cpu: *Data = device.deviceToHostPointer(data_gpu);
     data_cpu.output_texture = 0;
 
     const pixel_buffer_size = dimensions[0] * dimensions[1] * 4;
     const readback_gpu = try gpu_arena.alignedAlloc(u8, .fromByteUnits(256), pixel_buffer_size, .readback);
-    defer gpu_arena.free(readback_gpu, .readback);
     const readback_cpu: []u8 = device.deviceToHostPointer(readback_gpu);
 
     const spirv align(@alignOf(u32)) = @embedFile("generate_texture.spv").*;

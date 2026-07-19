@@ -989,6 +989,83 @@ pub const Semaphore = struct {
     }
 };
 
+pub const Swapchain = struct {
+    swapchain: vk.SwapchainKHR,
+
+    pub const Options = struct {
+        format: Format,
+        present_mode: PresentMode,
+        usage: Texture.Usage = .{ .color_attachment = true },
+        dimensions: [2]u32 = .{ 1, 1 },
+    };
+
+    pub fn create(
+        d: *Device,
+        queue: Queue,
+        surface: vk.SurfaceKHR,
+        options: Options,
+    ) !Swapchain {
+        const queue_family = d.queue_family_indices.get(queue.queue_type);
+
+        // TODO: move to adapter picking
+        std.debug.assert(try d.instance.getPhysicalDeviceSurfaceSupportKHR(d.physical_device, queue_family, surface) == .true);
+
+        const capabilities = try d.instance.getPhysicalDeviceSurfaceCapabilitiesKHR(d.physical_device, surface);
+        const extent: vk.Extent2D = switch (capabilities.current_extent.width != std.math.maxInt(u32)) {
+            true => capabilities.current_extent,
+            false => .{
+                .width = std.math.clamp(
+                    options.dimensions[0],
+                    capabilities.min_image_extent.width,
+                    capabilities.max_image_extent.width,
+                ),
+                .height = std.math.clamp(
+                    options.dimensions[1],
+                    capabilities.min_image_extent.height,
+                    capabilities.max_image_extent.height,
+                ),
+            },
+        };
+
+        var min_image_count = capabilities.min_image_count + 1;
+        if (capabilities.max_image_count != 0) min_image_count = @min(min_image_count, capabilities.max_image_count);
+
+        const create_info: vk.SwapchainCreateInfoKHR = .{
+            .surface = surface,
+            .min_image_count = min_image_count,
+            .image_format = gpu_to_vk.format(options.format),
+            .image_color_space = .srgb_nonlinear_khr,
+            .image_extent = extent,
+            .image_array_layers = 1,
+            .image_usage = gpu_to_vk.usageFlags(options.usage),
+            .image_sharing_mode = .exclusive,
+            .queue_family_index_count = 0,
+            .p_queue_family_indices = null,
+            .pre_transform = capabilities.current_transform,
+            .composite_alpha = .{ .opaque_bit_khr = true },
+            .present_mode = switch (options.present_mode) {
+                .immediate => .immediate_khr,
+                .mailbox => .mailbox_khr,
+                .fifo => .fifo_khr,
+                .fifo_relaxed => .fifo_relaxed_khr,
+            },
+            .clipped = .true,
+            .old_swapchain = .null_handle,
+        };
+        const swapchain = try d.device.createSwapchainKHR(&create_info, null);
+        errdefer d.device.destroySwapchainKHR(swapchain, null);
+
+        return .{
+            .swapchain = swapchain,
+        };
+    }
+
+    pub fn destroy(swapchain: *Swapchain, d: *Device) void {
+        d.device.destroySwapchainKHR(swapchain.swapchain, null);
+        swapchain.* = undefined;
+    }
+};
+
 pub const Stage = packed struct {
     transfer: bool = false,
     compute: bool = false,
@@ -1328,26 +1405,6 @@ pub const Pipeline = struct {
         pipeline.* = undefined;
     }
 };
-
-fn debugCallback(
-    message_severity: vk.DebugUtilsMessageSeverityFlagsEXT,
-    message_types: vk.DebugUtilsMessageTypeFlagsEXT,
-    p_callback_data: ?*const vk.DebugUtilsMessengerCallbackDataEXT,
-    p_user_data: ?*anyopaque,
-) callconv(vk.vulkan_call_conv) vk.Bool32 {
-    _ = .{ message_types, p_user_data };
-    const callback_data = p_callback_data orelse @panic("");
-    const message = std.mem.span(callback_data.p_message orelse "no message");
-    if (message_severity.error_bit_ext) {
-        std.log.err("Validation: {s}", .{message});
-    } else if (message_severity.warning_bit_ext) {
-        std.log.warn("Validation: {s}", .{message});
-    } else {
-        std.log.info("Validation: {s}", .{message});
-    }
-    std.debug.dumpCurrentStackTrace(.{});
-    return .false;
-}
 
 pub const heap = struct {
     pub fn rawDeviceAllocator(d: *Device) Allocator {
@@ -1718,3 +1775,23 @@ pub const heap = struct {
         }
     };
 };
+
+fn debugCallback(
+    message_severity: vk.DebugUtilsMessageSeverityFlagsEXT,
+    message_types: vk.DebugUtilsMessageTypeFlagsEXT,
+    p_callback_data: ?*const vk.DebugUtilsMessengerCallbackDataEXT,
+    p_user_data: ?*anyopaque,
+) callconv(vk.vulkan_call_conv) vk.Bool32 {
+    _ = .{ message_types, p_user_data };
+    const callback_data = p_callback_data orelse @panic("");
+    const message = std.mem.span(callback_data.p_message orelse "no message");
+    if (message_severity.error_bit_ext) {
+        std.log.err("Validation: {s}", .{message});
+    } else if (message_severity.warning_bit_ext) {
+        std.log.warn("Validation: {s}", .{message});
+    } else {
+        std.log.info("Validation: {s}", .{message});
+    }
+    std.debug.dumpCurrentStackTrace(.{});
+    return .false;
+}

@@ -3,7 +3,7 @@
     .version = "0.0.1",
     .dependencies = .{
         .sulfur = .{
-            .path = "..",
+            .path = "../..",
         },
     },
     .minimum_zig_version = "0.16.0",
