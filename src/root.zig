@@ -470,8 +470,17 @@ pub const Device = struct {
 
     pending_general_layout_transitions: std.array_hash_map.Auto(vk.Image, Texture.Info),
 
+    free_command_buffers: std.EnumArray(Queue.Type, std.ArrayList(vk.CommandBuffer)),
+    in_flight_command_buffers: std.ArrayList(InFlightCommandBuffer),
+
     memory_properties: vk.PhysicalDeviceMemoryProperties,
     has_host_visible_device_local: bool,
+
+    const InFlightCommandBuffer = struct {
+        semaphore: vk.Semaphore,
+        semaphore_value: u64,
+        command_buffer: CommandBuffer,
+    };
 
     const AdressMap = struct {
         entries: std.ArrayList(Entry),
@@ -627,6 +636,8 @@ pub const Device = struct {
             .descriptor_set_layout = descriptor_set_layout,
             .pipeline_layout = pipeline_layout,
             .pending_general_layout_transitions = .empty,
+            .free_command_buffers = .initFill(.empty),
+            .in_flight_command_buffers = .empty,
             .memory_properties = memory_properties,
             .has_host_visible_device_local = has_host_visible_device_local,
         };
@@ -643,6 +654,8 @@ pub const Device = struct {
         // for (d.heap.entries.items) |entry| entry.destroy(d);
         d.heap.entries.deinit(d.gpa);
         d.pending_general_layout_transitions.deinit(d.gpa);
+        for (&d.free_command_buffers.values) |*list| list.deinit(d.gpa);
+        d.in_flight_command_buffers.deinit(d.gpa);
         d.* = undefined;
     }
 
@@ -845,6 +858,43 @@ pub const Device = struct {
             }),
         };
     }
+
+    fn acquireCommandBuffer(d: *Device, queue_type: Queue.Type) !CommandBuffer {
+        if (d.free_command_buffers.getPtr(queue_type).pop()) |command_buffer|
+            return .{ .command_buffer = command_buffer, .queue_type = queue_type };
+
+        const alloc_info: vk.CommandBufferAllocateInfo = .{
+            .command_pool = d.command_pools.get(queue_type),
+            .level = .primary,
+            .command_buffer_count = 1,
+        };
+        var command_buffer: vk.CommandBuffer = undefined;
+        try d.device.allocateCommandBuffers(&alloc_info, (&command_buffer)[0..1]);
+        return .{ .command_buffer = command_buffer, .queue_type = queue_type };
+    }
+
+    fn releaseCommandBuffer(d: *Device, command_buffer: CommandBuffer) void {
+        d.free_command_buffers.getPtr(command_buffer.queue_type).append(d.gpa, command_buffer.command_buffer) catch {
+            d.device.freeCommandBuffers(d.command_pools.get(command_buffer.queue_type), &.{command_buffer.command_buffer});
+        };
+    }
+
+    fn reclaimCompletedCommandBuffers(d: *Device) void {
+        var i: usize = 0;
+        while (i < d.in_flight_command_buffers.items.len) {
+            const entry = d.in_flight_command_buffers.items[i];
+            const completed = d.device.getSemaphoreCounterValue(entry.semaphore) catch {
+                i += 1;
+                continue;
+            };
+            if (completed < entry.semaphore_value) {
+                i += 1;
+                continue;
+            }
+            _ = d.in_flight_command_buffers.swapRemove(i);
+            d.releaseCommandBuffer(entry.command_buffer);
+        }
+    }
 };
 
 pub const Queue = struct {
@@ -865,16 +915,12 @@ pub const Queue = struct {
     }
 
     pub fn startRecording(queue: Queue, d: *Device) !CommandBuffer {
-        const alloc_info: vk.CommandBufferAllocateInfo = .{
-            .command_pool = d.command_pools.get(queue.queue_type),
-            .level = .primary,
-            .command_buffer_count = 1,
-        };
-        var command_buffer: vk.CommandBuffer = undefined;
-        try d.device.allocateCommandBuffers(&alloc_info, (&command_buffer)[0..1]);
+        d.reclaimCompletedCommandBuffers();
+        const command_buffer = try d.acquireCommandBuffer(queue.queue_type);
+        errdefer d.releaseCommandBuffer(command_buffer);
 
         const begin_info: vk.CommandBufferBeginInfo = .{ .flags = .{ .one_time_submit_bit = true } };
-        try d.device.beginCommandBuffer(command_buffer, &begin_info);
+        try d.device.beginCommandBuffer(command_buffer.command_buffer, &begin_info);
 
         var image_it = d.pending_general_layout_transitions.iterator();
         const image_count = d.pending_general_layout_transitions.count();
@@ -914,13 +960,13 @@ pub const Queue = struct {
                 .p_image_memory_barriers = barriers.ptr,
             };
             d.device.cmdPipelineBarrier2(
-                command_buffer,
+                command_buffer.command_buffer,
                 &dependency_info,
             );
             d.pending_general_layout_transitions.clearRetainingCapacity();
         }
 
-        return .{ .command_buffer = command_buffer };
+        return command_buffer;
     }
 
     pub fn submitAndSignal(
@@ -941,6 +987,8 @@ pub const Queue = struct {
             };
         }
 
+        try d.in_flight_command_buffers.ensureUnusedCapacity(d.gpa, command_buffers.len);
+
         const signal_info: vk.SemaphoreSubmitInfo = .{
             .semaphore = signal_semaphore.semaphore,
             .value = signal_value,
@@ -958,6 +1006,12 @@ pub const Queue = struct {
             &.{submit_info},
             .null_handle,
         );
+
+        for (command_buffers) |command_buffer| d.in_flight_command_buffers.appendAssumeCapacity(.{
+            .semaphore = signal_semaphore.semaphore,
+            .semaphore_value = signal_value,
+            .command_buffer = command_buffer,
+        });
     }
 };
 
@@ -1011,19 +1065,14 @@ pub const Swapchain = struct {
         std.debug.assert(try d.instance.getPhysicalDeviceSurfaceSupportKHR(d.physical_device, queue_family, surface) == .true);
 
         const capabilities = try d.instance.getPhysicalDeviceSurfaceCapabilitiesKHR(d.physical_device, surface);
+
+        const min_image_extent = capabilities.min_image_extent;
+        const max_image_extent = capabilities.max_image_extent;
         const extent: vk.Extent2D = switch (capabilities.current_extent.width != std.math.maxInt(u32)) {
             true => capabilities.current_extent,
             false => .{
-                .width = std.math.clamp(
-                    options.dimensions[0],
-                    capabilities.min_image_extent.width,
-                    capabilities.max_image_extent.width,
-                ),
-                .height = std.math.clamp(
-                    options.dimensions[1],
-                    capabilities.min_image_extent.height,
-                    capabilities.max_image_extent.height,
-                ),
+                .width = std.math.clamp(options.dimensions[0], min_image_extent.width, max_image_extent.width),
+                .height = std.math.clamp(options.dimensions[1], min_image_extent.height, max_image_extent.height),
             },
         };
 
@@ -1055,9 +1104,7 @@ pub const Swapchain = struct {
         const swapchain = try d.device.createSwapchainKHR(&create_info, null);
         errdefer d.device.destroySwapchainKHR(swapchain, null);
 
-        return .{
-            .swapchain = swapchain,
-        };
+        return .{ .swapchain = swapchain };
     }
 
     pub fn destroy(swapchain: *Swapchain, d: *Device) void {
@@ -1083,6 +1130,7 @@ pub const Hazard = packed struct {
 
 pub const CommandBuffer = struct {
     command_buffer: vk.CommandBuffer,
+    queue_type: Queue.Type,
 
     pub fn setActiveTextureHeapPtr(command_buffer: CommandBuffer, d: Device, heap_ptr: Slice(u8, .{})) void {
         const binding_info: vk.DescriptorBufferBindingInfoEXT = .{

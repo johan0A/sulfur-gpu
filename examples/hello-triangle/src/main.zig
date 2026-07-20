@@ -62,8 +62,8 @@ pub fn main(init: std.process.Init) !void {
             else => {},
         };
 
-        // if (frame_index > FRAMES_IN_FLIGHT)
-        //     try frame_semaphore.wait(device, frame_index - FRAMES_IN_FLIGHT);
+        if (frame_index > FRAMES_IN_FLIGHT)
+            try frame_semaphore.wait(device, frame_index - FRAMES_IN_FLIGHT);
 
         // const back_buffer = try swapchain.acquireNextTexture(&device);
 
@@ -74,6 +74,8 @@ pub fn main(init: std.process.Init) !void {
 
         frame_index += 1;
     }
+
+    try frame_semaphore.wait(device, frame_index - 1);
 }
 
 const FRAMES_IN_FLIGHT = 100;
