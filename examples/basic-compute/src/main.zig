@@ -115,7 +115,7 @@ pub fn writeBmp(w: *std.Io.Writer, pixels: []const u8, width: u32, height: u32) 
 }
 
 const Data = extern struct {
-    output_texture: u32 align(16),
+    output_texture: u32,
 };
 
 const std = @import("std");

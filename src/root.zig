@@ -933,13 +933,8 @@ pub const Queue = struct {
                 const image = item.key_ptr.*;
                 const info = item.value_ptr.*;
                 b.* = .{
-                    .src_stage_mask = .{},
-                    .src_access_mask = .{},
                     .dst_stage_mask = .{ .all_commands_bit = true },
-                    .dst_access_mask = .{
-                        .memory_read_bit = true,
-                        .memory_write_bit = true,
-                    },
+                    .dst_access_mask = .{ .memory_read_bit = true, .memory_write_bit = true },
                     .old_layout = .undefined,
                     .new_layout = .general,
                     .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
@@ -1045,11 +1040,25 @@ pub const Semaphore = struct {
 
 pub const Swapchain = struct {
     swapchain: vk.SwapchainKHR,
+    queue: Queue,
+
+    textures: []SwapchainTexture,
+    acquire_fence: vk.Fence,
+    current: u32,
+
+    const SwapchainTexture = struct {
+        texture: Texture,
+        /// general -> present_src
+        present_command_buffer: CommandBuffer,
+        /// binary
+        present_semaphore: vk.Semaphore,
+    };
 
     pub const Options = struct {
         format: Format,
         present_mode: PresentMode,
-        usage: Texture.Usage = .{ .color_attachment = true },
+        usage: Texture.Usage,
+        // TODO: reconsider including dimensions
         dimensions: [2]u32 = .{ 1, 1 },
     };
 
@@ -1104,12 +1113,153 @@ pub const Swapchain = struct {
         const swapchain = try d.device.createSwapchainKHR(&create_info, null);
         errdefer d.device.destroySwapchainKHR(swapchain, null);
 
-        return .{ .swapchain = swapchain };
+        const images = try d.device.getSwapchainImagesAllocKHR(swapchain, d.gpa);
+        defer d.gpa.free(images);
+
+        const textures = try d.gpa.alloc(SwapchainTexture, images.len);
+        errdefer d.gpa.free(textures);
+        for (textures, images) |*texture, image| {
+            const texture_info: Texture.Info = .{
+                .type = .@"2d",
+                .dimensions = .{ extent.width, extent.height, 1 },
+                .mip_count = 1,
+                .layer_count = 1,
+                .format = options.format,
+                .usage = options.usage,
+            };
+
+            const present_command_buffer = try d.acquireCommandBuffer(queue.queue_type);
+
+            const begin_info: vk.CommandBufferBeginInfo = .{ .flags = .{ .simultaneous_use_bit = true } };
+            try d.device.beginCommandBuffer(present_command_buffer.command_buffer, &begin_info);
+
+            const image_barrier: vk.ImageMemoryBarrier2 = .{
+                .src_stage_mask = .{ .all_commands_bit = true },
+                .src_access_mask = .{ .memory_write_bit = true },
+                .old_layout = .general,
+                .new_layout = .present_src_khr,
+                .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                .image = image,
+                .subresource_range = .{
+                    .aspect_mask = gpu_to_vk.aspectsForFormat(texture_info.format),
+                    .base_mip_level = 0,
+                    .level_count = texture_info.mip_count,
+                    .base_array_layer = 0,
+                    .layer_count = texture_info.layer_count,
+                },
+            };
+            const dependency_info: vk.DependencyInfo = .{
+                .image_memory_barrier_count = 1,
+                .p_image_memory_barriers = &.{image_barrier},
+            };
+            d.device.cmdPipelineBarrier2(present_command_buffer.command_buffer, &dependency_info);
+
+            try d.device.endCommandBuffer(present_command_buffer.command_buffer);
+
+            texture.* = .{
+                .texture = .{
+                    .image = image,
+                    .info = texture_info,
+                    .views = .empty,
+                },
+                .present_semaphore = try d.device.createSemaphore(&.{}, null),
+                .present_command_buffer = present_command_buffer,
+            };
+        }
+
+        return .{
+            .swapchain = swapchain,
+            .queue = queue,
+            .textures = textures,
+            .acquire_fence = try d.device.createFence(&.{}, null),
+            .current = undefined,
+        };
     }
 
     pub fn destroy(swapchain: *Swapchain, d: *Device) void {
+        _ = d.device.queueWaitIdle(swapchain.queue.queue) catch {};
+
         d.device.destroySwapchainKHR(swapchain.swapchain, null);
+        for (swapchain.textures) |*texture| {
+            texture.texture.destroyInner(d, false);
+            d.releaseCommandBuffer(texture.present_command_buffer);
+            d.device.destroySemaphore(texture.present_semaphore, null);
+        }
+        d.gpa.free(swapchain.textures);
+        d.device.destroyFence(swapchain.acquire_fence, null);
         swapchain.* = undefined;
+    }
+
+    pub fn acquireNextTexture(swapchain: *Swapchain, d: *Device) !*Texture {
+        const result = d.device.acquireNextImageKHR(
+            swapchain.swapchain,
+            std.math.maxInt(u64),
+            .null_handle,
+            swapchain.acquire_fence,
+        ) catch |err| switch (err) {
+            error.OutOfDateKHR => @panic("TODO"), // TODO
+            else => |e| return e,
+        };
+        const index = result.image_index;
+        _ = result.result; // TODO: handle suboptimal_khr: flag for recreate after present
+
+        _ = try d.device.waitForFences(&.{swapchain.acquire_fence}, .true, std.math.maxInt(u64));
+        try d.device.resetFences(&.{swapchain.acquire_fence});
+
+        swapchain.current = index;
+        const texture = &swapchain.textures[index].texture;
+
+        try d.pending_general_layout_transitions.put(d.gpa, texture.image, texture.info);
+
+        return texture;
+    }
+
+    pub fn present(
+        swapchain: *Swapchain,
+        d: *Device,
+        queue: Queue,
+        semaphore: Semaphore,
+        semaphore_value: u64,
+    ) !void {
+        const texture = &swapchain.textures[swapchain.current];
+
+        try d.device.queueSubmit2(
+            queue.queue,
+            &.{.{
+                .wait_semaphore_info_count = 1,
+                .p_wait_semaphore_infos = &.{.{
+                    .semaphore = semaphore.semaphore,
+                    .value = semaphore_value,
+                    .stage_mask = .{ .all_commands_bit = true },
+                    .device_index = 0,
+                }},
+                .command_buffer_info_count = 1,
+                .p_command_buffer_infos = &.{.{
+                    .command_buffer = texture.present_command_buffer.command_buffer,
+                    .device_mask = 0,
+                }},
+                .signal_semaphore_info_count = 1,
+                .p_signal_semaphore_infos = &.{.{
+                    .semaphore = texture.present_semaphore,
+                    .value = 0,
+                    .stage_mask = .{ .all_commands_bit = true },
+                    .device_index = 0,
+                }},
+            }},
+            .null_handle,
+        );
+
+        _ = d.device.queuePresentKHR(queue.queue, &.{
+            .wait_semaphore_count = 1,
+            .p_wait_semaphores = &.{texture.present_semaphore},
+            .swapchain_count = 1,
+            .p_swapchains = &.{swapchain.swapchain},
+            .p_image_indices = &.{swapchain.current},
+        }) catch |err| switch (err) {
+            error.OutOfDateKHR => @panic("TODO"), // TODO
+            else => return err,
+        };
     }
 };
 
@@ -1359,8 +1509,12 @@ pub const Texture = struct {
     }
 
     pub fn destroy(texture: *Texture, d: *Device) void {
+        texture.destroyInner(d, true);
+    }
+
+    fn destroyInner(texture: *Texture, d: *Device, destroy_image: bool) void {
         _ = d.pending_general_layout_transitions.swapRemove(texture.image);
-        d.device.destroyImage(texture.image, null);
+        if (destroy_image) d.device.destroyImage(texture.image, null);
         var it = texture.views.valueIterator();
         while (it.next()) |view| d.device.destroyImageView(view.*, null);
         texture.views.deinit(d.gpa);
