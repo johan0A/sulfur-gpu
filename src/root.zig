@@ -1040,11 +1040,15 @@ pub const Semaphore = struct {
 
 pub const Swapchain = struct {
     swapchain: vk.SwapchainKHR,
+    surface: vk.SurfaceKHR,
+    options: Options,
     queue: Queue,
 
     textures: []SwapchainTexture,
     acquire_fence: vk.Fence,
     current: u32,
+
+    needs_recreate: bool,
 
     const SwapchainTexture = struct {
         texture: Texture,
@@ -1052,14 +1056,16 @@ pub const Swapchain = struct {
         present_command_buffer: CommandBuffer,
         /// binary
         present_semaphore: vk.Semaphore,
+        present_timeline: ?struct {
+            semaphore: Semaphore,
+            value: u64,
+        },
     };
 
     pub const Options = struct {
         format: Format,
         present_mode: PresentMode,
         usage: Texture.Usage,
-        // TODO: reconsider including dimensions
-        dimensions: [2]u32 = .{ 1, 1 },
     };
 
     pub fn create(
@@ -1073,15 +1079,33 @@ pub const Swapchain = struct {
         // TODO: move to adapter picking
         std.debug.assert(try d.instance.getPhysicalDeviceSurfaceSupportKHR(d.physical_device, queue_family, surface) == .true);
 
-        const capabilities = try d.instance.getPhysicalDeviceSurfaceCapabilitiesKHR(d.physical_device, surface);
+        return .{
+            .swapchain = .null_handle,
+            .surface = surface,
+            .options = options,
+            .queue = queue,
+            .textures = &.{},
+            .acquire_fence = try d.device.createFence(&.{}, null),
+            .current = undefined,
+            .needs_recreate = true,
+        };
+    }
+
+    fn recreate(swapchain: *Swapchain, d: *Device, queue: Queue, extent: [2]u32) !void {
+        for (swapchain.textures) |t| if (t.present_timeline) |tl| try tl.semaphore.wait(d.*, tl.value);
+        try d.device.queueWaitIdle(queue.queue);
+
+        swapchain.destroyImageResources(d);
+
+        const capabilities = try d.instance.getPhysicalDeviceSurfaceCapabilitiesKHR(d.physical_device, swapchain.surface);
 
         const min_image_extent = capabilities.min_image_extent;
         const max_image_extent = capabilities.max_image_extent;
-        const extent: vk.Extent2D = switch (capabilities.current_extent.width != std.math.maxInt(u32)) {
+        const surface_extent: vk.Extent2D = switch (capabilities.current_extent.width != std.math.maxInt(u32)) {
             true => capabilities.current_extent,
             false => .{
-                .width = std.math.clamp(options.dimensions[0], min_image_extent.width, max_image_extent.width),
-                .height = std.math.clamp(options.dimensions[1], min_image_extent.height, max_image_extent.height),
+                .width = std.math.clamp(extent[0], min_image_extent.width, max_image_extent.width),
+                .height = std.math.clamp(extent[1], min_image_extent.height, max_image_extent.height),
             },
         };
 
@@ -1089,43 +1113,46 @@ pub const Swapchain = struct {
         if (capabilities.max_image_count != 0) min_image_count = @min(min_image_count, capabilities.max_image_count);
 
         const create_info: vk.SwapchainCreateInfoKHR = .{
-            .surface = surface,
+            .surface = swapchain.surface,
             .min_image_count = min_image_count,
-            .image_format = gpu_to_vk.format(options.format),
+            .image_format = gpu_to_vk.format(swapchain.options.format),
             .image_color_space = .srgb_nonlinear_khr,
-            .image_extent = extent,
+            .image_extent = surface_extent,
             .image_array_layers = 1,
-            .image_usage = gpu_to_vk.usageFlags(options.usage),
+            .image_usage = gpu_to_vk.usageFlags(swapchain.options.usage),
             .image_sharing_mode = .exclusive,
             .queue_family_index_count = 0,
             .p_queue_family_indices = null,
             .pre_transform = capabilities.current_transform,
             .composite_alpha = .{ .opaque_bit_khr = true },
-            .present_mode = switch (options.present_mode) {
+            .present_mode = switch (swapchain.options.present_mode) {
                 .immediate => .immediate_khr,
                 .mailbox => .mailbox_khr,
                 .fifo => .fifo_khr,
                 .fifo_relaxed => .fifo_relaxed_khr,
             },
             .clipped = .true,
-            .old_swapchain = .null_handle,
+            .old_swapchain = swapchain.swapchain,
         };
-        const swapchain = try d.device.createSwapchainKHR(&create_info, null);
-        errdefer d.device.destroySwapchainKHR(swapchain, null);
 
-        const images = try d.device.getSwapchainImagesAllocKHR(swapchain, d.gpa);
+        const old = swapchain.swapchain;
+        swapchain.swapchain = try d.device.createSwapchainKHR(&create_info, null);
+        if (old != .null_handle) d.device.destroySwapchainKHR(old, null);
+
+        const images = try d.device.getSwapchainImagesAllocKHR(swapchain.swapchain, d.gpa);
         defer d.gpa.free(images);
 
         const textures = try d.gpa.alloc(SwapchainTexture, images.len);
         errdefer d.gpa.free(textures);
+
         for (textures, images) |*texture, image| {
             const texture_info: Texture.Info = .{
                 .type = .@"2d",
-                .dimensions = .{ extent.width, extent.height, 1 },
+                .dimensions = .{ surface_extent.width, surface_extent.height, 1 },
                 .mip_count = 1,
                 .layer_count = 1,
-                .format = options.format,
-                .usage = options.usage,
+                .format = swapchain.options.format,
+                .usage = swapchain.options.usage,
             };
 
             const present_command_buffer = try d.acquireCommandBuffer(queue.queue_type);
@@ -1165,54 +1192,63 @@ pub const Swapchain = struct {
                 },
                 .present_semaphore = try d.device.createSemaphore(&.{}, null),
                 .present_command_buffer = present_command_buffer,
+                .present_timeline = null,
             };
         }
 
-        return .{
-            .swapchain = swapchain,
-            .queue = queue,
-            .textures = textures,
-            .acquire_fence = try d.device.createFence(&.{}, null),
-            .current = undefined,
-        };
+        swapchain.textures = textures;
+        swapchain.needs_recreate = false;
+    }
+
+    fn destroyImageResources(swapchain: *Swapchain, d: *Device) void {
+        for (swapchain.textures) |*texture| {
+            d.device.destroySemaphore(texture.present_semaphore, null);
+            d.releaseCommandBuffer(texture.present_command_buffer);
+            texture.texture.destroyInner(d, false);
+        }
+        d.gpa.free(swapchain.textures);
+        swapchain.textures = &.{};
     }
 
     pub fn destroy(swapchain: *Swapchain, d: *Device) void {
         _ = d.device.queueWaitIdle(swapchain.queue.queue) catch {};
-
+        swapchain.destroyImageResources(d);
         d.device.destroySwapchainKHR(swapchain.swapchain, null);
-        for (swapchain.textures) |*texture| {
-            texture.texture.destroyInner(d, false);
-            d.releaseCommandBuffer(texture.present_command_buffer);
-            d.device.destroySemaphore(texture.present_semaphore, null);
-        }
-        d.gpa.free(swapchain.textures);
         d.device.destroyFence(swapchain.acquire_fence, null);
         swapchain.* = undefined;
     }
 
-    pub fn acquireNextTexture(swapchain: *Swapchain, d: *Device) !*Texture {
-        const result = d.device.acquireNextImageKHR(
-            swapchain.swapchain,
-            std.math.maxInt(u64),
-            .null_handle,
-            swapchain.acquire_fence,
-        ) catch |err| switch (err) {
-            error.OutOfDateKHR => @panic("TODO"), // TODO
-            else => |e| return e,
-        };
-        const index = result.image_index;
-        _ = result.result; // TODO: handle suboptimal_khr: flag for recreate after present
+    pub fn acquireNextTexture(swapchain: *Swapchain, d: *Device, queue: Queue, extent: [2]u32) !*Texture {
+        var attempts: u32 = 0;
+        while (true) : (attempts += 1) {
+            if (attempts > 8) return error.SurfaceLost;
+            if (swapchain.needs_recreate) try swapchain.recreate(d, queue, extent);
 
-        _ = try d.device.waitForFences(&.{swapchain.acquire_fence}, .true, std.math.maxInt(u64));
-        try d.device.resetFences(&.{swapchain.acquire_fence});
+            const result = d.device.acquireNextImageKHR(
+                swapchain.swapchain,
+                std.math.maxInt(u64),
+                .null_handle,
+                swapchain.acquire_fence,
+            ) catch |err| switch (err) {
+                error.OutOfDateKHR => {
+                    swapchain.needs_recreate = true;
+                    continue;
+                },
+                else => |e| return e,
+            };
+            const index = result.image_index;
+            if (result.result == .suboptimal_khr) swapchain.needs_recreate = true;
 
-        swapchain.current = index;
-        const texture = &swapchain.textures[index].texture;
+            _ = try d.device.waitForFences(&.{swapchain.acquire_fence}, .true, std.math.maxInt(u64));
+            try d.device.resetFences(&.{swapchain.acquire_fence});
 
-        try d.pending_general_layout_transitions.put(d.gpa, texture.image, texture.info);
+            swapchain.current = index;
+            const texture = &swapchain.textures[index].texture;
 
-        return texture;
+            try d.pending_general_layout_transitions.put(d.gpa, texture.image, texture.info);
+
+            return texture;
+        }
     }
 
     pub fn present(
@@ -1223,6 +1259,7 @@ pub const Swapchain = struct {
         semaphore_value: u64,
     ) !void {
         const texture = &swapchain.textures[swapchain.current];
+        texture.present_timeline = .{ .semaphore = semaphore, .value = semaphore_value };
 
         try d.device.queueSubmit2(
             queue.queue,
@@ -1257,8 +1294,11 @@ pub const Swapchain = struct {
             .p_swapchains = &.{swapchain.swapchain},
             .p_image_indices = &.{swapchain.current},
         }) catch |err| switch (err) {
-            error.OutOfDateKHR => @panic("TODO"), // TODO
-            else => return err,
+            error.OutOfDateKHR => { // TODO: can we avoid the frame drop?
+                swapchain.needs_recreate = true;
+                return;
+            },
+            else => |e| return e,
         };
     }
 };
@@ -1512,13 +1552,18 @@ pub const Texture = struct {
         texture.destroyInner(d, true);
     }
 
-    fn destroyInner(texture: *Texture, d: *Device, destroy_image: bool) void {
+    fn destroyInner(texture: *Texture, d: *Device, owns_vk_image: bool) void {
         _ = d.pending_general_layout_transitions.swapRemove(texture.image);
-        if (destroy_image) d.device.destroyImage(texture.image, null);
-        var it = texture.views.valueIterator();
-        while (it.next()) |view| d.device.destroyImageView(view.*, null);
+        if (owns_vk_image) d.device.destroyImage(texture.image, null);
+        texture.clearViews(d);
         texture.views.deinit(d.gpa);
         texture.* = undefined;
+    }
+
+    fn clearViews(texture: *Texture, d: *Device) void {
+        var it = texture.views.valueIterator();
+        while (it.next()) |view| d.device.destroyImageView(view.*, null);
+        texture.views.clearRetainingCapacity();
     }
 
     pub fn storageDescriptor(texture: *Texture, d: *Device, view_info: ViewInfo) !Descriptor {

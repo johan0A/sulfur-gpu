@@ -7,8 +7,8 @@ pub fn main(init: std.process.Init) !void {
     const gpa = debug_allocator.allocator();
     const arena = init.arena.allocator();
 
-    const width = 512;
-    const height = 512;
+    var width: c_int = 512;
+    var height: c_int = 512;
 
     const window = c.SDL_CreateWindow(
         "title",
@@ -53,12 +53,13 @@ pub fn main(init: std.process.Init) !void {
     const surface_capabilities = try device.surfaceCapabilities(arena, surface);
     const swapchain_format = for (surface_capabilities.formats) |f| {
         if (f == .rgba8_unorm or f == .bgra8_unorm) break f;
-    } else @panic("");
+    } else @panic("message: []const u8");
 
     var frame_semaphore: gpu.Semaphore = try .create(device, 0);
     defer frame_semaphore.destroy(device);
     var frame_index: u64 = 1;
 
+    std.debug.assert(surface_capabilities.usage.storage);
     var swapchain: gpu.Swapchain = try .create(&device, queue, surface, .{
         .format = swapchain_format,
         .usage = .{ .storage = true },
@@ -85,10 +86,12 @@ pub fn main(init: std.process.Init) !void {
             else => {},
         };
 
+        std.debug.assert(c.SDL_GetWindowSizeInPixels(window, &width, &height));
+
         if (frame_index > FRAMES_IN_FLIGHT)
             try frame_semaphore.wait(device, frame_index - FRAMES_IN_FLIGHT);
 
-        var back_buffer = try swapchain.acquireNextTexture(&device);
+        var back_buffer = try swapchain.acquireNextTexture(&device, queue, .{ @intCast(width), @intCast(height) });
 
         const descriptor = try back_buffer.storageDescriptor(&device, .{});
         const output_texture: u32 = @intCast(frame_index % FRAMES_IN_FLIGHT);
@@ -99,8 +102,8 @@ pub fn main(init: std.process.Init) !void {
         cb.setActiveTextureHeapPtr(device, heap_gpu);
         cb.setPipeline(device, pipeline);
         cb.dispatch(device, .cast(data_gpu), .{
-            (width + 7) / 8,
-            (height + 7) / 8,
+            @intCast(@divFloor((width + 7), 8)),
+            @intCast(@divFloor((height + 7), 8)),
             1,
         });
 
