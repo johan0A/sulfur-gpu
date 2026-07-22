@@ -257,6 +257,7 @@ pub const gpu_to_vk = struct {
 
     pub fn pipelineStage(stage: gpu.Stage) vk.PipelineStageFlags2 {
         var out: vk.PipelineStageFlags2 = .{};
+        if (stage.all) out.all_commands_bit = true;
         if (stage.transfer) out.all_transfer_bit = true;
         if (stage.compute) out.compute_shader_bit = true;
         if (stage.raster_color_out) out.color_attachment_output_bit = true;
@@ -265,10 +266,17 @@ pub const gpu_to_vk = struct {
             out.late_fragment_tests_bit = true;
         }
         if (stage.pixel_shader) out.fragment_shader_bit = true;
-        if (stage.vertex_shader) out.vertex_shader_bit = true;
+        if (stage.vertex_shader) {
+            out.vertex_shader_bit = true;
+            out.index_input_bit = true;
+        }
+        // TODO:
+        // if (stage.mesh_shader) {
+        //     out.task_shader_bit_ext = true;
+        //     out.mesh_shader_bit_ext = true;
+        // }
         return out;
     }
-
     pub fn textureType(tex: gpu.Texture.Type) vk.ImageType {
         return switch (tex) {
             .@"1d" => .@"1d",

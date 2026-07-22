@@ -1388,10 +1388,14 @@ pub const CommandBuffer = struct {
         d: Device,
         before: Stage,
         after: Stage,
-        hazard: Hazard, // TODO: investigate how to handle hazards flags
+        hazard: Hazard,
     ) void {
         const src_stage = gpu_to_vk.pipelineStage(before);
         var dst_stage = gpu_to_vk.pipelineStage(after);
+        var dst_access: vk.AccessFlags2 = .{
+            .memory_read_bit = true,
+            .memory_write_bit = true,
+        };
         if (hazard.draw_arguments) {
             dst_stage.draw_indirect_bit = true;
         }
@@ -1399,14 +1403,14 @@ pub const CommandBuffer = struct {
             dst_stage.early_fragment_tests_bit = true;
             dst_stage.late_fragment_tests_bit = true;
         }
+        if (hazard.descriptors) {
+            dst_access.descriptor_buffer_read_bit_ext = true;
+        }
         const memory_barrier: vk.MemoryBarrier2 = .{
             .src_stage_mask = src_stage,
             .src_access_mask = .{ .memory_write_bit = true },
             .dst_stage_mask = dst_stage,
-            .dst_access_mask = .{
-                .memory_read_bit = true,
-                .memory_write_bit = true,
-            },
+            .dst_access_mask = dst_access,
         };
         const dependency_info: vk.DependencyInfo = .{
             .memory_barrier_count = 1,
