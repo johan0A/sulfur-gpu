@@ -24,7 +24,7 @@ pub fn main(init: std.process.Init) !void {
     const queue: gpu.Queue = .create(device, .graphics);
 
     const dimensions: [3]u32 = .{ 256, 256, 1 };
-    const texture_info: gpu.Texture.Info = .{
+    const texture_info: gpu.Texture.Desc = .{
         .dimensions = dimensions,
         .format = .rgba8_unorm,
         .usage = .{ .storage = true },

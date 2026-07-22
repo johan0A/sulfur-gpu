@@ -52,33 +52,33 @@ pub fn main(init: std.process.Init) !void {
 
     const surface_capabilities = try device.surfaceCapabilities(arena, surface);
     const swapchain_format = for (surface_capabilities.formats) |f| {
-        if (f == .rgba8_unorm_srgb or f == .bgra8_unorm_srgb) break f;
+        if (f == .rgba8_unorm or f == .bgra8_unorm) break f;
     } else @panic("");
 
     var frame_semaphore: gpu.Semaphore = try .create(device, 0);
     defer frame_semaphore.destroy(device);
     var frame_index: u64 = 1;
 
-    std.debug.assert(surface_capabilities.usage.color_attachment);
+    std.debug.assert(surface_capabilities.usage.storage);
     var swapchain: gpu.Swapchain = try .create(&device, queue, surface, .{
         .format = swapchain_format,
-        .usage = .{ .color_attachment = true },
+        .usage = .{ .storage = true },
         .present_mode = .fifo,
     });
     defer swapchain.destroy(&device);
 
     const descriptor_size_and_align = gpu.Texture.Descriptor.sizeAndHeapAlignment(&device);
     const heap_gpu = try gpu_arena.runtimeAlignedAlloc(u8, descriptor_size_and_align.alignment, descriptor_size_and_align.size * 65536, .default);
+    const heap = device.deviceToHostPointer(heap_gpu);
 
     const data_gpu = try gpu_arena.create(Data, .default);
+    const data_cpu: *Data = device.deviceToHostPointer(data_gpu);
 
-    const frag align(@alignOf(u32)) = @embedFile("frag.spv").*;
-    const vert align(@alignOf(u32)) = @embedFile("vert.spv").*;
-
-    var pipeline: gpu.Pipeline = try .createGraphics(device, @ptrCast(&vert), @ptrCast(&frag), .{
-        .color_targets = &.{.{ .format = swapchain_format }},
-    });
+    const spirv align(@alignOf(u32)) = @embedFile("generate_texture.spv").*;
+    var pipeline: gpu.Pipeline = try .createCompute(device, @ptrCast(&spirv));
     defer pipeline.destroy(device);
+
+    var start: std.Io.Timestamp = .now(init.io, .real);
 
     var quit: bool = false;
     while (!quit) {
@@ -93,28 +93,29 @@ pub fn main(init: std.process.Init) !void {
         if (frame_index > FRAMES_IN_FLIGHT)
             try frame_semaphore.wait(device, frame_index - FRAMES_IN_FLIGHT);
 
-        const back_buffer = try swapchain.acquireNextTexture(&device, queue, .{ @intCast(width), @intCast(height) });
+        var back_buffer = try swapchain.acquireNextTexture(&device, queue, .{ @intCast(width), @intCast(height) });
+
+        const descriptor = try back_buffer.storageDescriptor(&device, .{});
+        const output_texture: u32 = @intCast(frame_index % FRAMES_IN_FLIGHT);
+        descriptor.store(&device, heap, output_texture);
+        var time: f64 = @floatFromInt(start.untilNow(init.io, .real).toMicroseconds());
+        time /= 1e6;
+        data_cpu.* = .{
+            .output_texture = output_texture,
+            .time = @floatCast(time),
+        };
 
         const cb = try queue.startRecording(&device);
-
         cb.setActiveTextureHeapPtr(device, heap_gpu);
-
-        cb.beginRenderPass(device, .{
-            .color_targets = &.{.{
-                .texture = back_buffer,
-                .load_op = .clear,
-                .store_op = .store,
-                .clear_color = .{ 0, 0, 0, 1 },
-            }},
+        cb.setPipeline(device, pipeline);
+        cb.dispatch(device, .cast(data_gpu), .{
+            @intCast(@divFloor((width + 7), 8)),
+            @intCast(@divFloor((height + 7), 8)),
+            1,
         });
 
-        cb.setPipeline(device, pipeline);
-
-        cb.draw(device, .cast(data_gpu), .cast(data_gpu), 3, 1);
-
-        cb.endRenderPass(device);
-
         try queue.submitAndSignal(&device, &.{cb}, frame_semaphore, frame_index);
+
         try swapchain.present(&device, queue, frame_semaphore, frame_index);
 
         frame_index += 1;
@@ -125,6 +126,7 @@ pub fn main(init: std.process.Init) !void {
 
 const Data = extern struct {
     output_texture: u32,
+    time: f32,
 };
 
 const FRAMES_IN_FLIGHT = 2;

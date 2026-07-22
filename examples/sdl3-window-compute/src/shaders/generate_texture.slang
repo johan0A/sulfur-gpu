@@ -1,5 +1,6 @@
 struct Data {
     uint32_t output_texture;
+    float32_t time;
 };
 
 [[vk::push_constant]]
@@ -16,7 +17,7 @@ float positiveMod(float x, float y) {
 [numthreads(8, 8, 1)]
 void main(uint3 id : SV_DispatchThreadID) {
     const uint output_texture = data.output_texture;
-    const float time = 0;
+    const float time = data.time;
 
     var texture = texture_heap[output_texture];
 

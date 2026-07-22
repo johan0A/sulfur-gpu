@@ -18,11 +18,8 @@ pub fn build(b: *std.Build) void {
     root_module.addImport("sulfur", sulfur_dep.module("sulfur"));
     root_module.addImport("VulkanLoader", sulfur_dep.module("VulkanLoader"));
 
-    const frag = compileShader(b, "src/shaders/frag.slang", "main");
-    root_module.addAnonymousImport("frag.spv", .{ .root_source_file = frag });
-
-    const vert = compileShader(b, "src/shaders/vert.slang", "main");
-    root_module.addAnonymousImport("vert.spv", .{ .root_source_file = vert });
+    const compute = compileShader(b, "src/shaders/generate_texture.slang", "main");
+    root_module.addAnonymousImport("generate_texture.spv", .{ .root_source_file = compute });
 
     {
         const sdl_dep = b.dependency("sdl", .{

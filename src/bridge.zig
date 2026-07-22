@@ -2,7 +2,7 @@ const std = @import("std");
 const gpu = @import("root.zig");
 const vk = @import("vulkan");
 
-pub const vk_to_gpu = struct {
+pub const to_gpu = struct {
     pub fn format(fmt: vk.Format) ?gpu.Format {
         return switch (fmt) {
             .undefined => .none,
@@ -125,7 +125,7 @@ pub const vk_to_gpu = struct {
     }
 };
 
-pub const gpu_to_vk = struct {
+pub const to_vk = struct {
     pub fn format(fmt: gpu.Format) vk.Format {
         return switch (fmt) {
             .none => .undefined,
@@ -239,10 +239,11 @@ pub const gpu_to_vk = struct {
         };
     }
 
-    pub fn topology(topo: gpu.Topology) vk.PrimitiveTopology {
+    pub fn topology(topo: gpu.Pipeline.Topology) vk.PrimitiveTopology {
         return switch (topo) {
             .triangle_list => .triangle_list,
             .triangle_strip => .triangle_strip,
+            .triangle_fan => .triangle_fan,
         };
     }
 
@@ -257,7 +258,6 @@ pub const gpu_to_vk = struct {
 
     pub fn pipelineStage(stage: gpu.Stage) vk.PipelineStageFlags2 {
         var out: vk.PipelineStageFlags2 = .{};
-        if (stage.all) out.all_commands_bit = true;
         if (stage.transfer) out.all_transfer_bit = true;
         if (stage.compute) out.compute_shader_bit = true;
         if (stage.raster_color_out) out.color_attachment_output_bit = true;
@@ -304,40 +304,38 @@ pub const gpu_to_vk = struct {
         };
     }
 
-    pub fn blendFactor(factor: gpu.Factor) vk.BlendFactor {
+    pub fn blendFactor(factor: gpu.Pipeline.Factor) vk.BlendFactor {
         return switch (factor) {
             .zero => .zero,
             .one => .one,
             .src_color => .src_color,
             .dst_color => .dst_color,
             .src_alpha => .src_alpha,
-            .one_minus_src_alpha => .one_minus_src_alpha,
         };
     }
 
-    pub fn blendOp(op: gpu.Blend) vk.BlendOp {
+    pub fn blendOp(op: gpu.Pipeline.Blend) vk.BlendOp {
         return switch (op) {
             .add => .add,
             .subtract => .subtract,
-            .rev_subtract => .reverse_subtract,
+            .reverse_subtract => .reverse_subtract,
             .min => .min,
             .max => .max,
         };
     }
 
-    pub fn attachmentLoadOp(op: gpu.LoadOp) vk.AttachmentLoadOp {
+    pub fn attachmentLoadOp(op: gpu.CommandBuffer.LoadOp) vk.AttachmentLoadOp {
         return switch (op) {
-            .undefined => .dont_care, // TODO: dont care? hu?
+            .dont_care => .dont_care,
             .load => .load,
             .clear => .clear,
         };
     }
 
-    pub fn attachmentStoreOp(op: gpu.StoreOp) vk.AttachmentStoreOp {
+    pub fn attachmentStoreOp(op: gpu.CommandBuffer.StoreOp) vk.AttachmentStoreOp {
         return switch (op) {
-            .undefined => .dont_care,
+            .dont_care => .dont_care,
             .store => .store,
-            .discard => .dont_care,
         };
     }
 
@@ -390,6 +388,34 @@ pub const gpu_to_vk = struct {
             .dst_alpha_blend_factor = blendFactor(state.dst_alpha_factor),
             .alpha_blend_op = blendOp(state.alpha_op),
             .color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true },
+        };
+    }
+
+    pub fn sampleCount(n: u8) vk.SampleCountFlags {
+        return switch (n) {
+            1 => .{ .@"1_bit" = true },
+            2 => .{ .@"2_bit" = true },
+            4 => .{ .@"4_bit" = true },
+            8 => .{ .@"8_bit" = true },
+            else => unreachable,
+        };
+    }
+
+    pub fn writeMask(mask: gpu.Pipeline.RgbaWriteMask) vk.ColorComponentFlags {
+        return .{
+            .r_bit = mask.r,
+            .g_bit = mask.g,
+            .b_bit = mask.b,
+            .a_bit = mask.a,
+        };
+    }
+
+    pub fn cullMode(c: gpu.Pipeline.Cull) vk.CullModeFlags {
+        return switch (c) {
+            .ccw => .{ .front_bit = true },
+            .cw => .{ .back_bit = true },
+            .all => .{ .front_bit = true, .back_bit = true },
+            .none => .{},
         };
     }
 };
