@@ -1369,6 +1369,14 @@ pub const CommandBuffer = struct {
         u32,
     };
 
+    pub const DrawIndexedArgs = extern struct {
+        index_count: u32,
+        instance_count: u32 = 1,
+        first_index: u32 = 0,
+        vertex_offset: i32 = 0,
+        first_instance: u32 = 0,
+    };
+
     pub fn setActiveTextureHeapPtr(command_buffer: CommandBuffer, d: Device, heap_ptr: Slice(u8, .{})) void {
         const binding_info: vk.DescriptorBufferBindingInfoEXT = .{
             .address = heap_ptr.ptr.addr,
@@ -1645,6 +1653,30 @@ pub const CommandBuffer = struct {
             0,
             @sizeOf(vk.DeviceAddress) * 2,
             std.mem.asBytes(&addresses),
+        );
+    }
+
+    pub fn drawIndexedInstancedIndirect(
+        cb: CommandBuffer,
+        d: Device,
+        vertex_data: Ptr(.one, anyopaque, .{}),
+        pixel_data: Ptr(.one, anyopaque, .{}),
+        comptime index_type: IndexType,
+        indices: switch (index_type) {
+            .u16 => Ptr(.many, u16, .{ .@"const" = true }),
+            .u32 => Ptr(.many, u32, .{ .@"const" = true }),
+        },
+        args: Ptr(.one, DrawIndexedArgs, .{ .@"const" = true }),
+    ) void {
+        cb.pushRootPointers(d, vertex_data.addr, pixel_data.addr);
+        cb.bindIndexPointer(d, indices);
+        const entry, const offset = d.heap.addrToEntryAndOffset(args.addr);
+        d.device.cmdDrawIndexedIndirect(
+            cb.command_buffer,
+            entry.buffer,
+            offset,
+            1,
+            @sizeOf(DrawIndexedArgs),
         );
     }
 
