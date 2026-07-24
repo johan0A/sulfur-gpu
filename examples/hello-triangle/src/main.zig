@@ -10,19 +10,12 @@ pub fn main(init: std.process.Init) !void {
     var width: c_int = 512;
     var height: c_int = 512;
 
-    const window = c.SDL_CreateWindow(
-        "title",
-        width,
-        height,
-        c.SDL_WINDOW_VULKAN | c.SDL_WINDOW_RESIZABLE,
-    ) orelse @panic("");
+    const window = c.SDL_CreateWindow("title", width, height, c.SDL_WINDOW_VULKAN | c.SDL_WINDOW_RESIZABLE) orelse @panic("");
 
-    const sdl_required_extensions = blk: {
-        var sdl_required_extensions_count: u32 = undefined;
-        const sdl_required_extensions_ptr = c.SDL_Vulkan_GetInstanceExtensions(&sdl_required_extensions_count) orelse
-            return error.SDL_Vulkan_GetInstanceExtensionsFailed;
-        break :blk sdl_required_extensions_ptr[0..sdl_required_extensions_count];
-    };
+    var sdl_required_extensions_count: u32 = undefined;
+    const sdl_required_extensions_ptr = c.SDL_Vulkan_GetInstanceExtensions(&sdl_required_extensions_count) orelse
+        return error.SDL_Vulkan_GetInstanceExtensionsFailed;
+    const sdl_required_extensions = sdl_required_extensions_ptr[0..sdl_required_extensions_count];
 
     var instance: gpu.Instance = try .create(
         gpa,
@@ -70,7 +63,28 @@ pub fn main(init: std.process.Init) !void {
     const descriptor_size_and_align = gpu.Texture.Descriptor.sizeAndHeapAlignment(&device);
     const heap_gpu = try gpu_arena.runtimeAlignedAlloc(u8, descriptor_size_and_align.alignment, descriptor_size_and_align.size * 65536, .default);
 
+    const positions_gpu = try gpu_arena.alloc([3]f32, 3, .default);
+    const positions_cpu: [][3]f32 = device.deviceToHostPointer(positions_gpu);
+    @memcpy(positions_cpu, @as([]const [3]f32, &.{
+        .{ -1.0, 1.0, 0.0 },
+        .{ 0.0, -1.0, 0.0 },
+        .{ 1.0, 1.0, 0.0 },
+    }));
+
+    const colors_gpu = try gpu_arena.alloc([3]f32, 3, .default);
+    const colors_cpu: [][3]f32 = device.deviceToHostPointer(colors_gpu);
+    @memcpy(colors_cpu, @as([]const [3]f32, &.{
+        .{ 0.0, 0.0, 1.0 },
+        .{ 0.0, 1.0, 0.0 },
+        .{ 1.0, 0.0, 0.0 },
+    }));
+
     const data_gpu = try gpu_arena.create(Data, .default);
+    const data_cpu: *Data = device.deviceToHostPointer(data_gpu);
+    data_cpu.* = .{
+        .positions = positions_gpu.ptr,
+        .colors = colors_gpu.ptr,
+    };
 
     const frag align(@alignOf(u32)) = @embedFile("frag.spv").*;
     const vert align(@alignOf(u32)) = @embedFile("vert.spv").*;
@@ -124,7 +138,8 @@ pub fn main(init: std.process.Init) !void {
 }
 
 const Data = extern struct {
-    output_texture: u32,
+    positions: gpu.Ptr(.many, [3]f32, .{}),
+    colors: gpu.Ptr(.many, [3]f32, .{}),
 };
 
 const FRAMES_IN_FLIGHT = 2;

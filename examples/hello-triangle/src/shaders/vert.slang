@@ -5,23 +5,18 @@ struct VertexOutput {
     float3 color : COLOR0;
 };
 
+struct Data {
+    float3 *positions;
+    float3 *colors;
+};
+
+[[vk::push_constant]]
+uniform Data *data;
+
 [shader("vertex")]
 VertexOutput main(uint vertex_index : SV_VertexID) {
-    static const float3 positions[3] = {
-        float3(-1.0, 1.0, 0.0),
-        float3(0.0, -1.0, 0.0),
-        float3(1.0,  1.0, 0.0)
-    };
-
-    static const float3 colors[3] = {
-        float3(0.0, 0.0, 1.0),
-        float3(0.0, 1.0, 0.0),
-        float3(1.0, 0.0, 0.0)
-    };
-
     VertexOutput output;
-    output.position = float4(positions[vertex_index], 1.0);
-    output.color = colors[vertex_index];
-
+    output.position = float4(data.positions[vertex_index], 1.0);
+    output.color = data.colors[vertex_index];
     return output;
 }
