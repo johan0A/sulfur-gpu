@@ -460,11 +460,12 @@ pub const Device = struct {
 
     queue_family_indices: std.EnumArray(Queue.Type, u32),
     queue_indices: std.EnumArray(Queue.Type, u32),
+    queue_timelines: std.EnumArray(Queue.Type, QueueTimeline),
     command_pools: std.EnumArray(Queue.Type, vk.CommandPool),
 
     gpa: std.mem.Allocator,
 
-    heap: AdressMap,
+    heap: AddressMap,
 
     descriptor_buffer_properties: ?vk.PhysicalDeviceDescriptorBufferPropertiesEXT,
 
@@ -473,18 +474,22 @@ pub const Device = struct {
     pending_general_layout_transitions: std.array_hash_map.Auto(vk.Image, Texture.Desc),
 
     free_command_buffers: std.EnumArray(Queue.Type, std.ArrayList(vk.CommandBuffer)),
-    in_flight_command_buffers: std.ArrayList(InFlightCommandBuffer),
+    pending_command_buffers: std.EnumArray(Queue.Type, std.ArrayList(PendingCommandBuffer)),
 
     memory_properties: vk.PhysicalDeviceMemoryProperties,
     has_host_visible_device_local: bool,
 
-    const InFlightCommandBuffer = struct {
-        semaphore: vk.Semaphore,
-        semaphore_value: u64,
-        command_buffer: CommandBuffer,
+    const QueueTimeline = struct {
+        semaphore: Semaphore,
+        last_submitted: u64,
     };
 
-    const AdressMap = struct {
+    const PendingCommandBuffer = struct {
+        value: u64,
+        command_buffer: vk.CommandBuffer,
+    };
+
+    const AddressMap = struct {
         entries: std.ArrayList(Entry),
 
         const Entry = struct {
@@ -501,17 +506,17 @@ pub const Device = struct {
             }
         };
 
-        fn addrToEntryAndOffset(map: *const AdressMap, device_addr: u64) struct { Entry, vk.DeviceSize } {
+        fn addrToEntryAndOffset(map: *const AddressMap, device_addr: u64) struct { Entry, vk.DeviceSize } {
             const entry = map.addrToEntry(device_addr);
             const offset = device_addr - entry.device_addr;
             return .{ entry, @intCast(offset) };
         }
 
-        fn addrToEntry(map: *const AdressMap, device_addr: u64) Entry {
+        fn addrToEntry(map: *const AddressMap, device_addr: u64) Entry {
             return map.entries.items[map.indexFromAddr(device_addr)];
         }
 
-        fn indexFromAddr(map: *const AdressMap, device_addr: u64) usize {
+        fn indexFromAddr(map: *const AddressMap, device_addr: u64) usize {
             return std.sort.upperBound(
                 Entry,
                 map.entries.items,
@@ -521,7 +526,7 @@ pub const Device = struct {
         }
 
         fn insert(
-            map: *AdressMap,
+            map: *AddressMap,
             gpa: std.mem.Allocator,
             entry: Entry,
         ) !void {
@@ -592,6 +597,17 @@ pub const Device = struct {
 
         const queue_families = try findQueueFamilies(arena, adapter.physical_device, instance.instance.wrapper);
 
+        var queue_timelines: std.EnumArray(Queue.Type, QueueTimeline) = .initUndefined();
+        var queue_timelines_created_count: usize = 0;
+        errdefer for (queue_timelines.values[0..queue_timelines_created_count]) |*t| t.semaphore.destroyVkDevice(device);
+        for (&queue_timelines.values) |*timeline| {
+            timeline.* = .{
+                .semaphore = try .createVkDevice(device, 0),
+                .last_submitted = 0,
+            };
+            queue_timelines_created_count += 1;
+        }
+
         var command_pools: std.EnumArray(Queue.Type, vk.CommandPool) = .initUndefined();
         var it = command_pools.iterator();
         while (it.next()) |entry| {
@@ -617,6 +633,7 @@ pub const Device = struct {
             .device = device,
             .queue_family_indices = queue_families.queue_family_indices,
             .queue_indices = queue_families.queue_indices,
+            .queue_timelines = queue_timelines,
             .command_pools = command_pools,
             .physical_device = adapter.physical_device,
             .gpa = gpa,
@@ -625,7 +642,7 @@ pub const Device = struct {
             .descriptor_set_layout = descriptor_set_layout,
             .pending_general_layout_transitions = .empty,
             .free_command_buffers = .initFill(.empty),
-            .in_flight_command_buffers = .empty,
+            .pending_command_buffers = .initFill(.empty),
             .memory_properties = memory_properties,
             .has_host_visible_device_local = has_host_visible_device_local,
         };
@@ -633,6 +650,7 @@ pub const Device = struct {
 
     pub fn destroy(d: *Device) void {
         d.device.deviceWaitIdle() catch {};
+        for (&d.queue_timelines.values) |*t| t.semaphore.destroy(d.*);
         for (d.command_pools.values) |pool| d.device.destroyCommandPool(pool, null);
         d.device.destroyDescriptorSetLayout(d.descriptor_set_layout, null);
         d.device.destroyDevice(null);
@@ -642,7 +660,7 @@ pub const Device = struct {
         d.heap.entries.deinit(d.gpa);
         d.pending_general_layout_transitions.deinit(d.gpa);
         for (&d.free_command_buffers.values) |*list| list.deinit(d.gpa);
-        d.in_flight_command_buffers.deinit(d.gpa);
+        for (&d.pending_command_buffers.values) |*p| p.deinit(d.gpa);
         d.* = undefined;
     }
 
@@ -847,8 +865,10 @@ pub const Device = struct {
     }
 
     fn acquireCommandBuffer(d: *Device, queue_type: Queue.Type) !CommandBuffer {
-        if (d.free_command_buffers.getPtr(queue_type).pop()) |command_buffer|
+        if (d.free_command_buffers.getPtr(queue_type).pop()) |command_buffer| {
+            try d.device.resetCommandBuffer(command_buffer, .{});
             return .{ .command_buffer = command_buffer, .queue_type = queue_type };
+        }
 
         const alloc_info: vk.CommandBufferAllocateInfo = .{
             .command_pool = d.command_pools.get(queue_type),
@@ -867,19 +887,21 @@ pub const Device = struct {
     }
 
     fn reclaimCompletedCommandBuffers(d: *Device) void {
-        var i: usize = 0;
-        while (i < d.in_flight_command_buffers.items.len) {
-            const entry = d.in_flight_command_buffers.items[i];
-            const completed = d.device.getSemaphoreCounterValue(entry.semaphore) catch {
-                i += 1;
-                continue;
-            };
-            if (completed < entry.semaphore_value) {
-                i += 1;
-                continue;
+        for (std.enums.values(Queue.Type)) |queue_type| {
+            const list = d.pending_command_buffers.getPtr(queue_type);
+            if (list.items.len == 0) continue;
+            const timeline = d.queue_timelines.get(queue_type);
+            const completed = d.device.getSemaphoreCounterValue(timeline.semaphore.semaphore) catch continue;
+            var n: usize = 0;
+            while (n < list.items.len and list.items[n].value <= completed) : (n += 1) {
+                d.releaseCommandBuffer(.{
+                    .command_buffer = list.items[n].command_buffer,
+                    .queue_type = queue_type,
+                });
             }
-            _ = d.in_flight_command_buffers.swapRemove(i);
-            d.releaseCommandBuffer(entry.command_buffer);
+            const rest = list.items[n..];
+            @memmove(list.items[0..rest.len], rest);
+            list.items.len = rest.len;
         }
     }
 };
@@ -951,6 +973,14 @@ pub const Queue = struct {
         return command_buffer;
     }
 
+    pub fn submit(
+        queue: Queue,
+        d: *Device,
+        command_buffers: []const CommandBuffer,
+    ) !void {
+        return queue.submitImpl(d, command_buffers, null);
+    }
+
     pub fn submitAndSignal(
         queue: Queue,
         d: *Device,
@@ -958,41 +988,69 @@ pub const Queue = struct {
         signal_semaphore: Semaphore,
         signal_value: u64,
     ) !void {
+        return queue.submitImpl(d, command_buffers, .{ .semaphore = signal_semaphore, .value = signal_value });
+    }
+
+    const Signal = struct {
+        semaphore: Semaphore,
+        value: u64,
+    };
+
+    fn submitImpl(
+        queue: Queue,
+        d: *Device,
+        command_buffers: []const CommandBuffer,
+        extra_signal: ?Signal,
+    ) !void {
+        errdefer for (command_buffers) |command_buffer|
+            d.releaseCommandBuffer(command_buffer);
+
         const submit_buffers = try d.gpa.alloc(vk.CommandBufferSubmitInfo, command_buffers.len);
         defer d.gpa.free(submit_buffers);
         for (command_buffers, submit_buffers) |command_buffer, *submit_buffer| {
             try d.device.endCommandBuffer(command_buffer.command_buffer);
-
             submit_buffer.* = .{
                 .command_buffer = command_buffer.command_buffer,
                 .device_mask = 0,
             };
         }
 
-        try d.in_flight_command_buffers.ensureUnusedCapacity(d.gpa, command_buffers.len);
+        const pending = d.pending_command_buffers.getPtr(queue.queue_type);
+        try pending.ensureUnusedCapacity(d.gpa, command_buffers.len);
 
-        const signal_info: vk.SemaphoreSubmitInfo = .{
-            .semaphore = signal_semaphore.semaphore,
-            .value = signal_value,
+        const timeline = d.queue_timelines.getPtr(queue.queue_type);
+        const value = timeline.last_submitted + 1;
+
+        var signal_infos: [2]vk.SemaphoreSubmitInfo = undefined;
+        signal_infos[0] = .{
+            .semaphore = timeline.semaphore.semaphore,
+            .value = value,
             .stage_mask = .{ .all_commands_bit = true },
             .device_index = 0,
         };
+        var signals: []const vk.SemaphoreSubmitInfo = signal_infos[0..1];
+        if (extra_signal) |signal| {
+            signal_infos[1] = .{
+                .semaphore = signal.semaphore.semaphore,
+                .value = signal.value,
+                .stage_mask = .{ .all_commands_bit = true },
+                .device_index = 0,
+            };
+            signals = signal_infos[0..2];
+        }
+
         const submit_info: vk.SubmitInfo2 = .{
             .command_buffer_info_count = @intCast(submit_buffers.len),
             .p_command_buffer_infos = submit_buffers.ptr,
-            .signal_semaphore_info_count = 1,
-            .p_signal_semaphore_infos = (&signal_info)[0..1],
+            .signal_semaphore_info_count = @intCast(signals.len),
+            .p_signal_semaphore_infos = signals.ptr,
         };
-        try d.device.queueSubmit2(
-            queue.queue,
-            &.{submit_info},
-            .null_handle,
-        );
+        try d.device.queueSubmit2(queue.queue, &.{submit_info}, .null_handle);
 
-        for (command_buffers) |command_buffer| d.in_flight_command_buffers.appendAssumeCapacity(.{
-            .semaphore = signal_semaphore.semaphore,
-            .semaphore_value = signal_value,
-            .command_buffer = command_buffer,
+        timeline.last_submitted = value;
+        for (command_buffers) |command_buffer| pending.appendAssumeCapacity(.{
+            .value = value,
+            .command_buffer = command_buffer.command_buffer,
         });
     }
 };
@@ -1001,18 +1059,11 @@ pub const Semaphore = struct {
     semaphore: vk.Semaphore,
 
     pub fn create(d: Device, init_value: u64) !Semaphore {
-        const semaphore_type: vk.SemaphoreTypeCreateInfo = .{
-            .semaphore_type = .timeline,
-            .initial_value = init_value,
-        };
-        const timeline_create_info: vk.SemaphoreCreateInfo = .{ .p_next = &semaphore_type };
-        const semaphore = try d.device.createSemaphore(&timeline_create_info, null);
-        return .{ .semaphore = semaphore };
+        return try createVkDevice(d.device, init_value);
     }
 
     pub fn destroy(semaphore: *Semaphore, d: Device) void {
-        d.device.destroySemaphore(semaphore.semaphore, null);
-        semaphore.* = undefined;
+        destroyVkDevice(semaphore, d.device);
     }
 
     pub fn wait(semaphore: Semaphore, d: Device, value: u64) !void {
@@ -1022,6 +1073,21 @@ pub const Semaphore = struct {
             .p_values = &.{value},
         };
         _ = try d.device.waitSemaphores(&wait_info, std.math.maxInt(u64));
+    }
+
+    fn createVkDevice(device: vk.DeviceProxy, init_value: u64) !Semaphore {
+        const semaphore_type: vk.SemaphoreTypeCreateInfo = .{
+            .semaphore_type = .timeline,
+            .initial_value = init_value,
+        };
+        const timeline_create_info: vk.SemaphoreCreateInfo = .{ .p_next = &semaphore_type };
+        const semaphore = try device.createSemaphore(&timeline_create_info, null);
+        return .{ .semaphore = semaphore };
+    }
+
+    pub fn destroyVkDevice(semaphore: *Semaphore, device: vk.DeviceProxy) void {
+        device.destroySemaphore(semaphore.semaphore, null);
+        semaphore.* = undefined;
     }
 };
 

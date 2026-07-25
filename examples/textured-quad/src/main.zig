@@ -130,11 +130,8 @@ pub fn main(init: std.process.Init) !void {
     const texture_descriptor = try texture.viewDescriptor(&device, .{ .format = .rgba8_unorm });
     texture_descriptor.store(&device, heap_gpu_cpu, 0);
 
-    var upload_semaphore: gpu.Semaphore = try .create(device, 0);
-    defer upload_semaphore.destroy(device);
     upload_command_buffer.barrier(device, .{ .transfer = true }, .all, .{ .descriptors = true });
-    try queue.submitAndSignal(&device, &.{upload_command_buffer}, upload_semaphore, 1);
-    try upload_semaphore.wait(device, 1);
+    try queue.submit(&device, &.{upload_command_buffer});
 
     const frag align(@alignOf(u32)) = @embedFile("frag.spv").*;
     const vert align(@alignOf(u32)) = @embedFile("vert.spv").*;
