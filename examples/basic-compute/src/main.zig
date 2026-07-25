@@ -55,7 +55,7 @@ pub fn main(init: std.process.Init) !void {
     var pipeline: gpu.Pipeline = try .createCompute(device, @ptrCast(&spirv));
     defer pipeline.destroy(device);
 
-    const cb = try queue.startRecording(&device);
+    var cb = try queue.startRecording(&device);
     cb.setActiveTextureHeapPtr(device, heap_gpu);
     cb.setPipeline(device, pipeline);
     cb.dispatch(device, .cast(data_gpu), .{

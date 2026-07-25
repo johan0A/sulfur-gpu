@@ -465,8 +465,7 @@ pub const Device = struct {
 
     descriptor_buffer_properties: ?vk.PhysicalDeviceDescriptorBufferPropertiesEXT,
 
-    descriptor_set_layout: vk.DescriptorSetLayout,
-    pipeline_layout: vk.PipelineLayout,
+    descriptor_set_layout: vk.DescriptorSetLayout, // TODO: rename to reflect usage: texture_heap_set_layout?
 
     pending_general_layout_transitions: std.array_hash_map.Auto(vk.Image, Texture.Desc),
 
@@ -588,19 +587,6 @@ pub const Device = struct {
         binding.descriptor_count = variable_support.max_variable_descriptor_count;
         const descriptor_set_layout = try device.createDescriptorSetLayout(&layout_info, null);
 
-        const push_constant_ranges: []const vk.PushConstantRange = &.{.{
-            .stage_flags = .{ .vertex_bit = true, .fragment_bit = true, .compute_bit = true },
-            .offset = 0,
-            .size = @sizeOf(vk.DeviceAddress) * 2,
-        }};
-        const create_info: vk.PipelineLayoutCreateInfo = .{
-            .push_constant_range_count = push_constant_ranges.len,
-            .p_push_constant_ranges = push_constant_ranges.ptr,
-            .set_layout_count = 1,
-            .p_set_layouts = &.{descriptor_set_layout},
-        };
-        const pipeline_layout = try device.createPipelineLayout(&create_info, null);
-
         const queue_families = try findQueueFamilies(arena, adapter.physical_device, instance.instance.wrapper);
 
         var command_pools: std.EnumArray(Queue.Type, vk.CommandPool) = .initUndefined();
@@ -634,7 +620,6 @@ pub const Device = struct {
             .heap = .{ .entries = .empty },
             .descriptor_buffer_properties = null,
             .descriptor_set_layout = descriptor_set_layout,
-            .pipeline_layout = pipeline_layout,
             .pending_general_layout_transitions = .empty,
             .free_command_buffers = .initFill(.empty),
             .in_flight_command_buffers = .empty,
@@ -646,7 +631,6 @@ pub const Device = struct {
     pub fn destroy(d: *Device) void {
         d.device.deviceWaitIdle() catch {};
         for (d.command_pools.values) |pool| d.device.destroyCommandPool(pool, null);
-        d.device.destroyPipelineLayout(d.pipeline_layout, null);
         d.device.destroyDescriptorSetLayout(d.descriptor_set_layout, null);
         d.device.destroyDevice(null);
         d.gpa.destroy(d.device.wrapper);
@@ -1314,6 +1298,15 @@ pub const Stage = packed struct {
     raster_depth_out: bool = false,
     pixel_shader: bool = false,
     vertex_shader: bool = false,
+
+    pub const all: Stage = .{
+        .transfer = true,
+        .compute = true,
+        .raster_color_out = true,
+        .raster_depth_out = true,
+        .pixel_shader = true,
+        .vertex_shader = true,
+    };
 };
 
 pub const Hazard = packed struct {
@@ -1325,6 +1318,10 @@ pub const Hazard = packed struct {
 pub const CommandBuffer = struct {
     command_buffer: vk.CommandBuffer,
     queue_type: Queue.Type,
+
+    pipeline_layout: vk.PipelineLayout = .null_handle,
+    pipeline_bind_point: vk.PipelineBindPoint = undefined,
+    texture_heap_ptr: ?vk.DeviceAddress = null,
 
     pub const RenderPassDesc = struct {
         depth_target: DepthTarget = .{},
@@ -1377,42 +1374,44 @@ pub const CommandBuffer = struct {
         first_instance: u32 = 0,
     };
 
-    pub fn setActiveTextureHeapPtr(command_buffer: CommandBuffer, d: Device, heap_ptr: Slice(u8, .{})) void {
+    pub fn setActiveTextureHeapPtr(
+        command_buffer: *CommandBuffer,
+        d: Device,
+        heap_ptr: Slice(u8, .{}),
+    ) void {
+        const address: vk.DeviceAddress = heap_ptr.ptr.addr;
+        if (command_buffer.texture_heap_ptr == address) return;
         const binding_info: vk.DescriptorBufferBindingInfoEXT = .{
-            .address = heap_ptr.ptr.addr,
+            .address = address,
             .usage = .{ .resource_descriptor_buffer_bit_ext = true },
         };
         d.device.cmdBindDescriptorBuffersEXT(
             command_buffer.command_buffer,
             &.{binding_info},
         );
-
-        const indices = [_]u32{0};
-        const offsets = [_]vk.DeviceSize{0};
-        d.device.cmdSetDescriptorBufferOffsetsEXT(
-            command_buffer.command_buffer,
-            .compute,
-            d.pipeline_layout,
-            0,
-            &indices,
-            &offsets,
-        );
-        d.device.cmdSetDescriptorBufferOffsetsEXT(
-            command_buffer.command_buffer,
-            .graphics,
-            d.pipeline_layout,
-            0,
-            &indices,
-            &offsets,
-        );
+        command_buffer.texture_heap_ptr = address;
+        if (command_buffer.pipeline_layout != .null_handle) {
+            command_buffer.setDescriptorBufferOffsets(d);
+        }
     }
 
-    pub fn setPipeline(command_buffer: CommandBuffer, d: Device, pipeline: Pipeline) void {
+    pub fn setPipeline(command_buffer: *CommandBuffer, d: Device, pipeline: Pipeline) void {
         d.device.cmdBindPipeline(
             command_buffer.command_buffer,
             pipeline.bind_point,
             pipeline.pipeline,
         );
+        command_buffer.pipeline_layout = pipeline.pipeline_layout;
+        command_buffer.pipeline_bind_point = pipeline.bind_point;
+        d.device.cmdBindDescriptorBufferEmbeddedSamplersEXT(
+            command_buffer.command_buffer,
+            pipeline.bind_point,
+            pipeline.pipeline_layout,
+            1,
+        );
+        if (command_buffer.texture_heap_ptr != null) {
+            command_buffer.setDescriptorBufferOffsets(d);
+        }
     }
 
     pub fn dispatch(
@@ -1424,8 +1423,8 @@ pub const CommandBuffer = struct {
         const address: vk.DeviceAddress = data.addr;
         d.device.cmdPushConstants(
             command_buffer.command_buffer,
-            d.pipeline_layout,
-            .{ .vertex_bit = true, .fragment_bit = true, .compute_bit = true },
+            command_buffer.pipeline_layout,
+            .{ .compute_bit = true },
             0,
             @sizeOf(vk.DeviceAddress),
             std.mem.asBytes(&address),
@@ -1474,7 +1473,7 @@ pub const CommandBuffer = struct {
         d.device.cmdPipelineBarrier2(command_buffer.command_buffer, &dependency_info);
     }
 
-    /// 256 bytes is a typical optimal alignment
+    /// 256 bytes is a typical optimal alignment for dest
     pub fn copyTextureToBuffer(
         command_buffer: CommandBuffer,
         d: *Device,
@@ -1509,6 +1508,42 @@ pub const CommandBuffer = struct {
             .p_regions = (&region)[0..1],
         };
         d.device.cmdCopyImageToBuffer2(command_buffer.command_buffer, &info);
+    }
+
+    pub fn copyBufferToTexture(
+        command_buffer: CommandBuffer,
+        d: *Device,
+        dest: Slice(u8, .{}),
+        src: Slice(u8, .{}),
+        texture: Texture,
+    ) void {
+        _ = src;
+        const entry, const offset = d.heap.addrToEntryAndOffset(dest.ptr.addr);
+        const region: vk.BufferImageCopy2 = .{
+            .buffer_offset = offset,
+            .buffer_row_length = 0,
+            .buffer_image_height = 0,
+            .image_subresource = .{
+                .aspect_mask = .{ .color_bit = true },
+                .mip_level = 0,
+                .base_array_layer = 0,
+                .layer_count = texture.info.layer_count,
+            },
+            .image_offset = .{ .x = 0, .y = 0, .z = 0 },
+            .image_extent = .{
+                .width = texture.info.dimensions[0],
+                .height = texture.info.dimensions[1],
+                .depth = texture.info.dimensions[2],
+            },
+        };
+        const info: vk.CopyBufferToImageInfo2 = .{
+            .dst_image = texture.image,
+            .dst_image_layout = .general,
+            .src_buffer = entry.buffer,
+            .region_count = 1,
+            .p_regions = (&region)[0..1],
+        };
+        d.device.cmdCopyBufferToImage2(command_buffer.command_buffer, &info);
     }
 
     pub fn beginRenderPass(cb: CommandBuffer, d: Device, desc: RenderPassDesc) void {
@@ -1640,20 +1675,8 @@ pub const CommandBuffer = struct {
         instance_count: u32,
     ) void {
         cb.pushRootPointers(d, vertex_data.addr, pixel_data.addr);
-        cb.bindIndexPointer(d, indices);
+        cb.bindIndexPointer(d, index_type, indices);
         d.device.cmdDrawIndexed(cb.command_buffer, index_count, instance_count, 0, 0, 0);
-    }
-
-    fn pushRootPointers(cb: CommandBuffer, d: Device, vertex_data: u64, pixel_data: u64) void {
-        const addresses = [2]u64{ vertex_data, pixel_data };
-        d.device.cmdPushConstants(
-            cb.command_buffer,
-            d.pipeline_layout,
-            .{ .vertex_bit = true, .fragment_bit = true, .compute_bit = true },
-            0,
-            @sizeOf(vk.DeviceAddress) * 2,
-            std.mem.asBytes(&addresses),
-        );
     }
 
     pub fn drawIndexedInstancedIndirect(
@@ -1669,7 +1692,7 @@ pub const CommandBuffer = struct {
         args: Ptr(.one, DrawIndexedArgs, .{ .@"const" = true }),
     ) void {
         cb.pushRootPointers(d, vertex_data.addr, pixel_data.addr);
-        cb.bindIndexPointer(d, indices);
+        cb.bindIndexPointer(d, index_type, indices);
         const entry, const offset = d.heap.addrToEntryAndOffset(args.addr);
         d.device.cmdDrawIndexedIndirect(
             cb.command_buffer,
@@ -1677,6 +1700,18 @@ pub const CommandBuffer = struct {
             offset,
             1,
             @sizeOf(DrawIndexedArgs),
+        );
+    }
+
+    fn pushRootPointers(cb: CommandBuffer, d: Device, vertex_data: u64, pixel_data: u64) void {
+        const addresses = [2]u64{ vertex_data, pixel_data };
+        d.device.cmdPushConstants(
+            cb.command_buffer,
+            cb.pipeline_layout,
+            .{ .vertex_bit = true, .fragment_bit = true },
+            0,
+            @sizeOf(vk.DeviceAddress) * 2,
+            std.mem.asBytes(&addresses),
         );
     }
 
@@ -1692,6 +1727,17 @@ pub const CommandBuffer = struct {
         };
         const entry, const offset = d.heap.addrToEntryAndOffset(indices_addr);
         d.device.cmdBindIndexBuffer(cb.command_buffer, entry.buffer, offset, vk_index_type);
+    }
+
+    fn setDescriptorBufferOffsets(command_buffer: CommandBuffer, d: Device) void {
+        d.device.cmdSetDescriptorBufferOffsetsEXT(
+            command_buffer.command_buffer,
+            command_buffer.pipeline_bind_point,
+            command_buffer.pipeline_layout,
+            0,
+            &.{0},
+            &.{0},
+        );
     }
 };
 
@@ -1832,6 +1878,31 @@ pub const Texture = struct {
         return descriptor;
     }
 
+    pub fn viewDescriptor(
+        texture: *Texture,
+        d: *Device,
+        view_info: ViewInfo,
+    ) !Descriptor {
+        const view = texture.views.get(view_info) orelse blk: {
+            const view = try createView(d, texture.image, texture.info, view_info);
+            try texture.views.put(d.gpa, view_info, view);
+            break :blk view;
+        };
+        const image_info: vk.DescriptorImageInfo = .{
+            .image_view = view,
+            .image_layout = .general,
+            .sampler = .null_handle,
+        };
+        const get_info: vk.DescriptorGetInfoEXT = .{
+            .type = .sampled_image,
+            .data = .{ .p_sampled_image = &image_info },
+        };
+        const properties = d.descriptorBufferProperties();
+        var descriptor: Descriptor = .{ .data = @splat(0) };
+        d.device.getDescriptorEXT(&get_info, properties.sampled_image_descriptor_size, @ptrCast(&descriptor.data));
+        return descriptor;
+    }
+
     fn vkImageInfo(info: Desc) vk.ImageCreateInfo {
         return .{
             .image_type = to_vk.textureType(info.type),
@@ -1870,7 +1941,11 @@ pub const Texture = struct {
 
 pub const Pipeline = struct {
     pipeline: vk.Pipeline,
+    pipeline_layout: vk.PipelineLayout,
     bind_point: vk.PipelineBindPoint,
+
+    samplers: []vk.Sampler,
+    sampler_set_layout: vk.DescriptorSetLayout,
 
     pub fn createCompute(d: Device, ir: []const u32) !Pipeline {
         const module_info: vk.ShaderModuleCreateInfo = .{
@@ -1879,21 +1954,59 @@ pub const Pipeline = struct {
         };
         const module = try d.device.createShaderModule(&module_info, null);
         defer d.device.destroyShaderModule(module, null);
+        const stage: vk.PipelineShaderStageCreateInfo = .{
+            .stage = .{ .compute_bit = true },
+            .module = module,
+            .p_name = "main",
+        };
+
+        // TODO: placeholder sampler creation
+        const sampler_info: vk.SamplerCreateInfo = .{
+            .mag_filter = .nearest,
+            .min_filter = .nearest,
+            .mipmap_mode = .nearest,
+            .address_mode_u = .repeat,
+            .address_mode_v = .repeat,
+            .address_mode_w = .repeat,
+            .mip_lod_bias = 0,
+            .anisotropy_enable = .false,
+            .max_anisotropy = 0,
+            .compare_enable = .false,
+            .compare_op = .never,
+            .min_lod = 0,
+            .max_lod = 0,
+            .border_color = .float_transparent_black,
+            .unnormalized_coordinates = .false,
+        };
+        const sampler = try d.device.createSampler(&sampler_info, null);
+        const samplers = try d.gpa.alloc(vk.Sampler, 1);
+        samplers[0] = sampler;
+
+        const push_constant_ranges = [_]vk.PushConstantRange{.{
+            .stage_flags = .{ .compute_bit = true },
+            .offset = 0,
+            .size = @sizeOf(vk.DeviceAddress),
+        }};
+        const sampler_set_layout = try createSamplerSetLayout(d, samplers);
+        const pipeline_layout = try createPipelineLayout(d, sampler_set_layout, &push_constant_ranges);
 
         const info: vk.ComputePipelineCreateInfo = .{
             .flags = .{ .descriptor_buffer_bit_ext = true },
-            .stage = .{
-                .stage = .{ .compute_bit = true },
-                .module = module,
-                .p_name = "main",
-            },
-            .layout = d.pipeline_layout,
+            .stage = stage,
+            .layout = pipeline_layout,
             .base_pipeline_index = -1,
         };
         var pipeline: vk.Pipeline = undefined;
         _ = try d.device.createComputePipelines(.null_handle, &.{info}, null, (&pipeline)[0..1]);
 
-        return .{ .pipeline = pipeline, .bind_point = .compute };
+        return .{
+            .pipeline = pipeline,
+            .pipeline_layout = pipeline_layout,
+            .bind_point = .compute,
+
+            .samplers = samplers,
+            .sampler_set_layout = sampler_set_layout,
+        };
     }
 
     pub const RasterDesc = struct {
@@ -2097,6 +2210,39 @@ pub const Pipeline = struct {
             .p_dynamic_states = &dynamic_states,
         };
 
+        // TODO: placeholder sampler creation
+        const sampler_info: vk.SamplerCreateInfo = .{
+            .mag_filter = .nearest,
+            .min_filter = .nearest,
+            .mipmap_mode = .nearest,
+            .address_mode_u = .repeat,
+            .address_mode_v = .repeat,
+            .address_mode_w = .repeat,
+            .mip_lod_bias = 0,
+            .anisotropy_enable = .false,
+            .max_anisotropy = 0,
+            .compare_enable = .false,
+            .compare_op = .never,
+            .min_lod = 0,
+            .max_lod = 0,
+            .border_color = .float_transparent_black,
+            .unnormalized_coordinates = .false,
+        };
+        const sampler = try d.device.createSampler(&sampler_info, null);
+        const samplers = try d.gpa.alloc(vk.Sampler, 1);
+        samplers[0] = sampler;
+
+        const push_constant_ranges = [_]vk.PushConstantRange{.{
+            .stage_flags = .{
+                .vertex_bit = true,
+                .fragment_bit = true,
+            },
+            .offset = 0,
+            .size = @sizeOf(vk.DeviceAddress) * 2,
+        }};
+        const sampler_set_layout = try createSamplerSetLayout(d, samplers);
+        const pipeline_layout = try createPipelineLayout(d, sampler_set_layout, &push_constant_ranges);
+
         const rendering_info: vk.PipelineRenderingCreateInfo = .{
             .view_mask = 0,
             .color_attachment_count = @intCast(desc.color_targets.len),
@@ -2117,7 +2263,7 @@ pub const Pipeline = struct {
             .p_depth_stencil_state = &depth_stencil,
             .p_color_blend_state = &color_blend,
             .p_dynamic_state = &dynamic_state,
-            .layout = d.pipeline_layout,
+            .layout = pipeline_layout,
             .render_pass = .null_handle,
             .subpass = 0,
             .base_pipeline_index = -1,
@@ -2125,12 +2271,60 @@ pub const Pipeline = struct {
         var pipeline: vk.Pipeline = undefined;
         _ = try d.device.createGraphicsPipelines(.null_handle, &.{info}, null, (&pipeline)[0..1]);
 
-        return .{ .pipeline = pipeline, .bind_point = .graphics };
+        return .{
+            .pipeline = pipeline,
+            .pipeline_layout = pipeline_layout,
+            .bind_point = .graphics,
+
+            .samplers = samplers,
+            .sampler_set_layout = sampler_set_layout,
+        };
     }
 
     pub fn destroy(pipeline: *Pipeline, d: Device) void {
         d.device.destroyPipeline(pipeline.pipeline, null);
+        d.device.destroyPipelineLayout(pipeline.pipeline_layout, null);
+        d.device.destroyDescriptorSetLayout(pipeline.sampler_set_layout, null);
+        for (pipeline.samplers) |sampler| d.device.destroySampler(sampler, null);
+        d.gpa.free(pipeline.samplers);
         pipeline.* = undefined;
+    }
+
+    fn createSamplerSetLayout(d: Device, samplers: []const vk.Sampler) !vk.DescriptorSetLayout {
+        const sampler_binding: vk.DescriptorSetLayoutBinding = .{
+            .binding = 0,
+            .descriptor_type = .sampler,
+            .descriptor_count = @intCast(samplers.len),
+            .stage_flags = .{ .vertex_bit = true, .fragment_bit = true, .compute_bit = true },
+            .p_immutable_samplers = samplers.ptr,
+        };
+        const sampler_layout_info: vk.DescriptorSetLayoutCreateInfo = .{
+            .flags = .{
+                .descriptor_buffer_bit_ext = true,
+                .embedded_immutable_samplers_bit_ext = true,
+            },
+            .binding_count = 1,
+            .p_bindings = &.{sampler_binding},
+        };
+        return try d.device.createDescriptorSetLayout(&sampler_layout_info, null);
+    }
+
+    fn createPipelineLayout(
+        d: Device,
+        sampler_set_layout: vk.DescriptorSetLayout,
+        push_constant_ranges: []const vk.PushConstantRange,
+    ) !vk.PipelineLayout {
+        const set_layouts = [_]vk.DescriptorSetLayout{
+            d.descriptor_set_layout,
+            sampler_set_layout,
+        };
+        const pipeline_layout_info: vk.PipelineLayoutCreateInfo = .{
+            .push_constant_range_count = @intCast(push_constant_ranges.len),
+            .p_push_constant_ranges = push_constant_ranges.ptr,
+            .set_layout_count = set_layouts.len,
+            .p_set_layouts = &set_layouts,
+        };
+        return try d.device.createPipelineLayout(&pipeline_layout_info, null);
     }
 };
 

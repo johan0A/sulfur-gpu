@@ -37,7 +37,7 @@ pub fn main(init: std.process.Init) !void {
     defer gpu_arena_impl.deinit(gpu_gpa);
     const gpu_arena = gpu_arena_impl.allocator();
 
-    const queue: gpu.Queue = .create(device, .graphics);
+    var queue: gpu.Queue = .create(device, .graphics);
 
     var surface: gpu.vk.SurfaceKHR = undefined;
     if (!c.SDL_Vulkan_CreateSurface(window, @ptrFromInt(@intFromEnum(device.instance.handle)), null, @ptrCast(&surface))) return error.engine_init_failure;
@@ -62,29 +62,79 @@ pub fn main(init: std.process.Init) !void {
 
     const descriptor_size_and_align = gpu.Texture.Descriptor.sizeAndHeapAlignment(&device);
     const heap_gpu = try gpu_arena.runtimeAlignedAlloc(u8, descriptor_size_and_align.alignment, descriptor_size_and_align.size * 65536, .default);
+    const heap_gpu_cpu = device.deviceToHostPointer(heap_gpu);
 
-    const positions_gpu = try gpu_arena.alloc([3]f32, 3, .default);
+    const vetex_count = 6;
+
+    const positions_gpu = try gpu_arena.alloc([3]f32, vetex_count, .default);
     const positions_cpu: [][3]f32 = device.deviceToHostPointer(positions_gpu);
     @memcpy(positions_cpu, @as([]const [3]f32, &.{
         .{ -1, 1, 0 },
-        .{ 0, -1, 0 },
+        .{ -1, -1, 0 },
+        .{ 1, -1, 0 },
+
+        .{ -1, 1, 0 },
+        .{ 1, -1, 0 },
         .{ 1, 1, 0 },
     }));
 
-    const colors_gpu = try gpu_arena.alloc([3]f32, 3, .default);
-    const colors_cpu: [][3]f32 = device.deviceToHostPointer(colors_gpu);
-    @memcpy(colors_cpu, @as([]const [3]f32, &.{
-        .{ 0, 0, 1 },
-        .{ 0, 1, 0 },
-        .{ 1, 0, 0 },
+    const uvs_gpu = try gpu_arena.alloc([2]f32, vetex_count, .default);
+    const uvs_cpu: [][2]f32 = device.deviceToHostPointer(uvs_gpu);
+    @memcpy(uvs_cpu, @as([]const [2]f32, &.{
+        .{ 0, 0 },
+        .{ 0, 1 },
+        .{ 1, 1 },
+
+        .{ 0, 0 },
+        .{ 1, 1 },
+        .{ 1, 0 },
     }));
 
     const data_gpu = try gpu_arena.create(Data, .default);
     const data_cpu: *Data = device.deviceToHostPointer(data_gpu);
     data_cpu.* = .{
         .positions = positions_gpu.ptr,
-        .colors = colors_gpu.ptr,
+        .uvs = uvs_gpu.ptr,
     };
+
+    const dimensions: [3]u32 = .{ 256, 256, 1 };
+    const texture_info: gpu.Texture.Desc = .{
+        .dimensions = dimensions,
+        .format = .rgba8_unorm,
+        .usage = .{ .sampled = true },
+    };
+
+    const texture_size_align = gpu.Texture.sizeAndAlignment(device, texture_info);
+    const texture_gpu = try gpu_arena.runtimeAlignedAlloc(u8, texture_size_align.alignment, texture_size_align.size, .gpu);
+
+    var texture: gpu.Texture = try .create(&device, texture_info, texture_gpu);
+    defer texture.destroy(&device);
+
+    const texture_upload_gpu = try gpu_arena.alloc(u8, dimensions[0] * dimensions[1] * 4, .default);
+    const texture_upload_cpu = device.deviceToHostPointer(texture_upload_gpu);
+    @memset(texture_upload_cpu, 255);
+
+    for (0..@min(dimensions[0], dimensions[1])) |i| {
+        const offset = (i * dimensions[0] + i) * 4;
+
+        texture_upload_cpu[offset + 0] = 0;
+        texture_upload_cpu[offset + 1] = 0;
+        texture_upload_cpu[offset + 2] = 0;
+        texture_upload_cpu[offset + 3] = 255;
+    }
+
+    const upload_command_buffer = try queue.startRecording(&device);
+
+    upload_command_buffer.copyBufferToTexture(&device, texture_upload_gpu, texture_gpu, texture);
+
+    const texture_descriptor = try texture.viewDescriptor(&device, .{ .format = .rgba8_unorm });
+    texture_descriptor.store(&device, heap_gpu_cpu, 0);
+
+    var upload_semaphore: gpu.Semaphore = try .create(device, 0);
+    defer upload_semaphore.destroy(device);
+    upload_command_buffer.barrier(device, .{ .transfer = true }, .all, .{ .descriptors = true });
+    try queue.submitAndSignal(&device, &.{upload_command_buffer}, upload_semaphore, 1);
+    try upload_semaphore.wait(device, 1);
 
     const frag align(@alignOf(u32)) = @embedFile("frag.spv").*;
     const vert align(@alignOf(u32)) = @embedFile("vert.spv").*;
@@ -124,7 +174,7 @@ pub fn main(init: std.process.Init) !void {
 
         cb.setPipeline(device, pipeline);
 
-        cb.draw(device, .cast(data_gpu), .cast(data_gpu), 3, 1);
+        cb.draw(device, .cast(data_gpu), .cast(data_gpu), vetex_count, 1);
 
         cb.endRenderPass(device);
 
@@ -139,7 +189,7 @@ pub fn main(init: std.process.Init) !void {
 
 const Data = extern struct {
     positions: gpu.Ptr(.many, [3]f32, .{}),
-    colors: gpu.Ptr(.many, [3]f32, .{}),
+    uvs: gpu.Ptr(.many, [2]f32, .{}),
 };
 
 const FRAMES_IN_FLIGHT = 2;

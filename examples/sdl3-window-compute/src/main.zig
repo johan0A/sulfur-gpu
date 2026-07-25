@@ -10,12 +10,7 @@ pub fn main(init: std.process.Init) !void {
     var width: c_int = 512;
     var height: c_int = 512;
 
-    const window = c.SDL_CreateWindow(
-        "title",
-        width,
-        height,
-        c.SDL_WINDOW_VULKAN | c.SDL_WINDOW_RESIZABLE,
-    ) orelse @panic("");
+    const window = c.SDL_CreateWindow("title", width, height, c.SDL_WINDOW_VULKAN | c.SDL_WINDOW_RESIZABLE) orelse @panic("");
 
     const sdl_required_extensions = blk: {
         var sdl_required_extensions_count: u32 = undefined;
@@ -105,9 +100,9 @@ pub fn main(init: std.process.Init) !void {
             .time = @floatCast(time),
         };
 
-        const cb = try queue.startRecording(&device);
-        cb.setActiveTextureHeapPtr(device, heap_gpu);
+        var cb = try queue.startRecording(&device);
         cb.setPipeline(device, pipeline);
+        cb.setActiveTextureHeapPtr(device, heap_gpu);
         cb.dispatch(device, .cast(data_gpu), .{
             @intCast(@divFloor((width + 7), 8)),
             @intCast(@divFloor((height + 7), 8)),
