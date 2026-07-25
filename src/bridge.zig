@@ -277,6 +277,7 @@ pub const to_vk = struct {
         // }
         return out;
     }
+
     pub fn textureType(tex: gpu.Texture.Type) vk.ImageType {
         return switch (tex) {
             .@"1d" => .@"1d",
@@ -336,58 +337,6 @@ pub const to_vk = struct {
         return switch (op) {
             .dont_care => .dont_care,
             .store => .store,
-        };
-    }
-
-    pub fn compareOp(op: gpu.Op) vk.CompareOp {
-        return switch (op) {
-            .never => .never,
-            .less => .less,
-            .equal => .equal,
-            .less_equal => .less_or_equal,
-            .greater => .greater,
-            .not_equal => .not_equal,
-            .greater_equal => .greater_or_equal,
-            .always => .always,
-        };
-    }
-
-    pub fn stencilOp(op: gpu.StencilOp) vk.StencilOp {
-        return switch (op) {
-            .keep => .keep,
-            .zero => .zero,
-            .replace => .replace,
-            .increment_clamp => .increment_and_clamp,
-            .decrement_clamp => .decrement_and_clamp,
-            .invert => .invert,
-            .increment_wrap => .increment_and_wrap,
-            .decrement_wrap => .decrement_and_wrap,
-        };
-    }
-
-    pub fn indexType(t: gpu.IndexType) vk.IndexType {
-        switch (t) {
-            .u_int16 => .uint_16,
-            .u_int32 => .uint_32,
-        }
-    }
-
-    pub fn blendDesc(state: *const gpu.BlendDesc) vk.PipelineColorBlendAttachmentState {
-        const blend_disabled: bool =
-            state.color_op == .add and state.src_color_factor == .one and
-            state.dst_color_factor == .zero and state.alpha_op == .add and
-            state.src_alpha_factor == .one and state.dst_color_factor == .zero;
-
-        comptime std.debug.assert(@TypeOf(state.color_write_mask) == u8); //TODO: fix code bellow
-        return vk.PipelineColorBlendAttachmentState{
-            .blend_enable = if (!blend_disabled) .true else .false,
-            .src_color_blend_factor = blendFactor(state.src_color_factor),
-            .dst_color_blend_factor = blendFactor(state.dst_color_factor),
-            .color_blend_op = blendOp(state.color_op),
-            .src_alpha_blend_factor = blendFactor(state.src_alpha_factor),
-            .dst_alpha_blend_factor = blendFactor(state.dst_alpha_factor),
-            .alpha_blend_op = blendOp(state.alpha_op),
-            .color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true },
         };
     }
 

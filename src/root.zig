@@ -1,4 +1,5 @@
 const std = @import("std");
+const build_options = @import("options");
 pub const vk = @import("vulkan");
 const to_gpu = @import("bridge.zig").to_gpu;
 const to_vk = @import("bridge.zig").to_vk;
@@ -377,14 +378,16 @@ pub const Instance = struct {
         }
 
         const validation_layer = "VK_LAYER_KHRONOS_validation";
-
-        const enable_validation_layers = true; // TODO: enable from build.zig
+        var enable_validation_layers = build_options.validation_layers;
 
         if (enable_validation_layers) {
             const available_layers = try base_dispatch.enumerateInstanceLayerPropertiesAlloc(arena);
             for (available_layers) |available_layer| {
                 if (std.mem.eql(u8, std.mem.sliceTo(&available_layer.layer_name, 0), validation_layer)) break;
-            } else std.debug.panic("validation layers unsupported", .{});
+            } else {
+                std.log.warn("vulkan validation layers unsupported", .{});
+                enable_validation_layers = false;
+            }
         }
 
         var extensions: std.ArrayList([*:0]const u8) = .empty;
