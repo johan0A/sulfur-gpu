@@ -469,7 +469,7 @@ pub const Device = struct {
 
     descriptor_buffer_properties: ?vk.PhysicalDeviceDescriptorBufferPropertiesEXT,
 
-    descriptor_set_layout: vk.DescriptorSetLayout, // TODO: rename to reflect usage: texture_heap_set_layout?
+    texture_heap_set_layout: vk.DescriptorSetLayout,
 
     pending_general_layout_transitions: std.array_hash_map.Auto(vk.Image, Texture.Desc),
 
@@ -639,7 +639,7 @@ pub const Device = struct {
             .gpa = gpa,
             .heap = .{ .entries = .empty },
             .descriptor_buffer_properties = null,
-            .descriptor_set_layout = descriptor_set_layout,
+            .texture_heap_set_layout = descriptor_set_layout,
             .pending_general_layout_transitions = .empty,
             .free_command_buffers = .initFill(.empty),
             .pending_command_buffers = .initFill(.empty),
@@ -652,7 +652,7 @@ pub const Device = struct {
         d.device.deviceWaitIdle() catch {};
         for (&d.queue_timelines.values) |*t| t.semaphore.destroy(d.*);
         for (d.command_pools.values) |pool| d.device.destroyCommandPool(pool, null);
-        d.device.destroyDescriptorSetLayout(d.descriptor_set_layout, null);
+        d.device.destroyDescriptorSetLayout(d.texture_heap_set_layout, null);
         d.device.destroyDevice(null);
         d.gpa.destroy(d.device.wrapper);
         // TODO: make a debug gpa and uncomment next line
@@ -931,45 +931,6 @@ pub const Queue = struct {
         const begin_info: vk.CommandBufferBeginInfo = .{ .flags = .{ .one_time_submit_bit = true } };
         try d.device.beginCommandBuffer(command_buffer.command_buffer, &begin_info);
 
-        var image_it = d.pending_general_layout_transitions.iterator();
-        const image_count = d.pending_general_layout_transitions.count();
-        if (image_count != 0) {
-            const barriers = try d.gpa.alloc(vk.ImageMemoryBarrier2, image_count);
-            defer d.gpa.free(barriers);
-
-            for (barriers) |*b| {
-                const item = image_it.next() orelse break;
-                const image = item.key_ptr.*;
-                const info = item.value_ptr.*;
-                b.* = .{
-                    .dst_stage_mask = .{ .all_commands_bit = true },
-                    .dst_access_mask = .{ .memory_read_bit = true, .memory_write_bit = true },
-                    .old_layout = .undefined,
-                    .new_layout = .general,
-                    .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                    .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                    .image = image,
-                    .subresource_range = .{
-                        .aspect_mask = to_vk.aspectsForFormat(info.format),
-                        .base_mip_level = 0,
-                        .level_count = info.mip_count,
-                        .base_array_layer = 0,
-                        .layer_count = info.layer_count,
-                    },
-                };
-            }
-
-            const dependency_info: vk.DependencyInfo = .{
-                .image_memory_barrier_count = @intCast(barriers.len),
-                .p_image_memory_barriers = barriers.ptr,
-            };
-            d.device.cmdPipelineBarrier2(
-                command_buffer.command_buffer,
-                &dependency_info,
-            );
-            d.pending_general_layout_transitions.clearRetainingCapacity();
-        }
-
         return command_buffer;
     }
 
@@ -1002,9 +963,69 @@ pub const Queue = struct {
         command_buffers: []const CommandBuffer,
         extra_signal: ?Signal,
     ) !void {
-        errdefer for (command_buffers) |command_buffer|
-            d.releaseCommandBuffer(command_buffer);
+        errdefer for (command_buffers) |command_buffer| d.releaseCommandBuffer(command_buffer);
+        try queue.submitPendingGeneralLayoutTransitions(d);
+        try queue.submitRecordedCommandBuffers(d, command_buffers, extra_signal);
+    }
 
+    fn submitPendingGeneralLayoutTransitions(queue: Queue, d: *Device) !void {
+        const image_count = d.pending_general_layout_transitions.count();
+        if (image_count == 0) return;
+
+        const barriers = try d.gpa.alloc(vk.ImageMemoryBarrier2, image_count);
+        defer d.gpa.free(barriers);
+
+        var image_it = d.pending_general_layout_transitions.iterator();
+
+        for (barriers) |*barrier| {
+            const item = image_it.next().?;
+            const image = item.key_ptr.*;
+            const info = item.value_ptr.*;
+
+            barrier.* = .{
+                .dst_stage_mask = .{
+                    .all_commands_bit = true,
+                },
+                .dst_access_mask = .{
+                    .memory_read_bit = true,
+                    .memory_write_bit = true,
+                },
+                .old_layout = .undefined,
+                .new_layout = .general,
+                .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                .image = image,
+                .subresource_range = .{
+                    .aspect_mask = to_vk.aspectsForFormat(info.format),
+                    .base_mip_level = 0,
+                    .level_count = info.mip_count,
+                    .base_array_layer = 0,
+                    .layer_count = info.layer_count,
+                },
+            };
+        }
+
+        const command_buffer = try queue.startRecording(d);
+
+        errdefer d.releaseCommandBuffer(command_buffer);
+
+        const dependency_info: vk.DependencyInfo = .{
+            .image_memory_barrier_count = @intCast(barriers.len),
+            .p_image_memory_barriers = barriers.ptr,
+        };
+        d.device.cmdPipelineBarrier2(command_buffer.command_buffer, &dependency_info);
+
+        try queue.submitRecordedCommandBuffers(d, &.{command_buffer}, null);
+
+        d.pending_general_layout_transitions.clearRetainingCapacity();
+    }
+
+    fn submitRecordedCommandBuffers(
+        queue: Queue,
+        d: *Device,
+        command_buffers: []const CommandBuffer,
+        extra_signal: ?Signal,
+    ) !void {
         const submit_buffers = try d.gpa.alloc(vk.CommandBufferSubmitInfo, command_buffers.len);
         defer d.gpa.free(submit_buffers);
         for (command_buffers, submit_buffers) |command_buffer, *submit_buffer| {
@@ -2384,7 +2405,7 @@ pub const Pipeline = struct {
         push_constant_ranges: []const vk.PushConstantRange,
     ) !vk.PipelineLayout {
         const set_layouts = [_]vk.DescriptorSetLayout{
-            d.descriptor_set_layout,
+            d.texture_heap_set_layout,
             sampler_set_layout,
         };
         const pipeline_layout_info: vk.PipelineLayoutCreateInfo = .{
