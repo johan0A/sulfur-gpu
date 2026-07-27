@@ -69,8 +69,7 @@ pub fn main(init: std.process.Init) !void {
     const data_gpu = try gpu_arena.create(Data, .default);
     const data_cpu: *Data = device.deviceToHostPointer(data_gpu);
 
-    const spirv align(@alignOf(u32)) = @embedFile("generate_texture.spv").*;
-    var pipeline: gpu.Pipeline = try .createCompute(device, @ptrCast(&spirv));
+    var pipeline: gpu.Pipeline = try .createCompute(device, @embedFile("generate_texture.spv"));
     defer pipeline.destroy(device);
 
     var start: std.Io.Timestamp = .now(init.io, .real);

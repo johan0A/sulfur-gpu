@@ -3,6 +3,7 @@ const build_options = @import("options");
 pub const vk = @import("vulkan");
 const to_gpu = @import("bridge.zig").to_gpu;
 const to_vk = @import("bridge.zig").to_vk;
+const sfir = @import("sfir.zig");
 
 pub const Allocator = @import("DeviceAllocator.zig");
 
@@ -127,6 +128,119 @@ pub const PresentMode = enum(u8) {
     mailbox,
     fifo,
     fifo_relaxed,
+};
+
+pub const Op = enum(u3) {
+    never = 0,
+    less = 1,
+    equal = 2,
+    less_equal = 3,
+    greater = 4,
+    not_equal = 5,
+    greater_equal = 6,
+    always = 7,
+};
+
+pub const Sampler = packed struct(u64) {
+    min_filter: Filter = .linear,
+    mag_filter: Filter = .linear,
+    mip_filter: MipFilter = .linear,
+
+    address: AddressUVW = .{},
+
+    coord: Coord = .normalized,
+    border_color: BorderColor = .transparent_black,
+    reduction: Reduction = .weighted_average,
+    max_anisotropy: Anisotropy = .x1,
+
+    compare: Compare = .{},
+
+    lod_min: Lod = .min,
+    lod_max: Lod = .max,
+    lod_bias: Bias = .none,
+
+    _pad: u1 = 0,
+
+    pub const Filter = enum(u1) {
+        nearest = 0,
+        linear = 1,
+    };
+
+    pub const MipFilter = enum(u2) {
+        none = 0,
+        nearest = 1,
+        linear = 2,
+    };
+
+    pub const AddressUVW = packed struct(u9) {
+        u: Address = .clamp_to_edge,
+        v: Address = .clamp_to_edge,
+        w: Address = .clamp_to_edge,
+
+        pub fn all(a: Address) AddressUVW {
+            return .{ .u = a, .v = a, .w = a };
+        }
+    };
+
+    pub const Address = enum(u3) {
+        repeat = 0,
+        mirrored_repeat = 1,
+        clamp_to_edge = 2,
+        clamp_to_border = 3,
+    };
+
+    pub const Coord = enum(u1) {
+        normalized = 0,
+        pixel = 1,
+    };
+
+    pub const BorderColor = enum(u2) {
+        transparent_black = 0,
+        opaque_black = 1,
+        opaque_white = 2,
+    };
+
+    pub const Reduction = enum(u2) {
+        weighted_average = 0,
+        minimum = 1,
+        maximum = 2,
+    };
+
+    pub const Anisotropy = enum(u3) {
+        x1 = 0,
+        x2 = 1,
+        x4 = 2,
+        x8 = 3,
+        x16 = 4,
+    };
+
+    pub const Compare = packed struct(u4) {
+        enable: bool = false,
+        op: Op = .never,
+    };
+
+    pub const Lod = enum(u12) {
+        min = 0,
+        max = 0xFFF,
+        _,
+        pub fn of(x: f32) Lod {
+            return @enumFromInt(@as(u12, @intFromFloat(@min(x, 15.996) * 256.0)));
+        }
+        pub fn toF32(self: Lod) f32 {
+            return @as(f32, @floatFromInt(@intFromEnum(self))) / 256.0;
+        }
+    };
+
+    pub const Bias = enum(i14) {
+        none = 0,
+        _,
+        pub fn of(x: f32) Bias {
+            return @enumFromInt(@as(i14, @intFromFloat(x * 256)));
+        }
+        pub fn toF32(self: Bias) f32 {
+            return @as(f32, @floatFromInt(@intFromEnum(self))) / 256;
+        }
+    };
 };
 
 pub const PointerAttributes = struct {
@@ -2043,47 +2157,36 @@ pub const Pipeline = struct {
     samplers: []vk.Sampler,
     sampler_set_layout: vk.DescriptorSetLayout,
 
-    pub fn createCompute(d: Device, ir: []const u32) !Pipeline {
-        const module_info: vk.ShaderModuleCreateInfo = .{
-            .code_size = ir.len * @sizeOf(u32),
-            .p_code = ir.ptr,
-        };
-        const module = try d.device.createShaderModule(&module_info, null);
+    pub fn createCompute(d: Device, ir: []const u8) !Pipeline {
+        const parser = try sfir.parse(ir);
+        const spirv = try parser.spirvAlloc(d.gpa);
+        defer d.gpa.free(spirv);
+        const module = try d.device.createShaderModule(&.{
+            .code_size = spirv.len * @sizeOf(u32),
+            .p_code = spirv.ptr,
+        }, null);
         defer d.device.destroyShaderModule(module, null);
+
         const stage: vk.PipelineShaderStageCreateInfo = .{
             .stage = .{ .compute_bit = true },
             .module = module,
             .p_name = "main",
         };
 
-        // TODO: placeholder sampler creation
-        const sampler_info: vk.SamplerCreateInfo = .{
-            .mag_filter = .nearest,
-            .min_filter = .nearest,
-            .mipmap_mode = .nearest,
-            .address_mode_u = .repeat,
-            .address_mode_v = .repeat,
-            .address_mode_w = .repeat,
-            .mip_lod_bias = 0,
-            .anisotropy_enable = .false,
-            .max_anisotropy = 0,
-            .compare_enable = .false,
-            .compare_op = .never,
-            .min_lod = 0,
-            .max_lod = 0,
-            .border_color = .float_transparent_black,
-            .unnormalized_coordinates = .false,
-        };
-        const sampler = try d.device.createSampler(&sampler_info, null);
-        const samplers = try d.gpa.alloc(vk.Sampler, 1);
-        samplers[0] = sampler;
+        const samplers = try d.gpa.alloc(vk.Sampler, parser.samplerCount());
+        var vertex_sampler_it = parser.samplerIterator();
+        for (samplers) |*sampler| {
+            const sampler_info = vertex_sampler_it.next().?;
+            const sampler_create_info = to_vk.samplerCreateInfo(sampler_info);
+            sampler.* = try d.device.createSampler(&sampler_create_info, null);
+        }
 
         const push_constant_ranges = [_]vk.PushConstantRange{.{
             .stage_flags = .{ .compute_bit = true },
             .offset = 0,
             .size = @sizeOf(vk.DeviceAddress),
         }};
-        const sampler_set_layout = try createSamplerSetLayout(d, samplers);
+        const sampler_set_layout = try createSamplerSetLayout(d, samplers, &.{});
         const pipeline_layout = try createPipelineLayout(d, sampler_set_layout, &push_constant_ranges);
 
         const info: vk.ComputePipelineCreateInfo = .{
@@ -2188,22 +2291,30 @@ pub const Pipeline = struct {
 
     pub fn createGraphics(
         d: Device,
-        vertex_ir: []const u32,
-        pixel_ir: []const u32,
+        vertex_ir: []const u8,
+        pixel_ir: []const u8,
         desc: RasterDesc,
     ) !Pipeline {
         std.debug.assert(desc.color_targets.len <= 8);
 
+        const vertex_parser = try sfir.parse(vertex_ir);
+        const vertex_spirv = try vertex_parser.spirvAlloc(d.gpa);
+        defer d.gpa.free(vertex_spirv);
         const vert_module = try d.device.createShaderModule(&.{
-            .code_size = vertex_ir.len * @sizeOf(u32),
-            .p_code = vertex_ir.ptr,
+            .code_size = vertex_spirv.len * @sizeOf(u32),
+            .p_code = vertex_spirv.ptr,
         }, null);
         defer d.device.destroyShaderModule(vert_module, null);
+
+        const pixel_parser = try sfir.parse(pixel_ir);
+        const pixel_spirv = try pixel_parser.spirvAlloc(d.gpa);
+        defer d.gpa.free(pixel_spirv);
         const frag_module = try d.device.createShaderModule(&.{
-            .code_size = pixel_ir.len * @sizeOf(u32),
-            .p_code = pixel_ir.ptr,
+            .code_size = pixel_spirv.len * @sizeOf(u32),
+            .p_code = pixel_spirv.ptr,
         }, null);
         defer d.device.destroyShaderModule(frag_module, null);
+
         const stages = [_]vk.PipelineShaderStageCreateInfo{
             .{ .stage = .{ .vertex_bit = true }, .module = vert_module, .p_name = "main" },
             .{ .stage = .{ .fragment_bit = true }, .module = frag_module, .p_name = "main" },
@@ -2306,38 +2417,32 @@ pub const Pipeline = struct {
             .p_dynamic_states = &dynamic_states,
         };
 
-        // TODO: placeholder sampler creation
-        const sampler_info: vk.SamplerCreateInfo = .{
-            .mag_filter = .nearest,
-            .min_filter = .nearest,
-            .mipmap_mode = .nearest,
-            .address_mode_u = .repeat,
-            .address_mode_v = .repeat,
-            .address_mode_w = .repeat,
-            .mip_lod_bias = 0,
-            .anisotropy_enable = .false,
-            .max_anisotropy = 0,
-            .compare_enable = .false,
-            .compare_op = .never,
-            .min_lod = 0,
-            .max_lod = 0,
-            .border_color = .float_transparent_black,
-            .unnormalized_coordinates = .false,
-        };
-        const sampler = try d.device.createSampler(&sampler_info, null);
-        const samplers = try d.gpa.alloc(vk.Sampler, 1);
-        samplers[0] = sampler;
+        const samplers = try d.gpa.alloc(
+            vk.Sampler,
+            vertex_parser.samplerCount() + pixel_parser.samplerCount(),
+        );
+        var sampler_i: usize = 0;
+        var vertex_sampler_it = vertex_parser.samplerIterator();
+        while (vertex_sampler_it.next()) |sampler_info| : (sampler_i += 1) {
+            const sampler_create_info = to_vk.samplerCreateInfo(sampler_info);
+            samplers[sampler_i] = try d.device.createSampler(&sampler_create_info, null);
+        }
+        const vertex_samplers = samplers[0..sampler_i];
 
-        const push_constant_ranges = [_]vk.PushConstantRange{.{
-            .stage_flags = .{
-                .vertex_bit = true,
-                .fragment_bit = true,
-            },
+        var pixel_sampler_it = pixel_parser.samplerIterator();
+        while (pixel_sampler_it.next()) |sampler_info| : (sampler_i += 1) {
+            const sampler_create_info = to_vk.samplerCreateInfo(sampler_info);
+            samplers[sampler_i] = try d.device.createSampler(&sampler_create_info, null);
+        }
+        const pixel_samplers = samplers[vertex_samplers.len..sampler_i];
+
+        const push_constant_range: vk.PushConstantRange = .{
+            .stage_flags = .{ .vertex_bit = true, .fragment_bit = true },
             .offset = 0,
             .size = @sizeOf(vk.DeviceAddress) * 2,
-        }};
-        const sampler_set_layout = try createSamplerSetLayout(d, samplers);
-        const pipeline_layout = try createPipelineLayout(d, sampler_set_layout, &push_constant_ranges);
+        };
+        const sampler_set_layout = try createSamplerSetLayout(d, vertex_samplers, pixel_samplers);
+        const pipeline_layout = try createPipelineLayout(d, sampler_set_layout, &.{push_constant_range});
 
         const rendering_info: vk.PipelineRenderingCreateInfo = .{
             .view_mask = 0,
@@ -2386,21 +2491,42 @@ pub const Pipeline = struct {
         pipeline.* = undefined;
     }
 
-    fn createSamplerSetLayout(d: Device, samplers: []const vk.Sampler) !vk.DescriptorSetLayout {
-        const sampler_binding: vk.DescriptorSetLayoutBinding = .{
-            .binding = 0,
-            .descriptor_type = .sampler,
-            .descriptor_count = @intCast(samplers.len),
-            .stage_flags = .{ .vertex_bit = true, .fragment_bit = true, .compute_bit = true },
-            .p_immutable_samplers = samplers.ptr,
-        };
+    fn createSamplerSetLayout(
+        d: Device,
+        samplers: []const vk.Sampler,
+        pixel_samplers: []const vk.Sampler,
+    ) !vk.DescriptorSetLayout {
+        var sampler_bindings: [2]vk.DescriptorSetLayoutBinding = undefined;
+        var sampler_bindings_count: u32 = 0;
+
+        if (samplers.len != 0) {
+            sampler_bindings[sampler_bindings_count] = .{
+                .binding = 0,
+                .descriptor_type = .sampler,
+                .descriptor_count = @intCast(samplers.len),
+                .stage_flags = .{ .vertex_bit = true, .fragment_bit = true, .compute_bit = true },
+                .p_immutable_samplers = samplers.ptr,
+            };
+            sampler_bindings_count += 1;
+        }
+        if (pixel_samplers.len != 0) {
+            sampler_bindings[sampler_bindings_count] = .{
+                .binding = 1,
+                .descriptor_type = .sampler,
+                .descriptor_count = @intCast(pixel_samplers.len),
+                .stage_flags = .{ .vertex_bit = true, .fragment_bit = true, .compute_bit = true },
+                .p_immutable_samplers = pixel_samplers.ptr,
+            };
+            sampler_bindings_count += 1;
+        }
+
         const sampler_layout_info: vk.DescriptorSetLayoutCreateInfo = .{
             .flags = .{
                 .descriptor_buffer_bit_ext = true,
                 .embedded_immutable_samplers_bit_ext = true,
             },
-            .binding_count = 1,
-            .p_bindings = &.{sampler_binding},
+            .binding_count = sampler_bindings_count,
+            .p_bindings = &sampler_bindings,
         };
         return try d.device.createDescriptorSetLayout(&sampler_layout_info, null);
     }

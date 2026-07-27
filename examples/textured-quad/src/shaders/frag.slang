@@ -3,7 +3,7 @@ struct FragmentInput {
     float2 uv : TEXCOORD;
 };
 
-[[vk::binding(0, 1)]]
+[[vk::binding(1, 1)]]
 SamplerState samplers[1];
 
 [[vk::binding(0, 0)]]

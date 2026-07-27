@@ -133,10 +133,7 @@ pub fn main(init: std.process.Init) !void {
     upload_command_buffer.barrier(device, .{ .transfer = true }, .all, .{ .descriptors = true });
     try queue.submit(&device, &.{upload_command_buffer});
 
-    const frag align(@alignOf(u32)) = @embedFile("frag.spv").*;
-    const vert align(@alignOf(u32)) = @embedFile("vert.spv").*;
-
-    var pipeline: gpu.Pipeline = try .createGraphics(device, @ptrCast(&vert), @ptrCast(&frag), .{
+    var pipeline: gpu.Pipeline = try .createGraphics(device, @embedFile("vert.spv"), @embedFile("frag.spv"), .{
         .color_targets = &.{.{ .format = swapchain_format }},
     });
     defer pipeline.destroy(device);

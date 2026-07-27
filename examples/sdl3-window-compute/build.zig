@@ -1,4 +1,5 @@
 const std = @import("std");
+const sulfur = @import("sulfur");
 const zon = @import("build.zig.zon");
 
 pub fn build(b: *std.Build) void {
@@ -18,7 +19,7 @@ pub fn build(b: *std.Build) void {
     root_module.addImport("sulfur", sulfur_dep.module("sulfur"));
     root_module.addImport("VulkanLoader", sulfur_dep.module("VulkanLoader"));
 
-    const compute = compileShader(b, "src/shaders/generate_texture.slang", "main");
+    const compute = sulfur.compileShader(sulfur_dep, b, b.path("src/shaders/generate_texture.slang"), "main", &.{});
     root_module.addAnonymousImport("generate_texture.spv", .{ .root_source_file = compute });
 
     {
@@ -51,25 +52,4 @@ pub fn build(b: *std.Build) void {
         run_step.dependOn(&run.step);
         run_step.dependOn(b.getInstallStep());
     }
-}
-
-fn compileShader(
-    b: *std.Build,
-    src: []const u8,
-    entry: []const u8,
-) std.Build.LazyPath {
-    const command = b.addSystemCommand(&.{
-        "slangc",
-        "-target",
-        "spirv",
-        "-profile",
-        "spirv_1_6",
-        "-fvk-use-entrypoint-name",
-        "-fvk-use-scalar-layout",
-        "-entry",
-        entry,
-    });
-    command.addFileArg(b.path(src));
-    command.addArg("-o");
-    return command.addOutputFileArg("shader.spv");
 }

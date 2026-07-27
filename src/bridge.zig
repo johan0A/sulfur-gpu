@@ -367,4 +367,71 @@ pub const to_vk = struct {
             .none => .{},
         };
     }
+
+    pub fn samplerCreateInfo(s: gpu.Sampler) vk.SamplerCreateInfo {
+        return .{
+            .flags = .{},
+            .mag_filter = filter(s.mag_filter),
+            .min_filter = filter(s.min_filter),
+            .mipmap_mode = samplerMipmapMode(s.mip_filter),
+            .address_mode_u = Address(s.address.u),
+            .address_mode_v = Address(s.address.v),
+            .address_mode_w = Address(s.address.w),
+            .mip_lod_bias = s.lod_bias.toF32(),
+            .anisotropy_enable = if (s.max_anisotropy != .x1) .true else .false,
+            .max_anisotropy = anisotropy(s.max_anisotropy),
+            .compare_enable = if (s.compare.enable) .true else .false,
+            .compare_op = switch (s.compare.op) {
+                .never => .never,
+                .less => .less,
+                .equal => .equal,
+                .less_equal => .less_or_equal,
+                .greater => .greater,
+                .not_equal => .not_equal,
+                .greater_equal => .greater_or_equal,
+                .always => .always,
+            },
+            .min_lod = s.lod_min.toF32(),
+            .max_lod = s.lod_max.toF32(),
+            .border_color = switch (s.border_color) {
+                .transparent_black => .float_transparent_black,
+                .opaque_black => .float_opaque_black,
+                .opaque_white => .float_opaque_white,
+            },
+            .unnormalized_coordinates = switch (s.coord) {
+                .normalized => .false,
+                .pixel => .true,
+            },
+        };
+    }
+
+    pub fn filter(f: gpu.Sampler.Filter) vk.Filter {
+        return switch (f) {
+            .linear => .linear,
+            .nearest => .nearest,
+        };
+    }
+
+    pub fn Address(f: gpu.Sampler.Address) vk.SamplerAddressMode {
+        return switch (f) {
+            .repeat => .repeat,
+            .mirrored_repeat => .mirrored_repeat,
+            .clamp_to_edge => .clamp_to_edge,
+            .clamp_to_border => .clamp_to_border,
+        };
+    }
+
+    pub fn anisotropy(a: gpu.Sampler.Anisotropy) f32 {
+        return @floatFromInt(
+            @as(u32, 1) << @intFromEnum(a),
+        );
+    }
+
+    pub fn samplerMipmapMode(f: gpu.Sampler.MipFilter) vk.SamplerMipmapMode {
+        return switch (f) {
+            .none => .nearest, // TODO
+            .linear => .linear,
+            .nearest => .nearest,
+        };
+    }
 };

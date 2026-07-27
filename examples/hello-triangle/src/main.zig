@@ -86,10 +86,7 @@ pub fn main(init: std.process.Init) !void {
         .colors = colors_gpu.ptr,
     };
 
-    const frag align(@alignOf(u32)) = @embedFile("frag.spv").*;
-    const vert align(@alignOf(u32)) = @embedFile("vert.spv").*;
-
-    var pipeline: gpu.Pipeline = try .createGraphics(device, @ptrCast(&vert), @ptrCast(&frag), .{
+    var pipeline: gpu.Pipeline = try .createGraphics(device, @embedFile("vert.spv"), @embedFile("frag.spv"), .{
         .color_targets = &.{.{ .format = swapchain_format }},
     });
     defer pipeline.destroy(device);

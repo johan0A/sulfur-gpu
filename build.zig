@@ -1,4 +1,5 @@
 const std = @import("std");
+const gpu = @import("src/root.zig");
 
 pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
@@ -36,4 +37,46 @@ pub fn build(b: *std.Build) void {
         const test_step = b.step("test", "Run unit tests");
         test_step.dependOn(&run_tests.step);
     }
+}
+
+pub fn compileShader(
+    sulfur_dep: *std.Build.Dependency,
+    b: *std.Build,
+    src: std.Build.LazyPath,
+    entry: []const u8,
+    samplers: []const gpu.Sampler,
+) std.Build.LazyPath {
+    const command = b.addSystemCommand(&.{
+        "slangc",
+        "-target",
+        "spirv",
+        "-profile",
+        "spirv_1_6",
+        "-fvk-use-entrypoint-name",
+        "-fvk-use-scalar-layout",
+        "-entry",
+        entry,
+    });
+    command.addFileArg(src);
+    command.addArg("-o");
+    const spirv = command.addOutputFileArg("shader.spv");
+
+    const sfir = b.addExecutable(.{
+        .name = "sfir",
+        .root_module = b.createModule(.{
+            .root_source_file = sulfur_dep.path("src/sfir.zig"),
+            .target = b.graph.host,
+            .optimize = .Debug,
+        }),
+    });
+    const run_sfir = b.addRunArtifact(sfir);
+
+    const shader = run_sfir.addOutputFileArg("shader.sfir");
+    run_sfir.addFileArg(spirv);
+    for (samplers) |sampler| {
+        const as_int: u64 = @bitCast(sampler);
+        run_sfir.addArg(&std.fmt.hex(as_int));
+    }
+
+    return shader;
 }

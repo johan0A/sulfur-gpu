@@ -51,8 +51,7 @@ pub fn main(init: std.process.Init) !void {
     const readback_gpu = try gpu_arena.alignedAlloc(u8, .fromByteUnits(256), pixel_buffer_size, .readback);
     const readback_cpu: []u8 = device.deviceToHostPointer(readback_gpu);
 
-    const spirv align(@alignOf(u32)) = @embedFile("generate_texture.spv").*;
-    var pipeline: gpu.Pipeline = try .createCompute(device, @ptrCast(&spirv));
+    var pipeline: gpu.Pipeline = try .createCompute(device, @embedFile("generate_texture.spv"));
     defer pipeline.destroy(device);
 
     var cb = try queue.startRecording(&device);
