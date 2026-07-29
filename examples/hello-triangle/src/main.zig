@@ -17,50 +17,54 @@ pub fn main(init: std.process.Init) !void {
         return error.SDL_Vulkan_GetInstanceExtensionsFailed;
     const sdl_required_extensions = sdl_required_extensions_ptr[0..sdl_required_extensions_count];
 
-    var instance: gpu.Instance = try .create(
+    var instance: *gpu.Instance = .create(
         gpa,
         @ptrCast(c.SDL_Vulkan_GetVkGetInstanceProcAddr()),
         @ptrCast(sdl_required_extensions),
     );
     defer instance.destroy(gpa);
 
-    const adapters = try instance.enumerateAdaptersAlloc(arena);
+    const adapters = instance.enumerateAdaptersAlloc(arena);
 
     // TODO: pick adapter
     const adapter = adapters[0];
 
-    var device: gpu.Device = try .create(gpa, instance, adapter);
+    const device: *gpu.Device = .create(gpa, instance, adapter);
     defer device.destroy();
 
-    const gpu_gpa = gpu.heap.rawDeviceAllocator(&device);
+    const gpu_gpa = gpu.heap.rawDeviceAllocator(device);
     var gpu_arena_impl: gpu.heap.FixedBufferAllocator = try .initAlloc(gpu_gpa, .{}, 1024 * 1024);
     defer gpu_arena_impl.deinit(gpu_gpa);
     const gpu_arena = gpu_arena_impl.allocator();
 
-    const queue: gpu.Queue = .create(device, .graphics);
+    const queue: *gpu.Queue = .create(device, .graphics);
 
-    var surface: gpu.vk.SurfaceKHR = undefined;
-    if (!c.SDL_Vulkan_CreateSurface(window, @ptrFromInt(@intFromEnum(device.instance.handle)), null, @ptrCast(&surface))) return error.engine_init_failure;
-    defer c.SDL_Vulkan_DestroySurface(@ptrFromInt(@intFromEnum(device.instance.handle)), @ptrFromInt(@intFromEnum(surface)), null);
+    const props = c.SDL_GetWindowProperties(window);
+    const hwnd = c.SDL_GetPointerProperty(props, c.SDL_PROP_WINDOW_WIN32_HWND_POINTER, null) orelse @panic("TODO");
+    const hinstance = c.SDL_GetPointerProperty(props, c.SDL_PROP_WINDOW_WIN32_INSTANCE_POINTER, null) orelse @panic("TODO");
 
-    const surface_capabilities = try device.surfaceCapabilities(arena, surface);
+    const surface_desc: gpu.Surface.Win32Desc = .{ .hinstance = hinstance, .hwnd = hwnd };
+    const surface: *gpu.Surface = .createWin32(instance, surface_desc, gpa);
+    defer surface.destroy(instance, gpa);
+
+    const surface_capabilities = device.surfaceCapabilities(arena, surface);
     const swapchain_format = for (surface_capabilities.formats) |f| {
         if (f == .rgba8_unorm_srgb or f == .bgra8_unorm_srgb) break f;
     } else @panic("");
 
-    var frame_semaphore: gpu.Semaphore = try .create(device, 0);
+    var frame_semaphore: *gpu.Semaphore = .create(device, 0);
     defer frame_semaphore.destroy(device);
     var frame_index: u64 = 1;
 
     std.debug.assert(surface_capabilities.usage.color_attachment);
-    var swapchain: gpu.Swapchain = try .create(&device, queue, surface, .{
+    var swapchain: *gpu.Swapchain = .create(device, queue, surface, .{
         .format = swapchain_format,
         .usage = .{ .color_attachment = true },
         .present_mode = .fifo,
     });
-    defer swapchain.destroy(&device);
+    defer swapchain.destroy(device);
 
-    const descriptor_size_and_align = gpu.Texture.Descriptor.sizeAndHeapAlignment(&device);
+    const descriptor_size_and_align = gpu.Texture.Descriptor.sizeAndHeapAlignment(device);
     const heap_gpu = try gpu_arena.runtimeAlignedAlloc(u8, descriptor_size_and_align.alignment, descriptor_size_and_align.size * 65536, .default);
 
     const positions_gpu = try gpu_arena.alloc([3]f32, 3, .default);
@@ -86,7 +90,7 @@ pub fn main(init: std.process.Init) !void {
         .colors = colors_gpu.ptr,
     };
 
-    var pipeline: gpu.Pipeline = try .createGraphics(device, @embedFile("vert.spv"), @embedFile("frag.spv"), .{
+    var pipeline: *gpu.Pipeline = .createGraphics(device, @embedFile("vert.spv"), @embedFile("frag.spv"), .{
         .color_targets = &.{.{ .format = swapchain_format }},
     });
     defer pipeline.destroy(device);
@@ -102,11 +106,11 @@ pub fn main(init: std.process.Init) !void {
         std.debug.assert(c.SDL_GetWindowSizeInPixels(window, &width, &height));
 
         if (frame_index > FRAMES_IN_FLIGHT)
-            try frame_semaphore.wait(device, frame_index - FRAMES_IN_FLIGHT);
+            frame_semaphore.wait(device, frame_index - FRAMES_IN_FLIGHT);
 
-        const back_buffer = try swapchain.acquireNextTexture(&device, queue, .{ @intCast(width), @intCast(height) });
+        const back_buffer = swapchain.acquireNextTexture(device, queue, .{ @intCast(width), @intCast(height) });
 
-        var cb = try queue.startRecording(&device);
+        var cb = queue.startRecording(device);
 
         cb.setActiveTextureHeapPtr(device, heap_gpu);
 
@@ -125,13 +129,13 @@ pub fn main(init: std.process.Init) !void {
 
         cb.endRenderPass(device);
 
-        try queue.submitAndSignal(&device, &.{cb}, frame_semaphore, frame_index);
-        try swapchain.present(&device, queue, frame_semaphore, frame_index);
+        queue.submitAndSignal(device, &.{cb}, frame_semaphore, frame_index);
+        swapchain.present(device, queue, frame_semaphore, frame_index);
 
         frame_index += 1;
     }
 
-    try frame_semaphore.wait(device, frame_index - 1);
+    frame_semaphore.wait(device, frame_index - 1);
 }
 
 const Data = extern struct {
