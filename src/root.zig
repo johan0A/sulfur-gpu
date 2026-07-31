@@ -2,12 +2,21 @@ const std = @import("std");
 const impl = @import("vulkan_implementation.zig");
 pub const vk = @import("vulkan");
 
-pub const Allocator = @import("DeviceAllocator.zig");
+pub const DeviceAllocator = @import("DeviceAllocator.zig");
 
-pub const SizeAndAlignment = struct {
-    size: usize,
-    alignment: std.mem.Alignment,
+pub const Allocator = extern struct {
+    user_data: *anyopaque,
+    alloc: *const fn (*anyopaque, len: usize, alignment: usize) callconv(.c) ?[*]u8,
+    remap: *const fn (*anyopaque, ptr: [*]u8, len: usize, alignment: usize, new_len: usize) callconv(.c) ?[*]u8,
+    free: *const fn (*anyopaque, ptr: [*]u8, len: usize, alignment: usize) callconv(.c) void,
 };
+
+pub const SizeAndAlign = extern struct {
+    size: usize,
+    @"align": usize,
+};
+
+pub const DeviceAdrr = u64;
 
 pub const Memory = enum(u8) {
     default,
@@ -240,247 +249,24 @@ pub const Sampler = packed struct(u64) {
     };
 };
 
-pub const PointerAttributes = struct {
-    @"const": bool = false,
-    @"volatile": bool = false,
-    @"align": ?std.mem.Alignment = null,
-    optional: bool = false,
-};
-
-pub const PointerInfo = struct {
-    pub const Size = enum {
-        one,
-        many,
-    };
-    size: Size,
-    Element: type,
-    attributes: PointerAttributes,
-};
-
-pub fn Ptr(
-    size: PointerInfo.Size,
-    Element: type,
-    attributes: PointerAttributes,
-) type {
-    return extern struct {
-        addr: u64,
-
-        pub const Host = blk: {
-            const H = @Pointer(switch (size) {
-                .one => .one,
-                .many => .many,
-            }, .{
-                .@"const" = attributes.@"const",
-                .@"volatile" = attributes.@"volatile",
-                .@"align" = if (attributes.@"align") |a| a.toByteUnits() else null,
-            }, Element, null);
-            break :blk if (attributes.optional) ?H else H;
-        };
-
-        pub const info: PointerInfo = .{
-            .size = size,
-            .Element = Element,
-            .attributes = attributes,
-        };
-
-        pub const @"null": @This() =
-            if (attributes.optional) .{ .addr = 0 } else @compileError("pointer is not optional");
-
-        pub const alignement: ?std.mem.Alignment = if (attributes.@"align") |a| a else switch (Element) {
-            anyopaque => null,
-            else => .of(Element),
-        };
-
-        const unwrapped_attributes: PointerAttributes = blk: {
-            var a = attributes;
-            a.optional = false;
-            break :blk a;
-        };
-
-        pub fn fromInt(addr: u64) @This() {
-            const result: @This() = .{ .addr = addr };
-            result.assertAlignment();
-            result.assertZero();
-            return result;
-        }
-
-        pub fn from(ptr: anytype) @This() {
-            const Src = @TypeOf(ptr);
-            comptime {
-                if (!isDevicePtr(Src))
-                    @compileError("expected a device pointer, found '" ++ @typeName(Src) ++ "'");
-                _ = @as(Host, @as(Src.Host, undefined));
-            }
-            return .{ .addr = ptr.addr };
-        }
-
-        pub fn cast(ptr: anytype) @This() {
-            comptime blk: {
-                if (!isDevicePtr(@TypeOf(ptr)))
-                    @compileError("expected a device pointer, found '" ++ @typeName(@TypeOf(ptr)) ++ "'");
-                const ptr_align = @TypeOf(ptr).alignement orelse break :blk;
-                const this_align = alignement orelse break :blk;
-                if (this_align.compare(.gt, ptr_align))
-                    @compileError("cast increases pointer alignment; use alignCast");
-            }
-            return .{ .addr = ptr.addr };
-        }
-
-        pub fn alignCast(ptr: anytype) @This() {
-            const Src = @TypeOf(ptr);
-            comptime {
-                if (!isDevicePtr(Src))
-                    @compileError("expected a device pointer, found '" ++ @typeName(Src) ++ "'");
-                var a = Src.info.attributes;
-                a.@"align" = attributes.@"align";
-                _ = @as(Host, @as(Ptr(Src.info.size, Src.info.Element, a).Host, undefined));
-            }
-            return .fromInt(ptr.addr);
-        }
-
-        pub fn isNull(ptr: @This()) bool {
-            comptime std.debug.assert(attributes.optional);
-            return ptr.addr == 0;
-        }
-
-        pub fn unwrap(ptr: @This()) ?Ptr(size, Element, unwrapped_attributes) {
-            if (ptr.addr == 0) return null;
-            return .fromInt(ptr.addr);
-        }
-
-        pub fn slice(ptr: @This(), len: u64) Slice(Element, unwrapped_attributes) {
-            comptime std.debug.assert(size == .many);
-            ptr.assertZero();
-            return .{ .ptr = .fromInt(ptr.addr), .len = len };
-        }
-
-        fn assertAlignment(ptr: @This()) void {
-            if (alignement != null) std.debug.assert(std.mem.isAligned(ptr.addr, alignement.?.toByteUnits()));
-        }
-
-        fn assertZero(ptr: @This()) void {
-            if (!attributes.optional) std.debug.assert(ptr.addr != 0);
-        }
-    };
-}
-
-pub const SliceInfo = struct {
-    Element: type,
-    attributes: PointerAttributes,
-};
-
-pub fn Slice(
-    Element: type,
-    attributes: PointerAttributes,
-) type {
-    return extern struct {
-        ptr: Pointer,
-        len: u64,
-
-        const Pointer = Ptr(.many, Element, attributes);
-
-        pub const info: SliceInfo = .{
-            .Element = Element,
-            .attributes = attributes,
-        };
-
-        pub const Host = blk: {
-            const H = @Pointer(.slice, .{
-                .@"const" = attributes.@"const",
-                .@"volatile" = attributes.@"volatile",
-                .@"align" = if (attributes.@"align") |a| a.toByteUnits() else null,
-            }, Element, null);
-            break :blk if (attributes.optional) ?H else H;
-        };
-
-        const dangling_ptr: Pointer = .fromInt(
-            (Pointer.alignement orelse .@"1").backward(std.math.maxInt(u64)),
-        );
-
-        pub const empty: @This() = .{ .ptr = dangling_ptr, .len = 0 };
-
-        pub fn from(src: anytype) @This() {
-            const Src = @TypeOf(src);
-            comptime {
-                if (!isDeviceSlice(Src) and !isDevicePtr(Src))
-                    @compileError("expected a device pointer or slice, found '" ++ @typeName(Src) ++ "'");
-                _ = @as(Host, @as(Src.Host, undefined));
-            }
-            if (comptime isDeviceSlice(Src)) {
-                return .{ .ptr = .{ .addr = src.ptr.addr }, .len = src.len };
-            } else {
-                return .{
-                    .ptr = .{ .addr = src.addr },
-                    .len = @typeInfo(Src.info.Element).array.len,
-                };
-            }
-        }
-
-        pub fn cast(src: anytype) @This() {
-            const Src = @TypeOf(src);
-            comptime if (!isDeviceSlice(Src))
-                @compileError("expected a device slice, found '" ++ @typeName(Src) ++ "'");
-            const byte_len = src.len * @sizeOf(Src.info.Element);
-            std.debug.assert(byte_len % @sizeOf(Element) == 0);
-            return .{
-                .ptr = .cast(src.ptr),
-                .len = byte_len / @sizeOf(Element),
-            };
-        }
-
-        pub fn alignCast(src: anytype) @This() {
-            const Src = @TypeOf(src);
-            comptime {
-                if (!isDeviceSlice(Src))
-                    @compileError("expected a device slice, found '" ++ @typeName(Src) ++ "'");
-                var a = Src.info.attributes;
-                a.@"align" = attributes.@"align";
-                _ = @as(Host, @as(Slice(Src.info.Element, a).Host, undefined));
-            }
-            return .{ .ptr = .fromInt(src.ptr.addr), .len = src.len };
-        }
-
-        pub fn asBytes(self: @This()) Slice(u8, blk: {
-            var a = attributes;
-            a.@"align" = @TypeOf(self.ptr).alignement;
-            break :blk a;
-        }) {
-            return .{
-                .ptr = .{ .addr = self.ptr.addr },
-                .len = self.len * @sizeOf(Element),
-            };
-        }
-    };
-}
-
-fn isDevicePtr(comptime T: type) bool {
-    if (@typeInfo(T) != .@"struct") return false;
-    if (!@hasDecl(T, "info")) return false;
-    return @TypeOf(T.info) == PointerInfo;
-}
-
-fn isDeviceSlice(comptime T: type) bool {
-    if (@typeInfo(T) != .@"struct") return false;
-    if (!@hasDecl(T, "info")) return false;
-    return @TypeOf(T.info) == SliceInfo;
-}
-
 pub const Instance = opaque {
-    pub const create: fn (
-        gpa: std.mem.Allocator,
+    pub extern fn sfCreateInstance(
+        gpa: ?*Allocator,
         proc: vk.PfnGetInstanceProcAddr,
-        required_surface_extensions: []const [*:0]const u8,
-    ) *Instance = impl.Instance.create;
+        required_surface_extensions_count: usize,
+        required_surface_extensions_ptr: [*]const [*:0]const u8,
+    ) *Instance;
 
-    pub const destroy: fn (
+    pub extern fn sfDestroyInstance(
         instance: *Instance,
-        gpa: std.mem.Allocator,
-    ) void = impl.Instance.destroy;
+    ) void;
 
-    pub const enumerateAdaptersAlloc: fn (
+    pub extern fn sfEnumerateAdapters(
         instance: *Instance,
-        gpa: std.mem.Allocator,
-    ) []*Adapter = impl.Instance.enumerateAdaptersAlloc;
+        adapters_buffer_size: usize,
+        adapters_buffer: ?[*]*Adapter,
+        adapters_count: *usize,
+    ) void;
 
     pub const SurfaceDescWin32 = struct {
         hinstance: *anyopaque,
@@ -489,22 +275,20 @@ pub const Instance = opaque {
 };
 
 pub const Surface = opaque {
-    pub const Win32Desc = struct {
+    pub const Win32Desc = extern struct {
         hinstance: *anyopaque,
         hwnd: *anyopaque,
     };
 
-    pub const createWin32: fn (
+    pub extern fn sfCreateSurfaceWin32(
         instance: *Instance,
         desc: Win32Desc,
-        gpa: std.mem.Allocator,
-    ) *Surface = impl.Surface.createWin32;
+    ) *Surface;
 
-    pub const destroy: fn (
+    pub extern fn sfDestroySurface(
         surface: *Surface,
         instance: *Instance,
-        gpa: std.mem.Allocator,
-    ) void = impl.Surface.destroy;
+    ) void;
 };
 
 pub const Adapter = opaque {};
@@ -516,122 +300,133 @@ pub const SurfaceCapabilities = struct {
 };
 
 pub const Device = opaque {
-    pub const create: fn (
-        gpa: std.mem.Allocator,
+    pub extern fn sfCreateDevice(
         instance: *Instance,
         adapter: *Adapter,
-    ) *Device = impl.Device.create;
+    ) *Device;
 
-    pub const destroy: fn (
+    pub extern fn sfDestroyDevice(
         d: *Device,
-    ) void = impl.Device.destroy;
+    ) void;
 
-    pub const surfaceCapabilities: fn (
+    pub extern fn sfSurfaceCapabilities(
         d: *Device,
         gpa: std.mem.Allocator,
         surface: *Surface,
-    ) SurfaceCapabilities = impl.Device.surfaceCapabilities;
+    ) SurfaceCapabilities;
 
-    // pub const deviceToHostPointer: fn (
-    //     d: *Device,
-    //     ptr: anytype,
-    // ) @TypeOf(ptr).Host = impl.Device.deviceToHostPointer;
+    pub extern fn sfDeviceToHostPointer(
+        d: *Device,
+        ptr: u64,
+    ) *anyopaque;
 
-    pub const deviceToHostPointer = impl.Device.deviceToHostPointer;
+    pub extern fn sfMalloc(
+        d: *Device,
+        bytes: usize,
+        alignment: usize,
+        memory: Memory,
+    ) DeviceAdrr;
+
+    pub extern fn sfFree(
+        d: *Device,
+        ptr: u64,
+    ) void;
 };
 
 pub const Queue = opaque {
-    pub const Type = enum {
+    pub const Type = enum(u8) {
         graphics,
         compute,
         transfer,
     };
 
-    pub const create: fn (
+    pub extern fn sfCreateQueue(
         d: *Device,
         queue_type: Type,
-    ) *Queue = impl.Queue.create;
+    ) *Queue;
 
-    pub const startRecording: fn (
+    pub extern fn sfStartCommandRecording(
         queue: *Queue,
         d: *Device,
-    ) *CommandBuffer = impl.Queue.startRecording;
+    ) *CommandBuffer;
 
-    pub const submit: fn (
-        queue: *Queue,
-        d: *Device,
-        command_buffers: []const *CommandBuffer,
-    ) void = impl.Queue.submit;
-
-    pub const submitAndSignal: fn (
+    pub extern fn sfSubmit(
         queue: *Queue,
         d: *Device,
         command_buffers: []const *CommandBuffer,
+    ) void;
+
+    pub extern fn sfSubmitAndSignal(
+        queue: *Queue,
+        d: *Device,
+        command_buffer_count: usize,
+        command_buffers: [*]const *CommandBuffer,
         signal_semaphore: *Semaphore,
         signal_value: u64,
-    ) void = impl.Queue.submitAndSignal;
+    ) void;
 };
 
 pub const Semaphore = opaque {
-    pub const create: fn (
+    pub extern fn sfCreateSemaphore(
         d: *Device,
         init_value: u64,
-    ) *Semaphore = impl.Semaphore.create;
+    ) *Semaphore;
 
-    pub const destroy: fn (
+    pub extern fn sfDestroySemaphore(
         semaphore: *Semaphore,
         d: *Device,
-    ) void = impl.Semaphore.destroy;
+    ) void;
 
-    pub const wait: fn (
+    pub extern fn sfWaitSemaphore(
         semaphore: *Semaphore,
         d: *Device,
         value: u64,
-    ) void = impl.Semaphore.wait;
+    ) void;
 };
 
 pub const Swapchain = opaque {
-    pub const Desc = struct {
+    pub const Desc = extern struct {
         format: Format,
         present_mode: PresentMode,
         usage: Texture.Usage,
     };
 
-    pub const create: fn (
+    pub extern fn sfCreateSwpachain(
         d: *Device,
         queue: *Queue,
         surface: *Surface,
         options: Desc,
-    ) *Swapchain = impl.Swapchain.create;
+    ) *Swapchain;
 
-    pub const destroy: fn (
+    pub extern fn sfDestroySwapchain(
         swapchain: *Swapchain,
         d: *Device,
-    ) void = impl.Swapchain.destroy;
+    ) void;
 
-    pub const acquireNextTexture: fn (
+    pub extern fn sfSwapchainAcquireNextTexture(
         swapchain: *Swapchain,
         d: *Device,
         queue: *Queue,
         extent: [2]u32,
-    ) *Texture = impl.Swapchain.acquireNextTexture;
+    ) *Texture;
 
-    pub const present: fn (
+    pub extern fn sfSwapchainPresent(
         swapchain: *Swapchain,
         d: *Device,
         queue: *Queue,
         semaphore: *Semaphore,
         semaphore_value: u64,
-    ) void = impl.Swapchain.present;
+    ) void;
 };
 
-pub const Stage = packed struct {
+pub const Stage = packed struct(u64) {
     transfer: bool = false,
     compute: bool = false,
     raster_color_out: bool = false,
     raster_depth_out: bool = false,
     pixel_shader: bool = false,
     vertex_shader: bool = false,
+    reserved: u58 = 0,
 
     pub const all: Stage = .{
         .transfer = true,
@@ -643,52 +438,54 @@ pub const Stage = packed struct {
     };
 };
 
-pub const Hazard = packed struct {
+pub const Hazard = packed struct(u64) {
     draw_arguments: bool = false,
     descriptors: bool = false,
     depth_stencil: bool = false,
+    reserved: u61 = 0,
 };
 
 pub const CommandBuffer = opaque {
-    pub const RenderPassDesc = struct {
+    pub const RenderPassDesc = extern struct {
         depth_target: DepthTarget = .{},
         stencil_target: StencilTarget = .{},
-        color_targets: []const ColorTarget = &.{},
+        color_target_count: u32,
+        color_targets: [*]const ColorTarget = &.{},
     };
 
-    pub const DepthTarget = struct {
+    pub const DepthTarget = extern struct {
         texture: ?*const Texture = null,
         load_op: LoadOp = .load,
         store_op: StoreOp = .store,
         clear_value: f32 = 1,
     };
 
-    pub const StencilTarget = struct {
+    pub const StencilTarget = extern struct {
         texture: ?*const Texture = null,
         load_op: LoadOp = .load,
         store_op: StoreOp = .store,
         clear_value: u32 = 0,
     };
 
-    pub const ColorTarget = struct {
+    pub const ColorTarget = extern struct {
         texture: *const Texture,
         load_op: LoadOp = .load,
         store_op: StoreOp = .store,
         clear_color: [4]f32 = .{ 0, 0, 0, 0 },
     };
 
-    pub const LoadOp = enum {
+    pub const LoadOp = enum(u8) {
         load,
         clear,
         dont_care,
     };
 
-    pub const StoreOp = enum {
+    pub const StoreOp = enum(u8) {
         store,
         dont_care,
     };
 
-    pub const IndexType = enum {
+    pub const IndexType = enum(u8) {
         u16,
         u32,
     };
@@ -701,119 +498,106 @@ pub const CommandBuffer = opaque {
         first_instance: u32 = 0,
     };
 
-    pub const setActiveTextureHeapPtr: fn (
+    pub extern fn sfSetActiveTextureHeapPtr(
         command_buffer: *CommandBuffer,
         d: *Device,
-        heap_ptr: Slice(u8, .{}),
-    ) void = impl.CommandBuffer.setActiveTextureHeapPtr;
+        heap_ptr: DeviceAdrr,
+    ) void;
 
-    pub const setPipeline: fn (
+    pub extern fn sfSetPipeline(
         command_buffer: *CommandBuffer,
         d: *Device,
         pipeline: *Pipeline,
-    ) void = impl.CommandBuffer.setPipeline;
+    ) void;
 
-    pub const dispatch: fn (
+    pub extern fn sfDispatch(
         command_buffer: *CommandBuffer,
         d: *Device,
-        data: Ptr(.one, anyopaque, .{}),
-        grid_dimensions: [3]u32,
-    ) void = impl.CommandBuffer.dispatch;
+        data: DeviceAdrr,
+        x: u32,
+        y: u32,
+        z: u32,
+    ) void;
 
-    pub const barrier: fn (
+    pub extern fn sfBarrier(
         command_buffer: *CommandBuffer,
         d: *Device,
         before: Stage,
         after: Stage,
         hazard: Hazard,
-    ) void = impl.CommandBuffer.barrier;
+    ) void;
 
     /// 256 bytes is a typical optimal alignment for dest
-    pub const copyTextureToBuffer: fn (
+    pub extern fn sfCopyTextureToBuffer(
         command_buffer: *CommandBuffer,
         d: *Device,
-        dest: Slice(u8, .{ .@"align" = .@"16" }),
-        src: Slice(u8, .{}),
+        dest: DeviceAdrr,
+        src: DeviceAdrr,
         texture: *Texture,
-    ) void = impl.CommandBuffer.copyTextureToBuffer;
+    ) void;
 
-    pub const copyBufferToTexture: fn (
+    pub extern fn sfCopyBufferToTexture(
         command_buffer: *CommandBuffer,
         d: *Device,
-        dest: Slice(u8, .{}),
-        src: Slice(u8, .{}),
+        dest: DeviceAdrr,
+        src: DeviceAdrr,
         texture: *Texture,
-    ) void = impl.CommandBuffer.copyBufferToTexture;
+    ) void;
 
-    pub const beginRenderPass: fn (
+    pub extern fn sfBeginRenderPass(
         cb: *CommandBuffer,
         d: *Device,
         desc: RenderPassDesc,
-    ) void = impl.CommandBuffer.beginRenderPass;
+    ) void;
 
-    pub const endRenderPass: fn (
+    pub extern fn sfEndRenderPass(
         cb: *CommandBuffer,
         d: *Device,
-    ) void = impl.CommandBuffer.endRenderPass;
+    ) void;
 
-    pub const draw: fn (
+    pub extern fn sfDraw(
         cb: *CommandBuffer,
         d: *Device,
-        vertex_data: Ptr(.one, anyopaque, .{}),
-        pixel_data: Ptr(.one, anyopaque, .{}),
+        vertex_data: DeviceAdrr,
+        pixel_data: DeviceAdrr,
         vertex_count: u32,
         instance_count: u32,
-    ) void = impl.CommandBuffer.draw;
+    ) void;
 
-    // pub const drawIndexed: fn (
-    //     cb: *CommandBuffer,
-    //     d: *Device,
-    //     vertex_data: Ptr(.one, anyopaque, .{}),
-    //     pixel_data: Ptr(.one, anyopaque, .{}),
-    //     comptime index_type: IndexType,
-    //     indices: switch (index_type) {
-    //         .u16 => Ptr(.many, u16, .{ .@"const" = true }),
-    //         .u32 => Ptr(.many, u32, .{ .@"const" = true }),
-    //     },
-    //     index_count: u32,
-    // ) void = impl.CommandBuffer.drawIndexed;
+    pub extern fn sfDrawIndexed(
+        cb: *CommandBuffer,
+        d: *Device,
+        vertex_data: DeviceAdrr,
+        pixel_data: DeviceAdrr,
+        index_type: CommandBuffer.IndexType,
+        indices: DeviceAdrr,
+        index_count: u32,
+    ) void;
 
-    pub const drawIndexed = impl.CommandBuffer.drawIndexed;
+    pub extern fn sfDrawIndexedInstanced(
+        cb: *CommandBuffer,
+        d: *Device,
+        vertex_data: DeviceAdrr,
+        pixel_data: DeviceAdrr,
+        index_type: CommandBuffer.IndexType,
+        indices: DeviceAdrr,
+        index_count: u32,
+        instance_count: u32,
+    ) void;
 
-    // pub const drawIndexedInstanced: fn (
-    //     cb: *CommandBuffer,
-    //     d: *Device,
-    //     vertex_data: Ptr(.one, anyopaque, .{}),
-    //     pixel_data: Ptr(.one, anyopaque, .{}),
-    //     comptime index_type: IndexType,
-    //     indices: switch (index_type) {
-    //         .u16 => Ptr(.many, u16, .{ .@"const" = true }),
-    //         .u32 => Ptr(.many, u32, .{ .@"const" = true }),
-    //     },
-    //     index_count: u32,
-    //     instance_count: u32,
-    // ) void = impl.CommandBuffer.drawIndexedInstanced;
-
-    pub const drawIndexedInstanced = impl.CommandBuffer.drawIndexedInstanced;
-
-    // pub const drawIndexedInstancedIndirect: fn (
-    //     cb: *CommandBuffer,
-    //     d: *Device,
-    //     vertex_data: Ptr(.one, anyopaque, .{}),
-    //     pixel_data: Ptr(.one, anyopaque, .{}),
-    //     comptime index_type: IndexType,
-    //     indices: switch (index_type) {
-    //         .u16 => Ptr(.many, u16, .{ .@"const" = true }),
-    //         .u32 => Ptr(.many, u32, .{ .@"const" = true }),
-    //     },
-    //     args: Ptr(.one, DrawIndexedArgs, .{ .@"const" = true }),
-    // ) void = impl.CommandBuffer.drawIndexedInstancedIndirect;
-
-    pub const drawIndexedInstancedIndirect = impl.CommandBuffer.drawIndexedInstancedIndirect;
+    pub extern fn sfDrawIndexedInstancedIndirect(
+        cb: *CommandBuffer,
+        d: *Device,
+        vertex_data: DeviceAdrr,
+        pixel_data: DeviceAdrr,
+        index_type: CommandBuffer.IndexType,
+        indices: DeviceAdrr,
+        args: DeviceAdrr,
+    ) void;
 };
 
 pub const Texture = opaque {
-    pub const Type = enum {
+    pub const Type = enum(u8) {
         @"1d",
         @"2d",
         @"3d",
@@ -827,7 +611,7 @@ pub const Texture = opaque {
         padding: u12 = 0,
     };
 
-    pub const Desc = struct {
+    pub const Desc = extern struct {
         type: Type = .@"2d",
         dimensions: [3]u32,
         mip_count: u32 = 1,
@@ -837,7 +621,7 @@ pub const Texture = opaque {
         usage: Usage = .{},
     };
 
-    pub const ViewInfo = struct {
+    pub const ViewInfo = extern struct {
         pub const all_mips = std.math.maxInt(u8);
         pub const all_layers = std.math.maxInt(u16);
 
@@ -848,15 +632,15 @@ pub const Texture = opaque {
         layer_count: u16 = all_layers,
     };
 
-    pub const Descriptor = struct {
+    pub const Descriptor = extern struct {
         data: [64]u8,
 
-        pub const sizeAndHeapAlignment: fn (
+        pub extern fn sfDescriptorSizeAndHeapAlign(
             d: *Device,
-        ) SizeAndAlignment = impl.Texture.Descriptor.sizeAndHeapAlignment;
+        ) SizeAndAlign;
 
         pub fn store(descriptor: Descriptor, d: *Device, heap_ptr: []u8, index: usize) void {
-            const size_align = Descriptor.sizeAndHeapAlignment(d);
+            const size_align = Descriptor.sfDescriptorSizeAndHeapAlign(d);
             @memcpy(
                 @as([*]u8, @ptrCast(heap_ptr)) + size_align.size * index,
                 descriptor.data[0..size_align.size],
@@ -864,37 +648,37 @@ pub const Texture = opaque {
         }
     };
 
-    pub const sizeAndAlignment: fn (
+    pub extern fn sfTextureSizeAndAlign(
         d: *Device,
         info: Desc,
-    ) SizeAndAlignment = impl.Texture.sizeAndAlignment;
+    ) SizeAndAlign;
 
-    pub const create: fn (
+    pub extern fn sfCreateTexture(
         d: *Device,
         info: Desc,
-        texture_data: Slice(u8, .{}),
-    ) *Texture = impl.Texture.create;
+        texture_data: DeviceAdrr,
+    ) *Texture;
 
-    pub const destroy: fn (
+    pub extern fn sfDestroyTexture(
         texture: *Texture,
         d: *Device,
-    ) void = impl.Texture.destroy;
+    ) void;
 
-    pub const storageDescriptor: fn (
+    pub extern fn sfTextureStorageDescriptor(
         texture: *Texture,
         d: *Device,
         view_info: ViewInfo,
-    ) Descriptor = impl.Texture.storageDescriptor;
+    ) Descriptor;
 
-    pub const viewDescriptor: fn (
+    pub extern fn sfTextureViewDescriptor(
         texture: *Texture,
         d: *Device,
         view_info: ViewInfo,
-    ) Descriptor = impl.Texture.viewDescriptor;
+    ) Descriptor;
 };
 
 pub const Pipeline = opaque {
-    pub const RasterDesc = struct {
+    pub const RasterDesc = extern struct {
         topology: Topology = .triangle_list,
         cull: Cull = .none,
         alpha_to_coverage: bool = false,
@@ -902,30 +686,31 @@ pub const Pipeline = opaque {
         sample_count: u8 = 1,
         depth_format: Format = .none,
         stencil_format: Format = .none,
-        color_targets: []const ColorTarget = &.{},
+        color_target_count: u32,
+        color_targets: [*]const ColorTarget = &.{},
         /// optional embedded blend state
-        blend_state: ?BlendDesc = null,
+        blend_state: ?*const BlendDesc = null,
     };
 
-    pub const Topology = enum {
+    pub const Topology = enum(u8) {
         triangle_list,
         triangle_strip,
         triangle_fan,
     };
 
-    pub const Cull = enum {
+    pub const Cull = enum(u8) {
         ccw,
         cw,
         all,
         none,
     };
 
-    pub const ColorTarget = struct {
+    pub const ColorTarget = extern struct {
         format: Format = .none,
         write_mask: RgbaWriteMask = .all,
     };
 
-    pub const BlendDesc = struct {
+    pub const BlendDesc = extern struct {
         color_op: Blend = .add,
         src_color_factor: Factor = .one,
         dst_color_factor: Factor = .zero,
@@ -935,11 +720,12 @@ pub const Pipeline = opaque {
         color_write_mask: RgbaWriteMask = .all,
     };
 
-    pub const RgbaWriteMask = packed struct(u4) {
+    pub const RgbaWriteMask = packed struct(u8) {
         r: bool,
         g: bool,
         b: bool,
         a: bool,
+        reserved: u4 = 0,
 
         pub const all: RgbaWriteMask = .{
             .r = true,
@@ -959,7 +745,7 @@ pub const Pipeline = opaque {
         }
     };
 
-    pub const Blend = enum {
+    pub const Blend = enum(u8) {
         add,
         subtract,
         reverse_subtract,
@@ -967,7 +753,7 @@ pub const Pipeline = opaque {
         max,
     };
 
-    pub const Factor = enum {
+    pub const Factor = enum(u8) {
         zero,
         one,
         src_color,
@@ -975,231 +761,23 @@ pub const Pipeline = opaque {
         src_alpha,
     };
 
-    pub const createCompute: fn (
+    pub extern fn sfCreateComputePipeline(
         d: *Device,
-        ir: []const u8,
-    ) *Pipeline = impl.Pipeline.createCompute;
+        ir_size: usize,
+        ir: [*]const u8,
+    ) *Pipeline;
 
-    pub const createGraphics: fn (
+    pub extern fn sfCreateGraphicsPipeline(
         d: *Device,
-        vertex_ir: []const u8,
-        pixel_ir: []const u8,
+        vertex_ir_size: usize,
+        vertex_ir: [*]const u8,
+        pixel_ir_size: usize,
+        pixel_ir: [*]const u8,
         desc: RasterDesc,
-    ) *Pipeline = impl.Pipeline.createGraphics;
+    ) *Pipeline;
 
-    pub const destroy: fn (
+    pub extern fn sfDestroyPipeline(
         pipeline: *Pipeline,
         d: *Device,
-    ) void = impl.Pipeline.destroy;
-};
-
-pub const heap = struct {
-    pub fn rawDeviceAllocator(d: *Device) Allocator {
-        return .{
-            .ptr = @ptrCast(d),
-            .vtable = &.{
-                .alloc = raw_device_allocator.alloc,
-                .resize = Allocator.noResize, // TODO
-                .remap = Allocator.noRemap, // TODO
-                .free = raw_device_allocator.free,
-            },
-        };
-    }
-
-    pub const raw_device_allocator = struct {
-        pub fn alloc(
-            self: *anyopaque,
-            len: usize,
-            alignment: std.mem.Alignment,
-            memory_type: Memory,
-            ret_addr: usize,
-        ) Ptr(.many, u8, .{ .optional = true }) {
-            _ = ret_addr;
-            const device: *Device = @ptrCast(@alignCast(self));
-            // return .cast(rawAlloc(device, len, alignment, memory_type) catch return .null);
-            return .cast(rawAlloc(device, len, alignment, memory_type));
-        }
-
-        pub fn free(
-            self: *anyopaque,
-            memory: Slice(u8, .{}),
-            alignment: std.mem.Alignment,
-            memory_type: Memory,
-            ret_addr: usize,
-        ) void {
-            _ = alignment;
-            _ = memory_type;
-            _ = ret_addr;
-            const device: *Device = @ptrCast(@alignCast(self));
-            return rawFree(device, .cast(memory.ptr));
-        }
-
-        pub const rawAlloc: fn (
-            d: *Device,
-            bytes: usize,
-            alignment: std.mem.Alignment,
-            memory: Memory,
-        ) Ptr(.one, anyopaque, .{}) = impl.heap.rawAlloc;
-
-        pub const rawFree: fn (
-            d: *Device,
-            ptr: Ptr(.one, anyopaque, .{}),
-        ) void = impl.heap.rawFree;
-    };
-
-    pub const FixedBufferAllocator = struct {
-        regions: std.EnumArray(Memory, Region),
-
-        const Region = struct {
-            buffer: Slice(u8, .{}),
-            end_index: u64,
-
-            const empty: Region = .{ .buffer = .empty, .end_index = 0 };
-
-            fn ownsAddr(r: *const Region, addr: u64) bool {
-                return addr >= r.buffer.ptr.addr and addr < r.buffer.ptr.addr + r.buffer.len;
-            }
-
-            fn isLastAllocation(r: *const Region, memory: Slice(u8, .{})) bool {
-                return memory.ptr.addr + memory.len == r.buffer.ptr.addr + r.end_index;
-            }
-
-            fn alloc(
-                r: *Region,
-                len: usize,
-                alignment: std.mem.Alignment,
-            ) Ptr(.many, u8, .{ .optional = true }) {
-                if (r.buffer.len == 0) return .null;
-                const addr = std.mem.alignForward(
-                    u64,
-                    r.buffer.ptr.addr + r.end_index,
-                    alignment.toByteUnits(),
-                );
-                const new_end = addr + len - r.buffer.ptr.addr;
-                if (new_end > r.buffer.len) return .null;
-                r.end_index = new_end;
-                return .fromInt(addr);
-            }
-
-            fn resize(r: *Region, memory: Slice(u8, .{}), new_len: usize) bool {
-                std.debug.assert(r.ownsAddr(memory.ptr.addr));
-                if (!r.isLastAllocation(memory)) return new_len <= memory.len;
-                if (new_len <= memory.len) {
-                    r.end_index -= memory.len - new_len;
-                    return true;
-                }
-                const grow = new_len - memory.len;
-                if (r.end_index + grow > r.buffer.len) return false;
-                r.end_index += grow;
-                return true;
-            }
-
-            fn free(r: *Region, memory: Slice(u8, .{})) void {
-                std.debug.assert(r.ownsAddr(memory.ptr.addr));
-                if (r.isLastAllocation(memory)) r.end_index -= memory.len;
-            }
-        };
-
-        pub fn init(buffers: std.EnumArray(Memory, Slice(u8, .{}))) FixedBufferAllocator {
-            var fba: FixedBufferAllocator = .{ .regions = .initFill(.empty) };
-            for (std.enums.values(Memory)) |m| {
-                fba.regions.getPtr(m).* = .{ .buffer = buffers.get(m), .end_index = 0 };
-            }
-            return fba;
-        }
-
-        pub fn initAlloc(
-            gpa: Allocator,
-            sizes: std.enums.EnumFieldStruct(Memory, ?usize, @as(?usize, null)),
-            default_size: usize,
-        ) !FixedBufferAllocator {
-            var fba: FixedBufferAllocator = .{ .regions = .initFill(.empty) };
-            errdefer fba.deinit(gpa);
-            inline for (comptime std.enums.values(Memory)) |memory| {
-                const size = @field(sizes, @tagName(memory)) orelse default_size;
-                const buffer = try gpa.alloc(u8, size, memory);
-                if (size > 0) {
-                    fba.regions.getPtr(memory).* = .{
-                        .buffer = buffer,
-                        .end_index = 0,
-                    };
-                }
-            }
-            return fba;
-        }
-
-        pub fn deinit(fba: *FixedBufferAllocator, gpa: Allocator) void {
-            var it = fba.regions.iterator();
-            while (it.next()) |item| {
-                if (item.value.buffer.len > 0) gpa.free(item.value.buffer, item.key);
-                item.value.* = .empty;
-            }
-        }
-
-        pub fn reset(fba: *FixedBufferAllocator) void {
-            for (&fba.regions.values) |*r| r.end_index = 0;
-        }
-
-        pub fn allocator(fba: *FixedBufferAllocator) Allocator {
-            return .{
-                .ptr = @ptrCast(fba),
-                .vtable = &.{
-                    .alloc = alloc,
-                    .resize = resize,
-                    .remap = remap,
-                    .free = free,
-                },
-            };
-        }
-
-        fn alloc(
-            self: *anyopaque,
-            len: usize,
-            alignment: std.mem.Alignment,
-            memory_type: Memory,
-            ret_addr: usize,
-        ) Ptr(.many, u8, .{ .optional = true }) {
-            _ = ret_addr;
-            const fba: *FixedBufferAllocator = @ptrCast(@alignCast(self));
-            return fba.regions.getPtr(memory_type).alloc(len, alignment);
-        }
-
-        fn resize(
-            self: *anyopaque,
-            memory: Slice(u8, .{}),
-            alignment: std.mem.Alignment,
-            new_len: usize,
-            memory_type: Memory,
-            ret_addr: usize,
-        ) bool {
-            _ = alignment;
-            _ = ret_addr;
-            const fba: *FixedBufferAllocator = @ptrCast(@alignCast(self));
-            return fba.regions.getPtr(memory_type).resize(memory, new_len);
-        }
-
-        fn remap(
-            self: *anyopaque,
-            memory: Slice(u8, .{}),
-            alignment: std.mem.Alignment,
-            new_len: usize,
-            memory_type: Memory,
-            ret_addr: usize,
-        ) Ptr(.many, u8, .{ .optional = true }) {
-            return if (resize(self, memory, alignment, new_len, memory_type, ret_addr)) .{ .addr = memory.ptr.addr } else .null;
-        }
-
-        fn free(
-            self: *anyopaque,
-            memory: Slice(u8, .{}),
-            alignment: std.mem.Alignment,
-            memory_type: Memory,
-            ret_addr: usize,
-        ) void {
-            _ = alignment;
-            _ = ret_addr;
-            const fba: *FixedBufferAllocator = @ptrCast(@alignCast(self));
-            fba.regions.getPtr(memory_type).free(memory);
-        }
-    };
+    ) void;
 };

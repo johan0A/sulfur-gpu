@@ -19,7 +19,7 @@ pub fn main(init: std.process.Init) !void {
         break :blk sdl_required_extensions_ptr[0..sdl_required_extensions_count];
     };
 
-    var instance: *gpu.Instance = .create(
+    var instance: *gpu.Instance = .sfInstanceCreate(
         gpa,
         @ptrCast(c.SDL_Vulkan_GetVkGetInstanceProcAddr()),
         @ptrCast(sdl_required_extensions),
