@@ -1,0 +1,1067 @@
+{
+  "registry": "sulfur",
+  "version": "0.1.0",
+
+  "fn_prefix": "sf",
+  "type_prefix": "Sf",
+  "enum_prefix": "SF_",
+
+  "constants": [
+    { "name": "SF_DESCRIPTOR_MAX_SIZE", "type": "size_t", "value": "64", "doc": "" },
+    { "name": "SF_ALL_MIPS", "type": "uint32_t", "value": "0xFFFFFFFF", "doc": "" },
+    { "name": "SF_ALL_LAYERS", "type": "uint32_t", "value": "0xFFFFFFFF", "doc": "" }
+  ],
+
+  "typedefs": [
+    { "name": "SfDeviceAddress", "underlying": "uint64_t", "doc": "" }
+  ],
+
+  "opaques": [
+    { "name": "SfInstance", "doc": "" },
+    { "name": "SfSurface", "doc": "" },
+    { "name": "SfAdapter", "doc": "" },
+    { "name": "SfDevice", "doc": "" },
+    { "name": "SfQueue", "doc": "" },
+    { "name": "SfSemaphore", "doc": "" },
+    { "name": "SfSwapchain", "doc": "" },
+    { "name": "SfCommandBuffer", "doc": "" },
+    { "name": "SfTexture", "doc": "" },
+    { "name": "SfPipeline", "doc": "" }
+  ],
+
+  "function_pointers": [
+    {
+      "name": "SfAllocFn",
+      "return": { "base": "uint8_t", "ptr": [{ "optional": true, "len": "length" }] },
+      "params": [
+        { "name": "user_data", "type": { "base": "void", "ptr": [{}] }, "doc": "" },
+        { "name": "length", "type": { "base": "size_t" }, "doc": "" },
+        { "name": "alignment", "type": { "base": "size_t" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfRemapFn",
+      "return": { "base": "uint8_t", "ptr": [{ "optional": true, "len": "new_length" }] },
+      "params": [
+        { "name": "user_data", "type": { "base": "void", "ptr": [{}] }, "doc": "" },
+        { "name": "pointer", "type": { "base": "uint8_t", "ptr": [{ "len": "length" }] }, "doc": "" },
+        { "name": "length", "type": { "base": "size_t" }, "doc": "" },
+        { "name": "alignment", "type": { "base": "size_t" }, "doc": "" },
+        { "name": "new_length", "type": { "base": "size_t" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfFreeFn",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "user_data", "type": { "base": "void", "ptr": [{}] }, "doc": "" },
+        { "name": "pointer", "type": { "base": "uint8_t", "ptr": [{ "len": "length" }] }, "doc": "" },
+        { "name": "length", "type": { "base": "size_t" }, "doc": "" },
+        { "name": "alignment", "type": { "base": "size_t" }, "doc": "" }
+      ],
+      "doc": ""
+    }
+  ],
+
+  "structs": [
+    {
+      "name": "SfAllocator",
+      "fields": [
+        { "name": "user_data", "type": { "base": "void", "ptr": [{}] }, "doc": "" },
+        { "name": "alloc", "type": { "base": "SfAllocFn" }, "doc": "" },
+        { "name": "remap", "type": { "base": "SfRemapFn" }, "doc": "" },
+        { "name": "free", "type": { "base": "SfFreeFn" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfSizeAndAlign",
+      "fields": [
+        { "name": "size", "type": { "base": "size_t" }, "doc": "" },
+        { "name": "alignment", "type": { "base": "size_t" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfSurfaceWin32Desc",
+      "platform": "win32",
+      "fields": [
+        { "name": "hinstance", "type": { "base": "void", "ptr": [{}] }, "doc": "" },
+        { "name": "hwnd", "type": { "base": "void", "ptr": [{}] }, "doc": "" }
+      ],
+      "doc": ""
+    },
+
+    {
+      "name": "SfSwapchainDesc",
+      "fields": [
+        { "name": "format", "type": { "base": "SfFormat" }, "doc": "" },
+        { "name": "present_mode", "type": { "base": "SfPresentMode" }, "doc": "" },
+        { "name": "usage", "type": { "base": "SfTextureUsageFlags" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfDepthAttachment",
+      "fields": [
+        { "name": "texture", "type": { "base": "SfTexture", "ptr": [{ "const": true, "optional": true }] }, "default": "NULL", "doc": "" },
+        { "name": "load_op", "type": { "base": "SfLoadOp" }, "default": "SF_LOAD_OP_LOAD", "doc": "" },
+        { "name": "store_op", "type": { "base": "SfStoreOp" }, "default": "SF_STORE_OP_STORE", "doc": "" },
+        { "name": "clear_value", "type": { "base": "float" }, "default": "1.0f", "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfStencilAttachment",
+      "fields": [
+        { "name": "texture", "type": { "base": "SfTexture", "ptr": [{ "const": true, "optional": true }] }, "default": "NULL", "doc": "" },
+        { "name": "load_op", "type": { "base": "SfLoadOp" }, "default": "SF_LOAD_OP_LOAD", "doc": "" },
+        { "name": "store_op", "type": { "base": "SfStoreOp" }, "default": "SF_STORE_OP_STORE", "doc": "" },
+        { "name": "clear_value", "type": { "base": "uint32_t" }, "default": "0", "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfColorAttachment",
+      "fields": [
+        { "name": "texture", "type": { "base": "SfTexture", "ptr": [{ "const": true }] }, "doc": "" },
+        { "name": "load_op", "type": { "base": "SfLoadOp" }, "default": "SF_LOAD_OP_LOAD", "doc": "" },
+        { "name": "store_op", "type": { "base": "SfStoreOp" }, "default": "SF_STORE_OP_STORE", "doc": "" },
+        { "name": "clear_color", "type": { "base": "float", "array": 4 }, "default": "{0.0, 0.0, 0.0, 0.0}", "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfRenderPassDesc",
+      "fields": [
+        { "name": "depth_attachment", "type": { "base": "SfDepthAttachment" }, "doc": "" },
+        { "name": "stencil_attachment", "type": { "base": "SfStencilAttachment" }, "doc": "" },
+        { "name": "color_attachment_count", "type": { "base": "uint32_t" }, "doc": "" },
+        { "name": "color_attachments", "type": { "base": "SfColorAttachment", "ptr": [{ "const": true, "optional": true, "len": "color_attachment_count" }] }, "default": "NULL", "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfDrawIndexedArguments",
+      "fields": [
+        { "name": "index_count", "type": { "base": "uint32_t" }, "doc": "" },
+        { "name": "instance_count", "type": { "base": "uint32_t" }, "default": "1", "doc": "" },
+        { "name": "first_index", "type": { "base": "uint32_t" }, "default": "0", "doc": "" },
+        { "name": "vertex_offset", "type": { "base": "int32_t" }, "default": "0", "doc": "" },
+        { "name": "first_instance", "type": { "base": "uint32_t" }, "default": "0", "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfTextureDesc",
+      "fields": [
+        { "name": "type", "type": { "base": "SfTextureType" }, "default": "SF_TEXTURE_TYPE_2D", "doc": "" },
+        { "name": "dimensions", "type": { "base": "uint32_t", "array": 3 }, "doc": "" },
+        { "name": "mip_count", "type": { "base": "uint32_t" }, "default": "1", "doc": "" },
+        { "name": "layer_count", "type": { "base": "uint32_t" }, "default": "1", "doc": "" },
+        { "name": "format", "type": { "base": "SfFormat" }, "default": "SF_FORMAT_NONE", "doc": "" },
+        { "name": "usage", "type": { "base": "SfTextureUsageFlags" }, "default": "0", "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfTextureViewDesc",
+      "fields": [
+        { "name": "format", "type": { "base": "SfFormat" }, "default": "SF_FORMAT_NONE", "doc": "" },
+        { "name": "base_mip", "type": { "base": "uint32_t" }, "default": "0", "doc": "" },
+        { "name": "mip_count", "type": { "base": "uint32_t" }, "default": "SF_ALL_MIPS", "doc": "" },
+        { "name": "base_layer", "type": { "base": "uint32_t" }, "default": "0", "doc": "" },
+        { "name": "layer_count", "type": { "base": "uint32_t" }, "default": "SF_ALL_LAYERS", "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfDescriptor",
+      "fields": [
+        { "name": "data", "type": { "base": "uint8_t", "array": "SF_DESCRIPTOR_MAX_SIZE" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfBlendDesc",
+      "fields": [
+        { "name": "color_op", "type": { "base": "SfBlendOp" }, "default": "SF_BLEND_OP_ADD", "doc": "" },
+        { "name": "src_color_factor", "type": { "base": "SfBlendFactor" }, "default": "SF_BLEND_FACTOR_ONE", "doc": "" },
+        { "name": "dst_color_factor", "type": { "base": "SfBlendFactor" }, "default": "SF_BLEND_FACTOR_ZERO", "doc": "" },
+        { "name": "alpha_op", "type": { "base": "SfBlendOp" }, "default": "SF_BLEND_OP_ADD", "doc": "" },
+        { "name": "src_alpha_factor", "type": { "base": "SfBlendFactor" }, "default": "SF_BLEND_FACTOR_ONE", "doc": "" },
+        { "name": "dst_alpha_factor", "type": { "base": "SfBlendFactor" }, "default": "SF_BLEND_FACTOR_ZERO", "doc": "" },
+        { "name": "color_write_mask", "type": { "base": "SfColorWriteMask" }, "default": "SF_COLOR_WRITE_MASK_ALL", "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfColorTarget",
+      "fields": [
+        { "name": "format", "type": { "base": "SfFormat" }, "default": "SF_FORMAT_NONE", "doc": "" },
+        { "name": "write_mask", "type": { "base": "SfColorWriteMask" }, "default": "SF_COLOR_WRITE_MASK_ALL", "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfGraphicsPipelineDesc",
+      "fields": [
+        { "name": "topology", "type": { "base": "SfTopology" }, "default": "SF_TOPOLOGY_TRIANGLE_LIST", "doc": "" },
+        { "name": "cull", "type": { "base": "SfCull" }, "default": "SF_CULL_NONE", "doc": "" },
+        { "name": "alpha_to_coverage", "type": { "base": "bool" }, "default": "false", "doc": "" },
+        { "name": "support_dual_source_blending", "type": { "base": "bool" }, "default": "false", "doc": "" },
+        { "name": "sample_count", "type": { "base": "uint32_t" }, "default": "1", "doc": "" },
+        { "name": "depth_format", "type": { "base": "SfFormat" }, "default": "SF_FORMAT_NONE", "doc": "" },
+        { "name": "stencil_format", "type": { "base": "SfFormat" }, "default": "SF_FORMAT_NONE", "doc": "" },
+        { "name": "color_target_count", "type": { "base": "uint32_t" }, "doc": "" },
+        { "name": "color_targets", "type": { "base": "SfColorTarget", "ptr": [{ "const": true, "optional": true, "len": "color_target_count" }] }, "default": "NULL", "doc": "" },
+        { "name": "blend_state", "type": { "base": "SfBlendDesc", "ptr": [{ "const": true, "optional": true }] }, "default": "NULL", "doc": "" }
+      ],
+      "doc": ""
+    }
+  ],
+
+  "enums": [
+    {
+      "name": "SfMemory",
+      "underlying": "uint32_t",
+      "values": [
+        { "name": "SF_MEMORY_DEFAULT", "value": 0, "doc": "" },
+        { "name": "SF_MEMORY_GPU", "value": 1, "doc": "" },
+        { "name": "SF_MEMORY_READBACK", "value": 2, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfPresentMode",
+      "underlying": "uint32_t",
+      "values": [
+        { "name": "SF_PRESENT_MODE_IMMEDIATE", "value": 0, "doc": "" },
+        { "name": "SF_PRESENT_MODE_MAILBOX", "value": 1, "doc": "" },
+        { "name": "SF_PRESENT_MODE_FIFO", "value": 2, "doc": "" },
+        { "name": "SF_PRESENT_MODE_FIFO_RELAXED", "value": 3, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfCompareOp",
+      "underlying": "uint32_t",
+      "values": [
+        { "name": "SF_COMPARE_OP_NEVER", "value": 0, "doc": "" },
+        { "name": "SF_COMPARE_OP_LESS", "value": 1, "doc": "" },
+        { "name": "SF_COMPARE_OP_EQUAL", "value": 2, "doc": "" },
+        { "name": "SF_COMPARE_OP_LESS_EQUAL", "value": 3, "doc": "" },
+        { "name": "SF_COMPARE_OP_GREATER", "value": 4, "doc": "" },
+        { "name": "SF_COMPARE_OP_NOT_EQUAL", "value": 5, "doc": "" },
+        { "name": "SF_COMPARE_OP_GREATER_EQUAL", "value": 6, "doc": "" },
+        { "name": "SF_COMPARE_OP_ALWAYS", "value": 7, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfQueueType",
+      "underlying": "uint32_t",
+      "values": [
+        { "name": "SF_QUEUE_TYPE_GRAPHICS", "value": 0, "doc": "" },
+        { "name": "SF_QUEUE_TYPE_COMPUTE", "value": 1, "doc": "" },
+        { "name": "SF_QUEUE_TYPE_TRANSFER", "value": 2, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfLoadOp",
+      "underlying": "uint32_t",
+      "values": [
+        { "name": "SF_LOAD_OP_LOAD", "value": 0, "doc": "" },
+        { "name": "SF_LOAD_OP_CLEAR", "value": 1, "doc": "" },
+        { "name": "SF_LOAD_OP_DONT_CARE", "value": 2, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfStoreOp",
+      "underlying": "uint32_t",
+      "values": [
+        { "name": "SF_STORE_OP_STORE", "value": 0, "doc": "" },
+        { "name": "SF_STORE_OP_DONT_CARE", "value": 1, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfIndexType",
+      "underlying": "uint32_t",
+      "values": [
+        { "name": "SF_INDEX_TYPE_UINT16", "value": 0, "doc": "" },
+        { "name": "SF_INDEX_TYPE_UINT32", "value": 1, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfTextureType",
+      "underlying": "uint32_t",
+      "values": [
+        { "name": "SF_TEXTURE_TYPE_1D", "value": 0, "doc": "" },
+        { "name": "SF_TEXTURE_TYPE_2D", "value": 1, "doc": "" },
+        { "name": "SF_TEXTURE_TYPE_3D", "value": 2, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfTopology",
+      "underlying": "uint32_t",
+      "values": [
+        { "name": "SF_TOPOLOGY_TRIANGLE_LIST", "value": 0, "doc": "" },
+        { "name": "SF_TOPOLOGY_TRIANGLE_STRIP", "value": 1, "doc": "" },
+        { "name": "SF_TOPOLOGY_TRIANGLE_FAN", "value": 2, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfCull",
+      "underlying": "uint32_t",
+      "values": [
+        { "name": "SF_CULL_CCW", "value": 0, "doc": "" },
+        { "name": "SF_CULL_CW", "value": 1, "doc": "" },
+        { "name": "SF_CULL_ALL", "value": 2, "doc": "" },
+        { "name": "SF_CULL_NONE", "value": 3, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfBlendOp",
+      "underlying": "uint32_t",
+      "values": [
+        { "name": "SF_BLEND_OP_ADD", "value": 0, "doc": "" },
+        { "name": "SF_BLEND_OP_SUBTRACT", "value": 1, "doc": "" },
+        { "name": "SF_BLEND_OP_REVERSE_SUBTRACT", "value": 2, "doc": "" },
+        { "name": "SF_BLEND_OP_MIN", "value": 3, "doc": "" },
+        { "name": "SF_BLEND_OP_MAX", "value": 4, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfBlendFactor",
+      "underlying": "uint32_t",
+      "values": [
+        { "name": "SF_BLEND_FACTOR_ZERO", "value": 0, "doc": "" },
+        { "name": "SF_BLEND_FACTOR_ONE", "value": 1, "doc": "" },
+        { "name": "SF_BLEND_FACTOR_SRC_COLOR", "value": 2, "doc": "" },
+        { "name": "SF_BLEND_FACTOR_DST_COLOR", "value": 3, "doc": "" },
+        { "name": "SF_BLEND_FACTOR_SRC_ALPHA", "value": 4, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfFormat",
+      "underlying": "uint32_t",
+      "values": [
+        { "name": "SF_FORMAT_NONE", "value": 0, "doc": "" },
+        { "name": "SF_FORMAT_R8_UNORM", "value": 1, "doc": "" },
+        { "name": "SF_FORMAT_R8_SNORM", "value": 2, "doc": "" },
+        { "name": "SF_FORMAT_R8_UINT", "value": 3, "doc": "" },
+        { "name": "SF_FORMAT_R8_SINT", "value": 4, "doc": "" },
+        { "name": "SF_FORMAT_R16_UNORM", "value": 5, "doc": "" },
+        { "name": "SF_FORMAT_R16_SNORM", "value": 6, "doc": "" },
+        { "name": "SF_FORMAT_R16_UINT", "value": 7, "doc": "" },
+        { "name": "SF_FORMAT_R16_SINT", "value": 8, "doc": "" },
+        { "name": "SF_FORMAT_R16_FLOAT", "value": 9, "doc": "" },
+        { "name": "SF_FORMAT_RG8_UNORM", "value": 10, "doc": "" },
+        { "name": "SF_FORMAT_RG8_SNORM", "value": 11, "doc": "" },
+        { "name": "SF_FORMAT_RG8_UINT", "value": 12, "doc": "" },
+        { "name": "SF_FORMAT_RG8_SINT", "value": 13, "doc": "" },
+        { "name": "SF_FORMAT_R32_FLOAT", "value": 14, "doc": "" },
+        { "name": "SF_FORMAT_R32_UINT", "value": 15, "doc": "" },
+        { "name": "SF_FORMAT_R32_SINT", "value": 16, "doc": "" },
+        { "name": "SF_FORMAT_RG16_UNORM", "value": 17, "doc": "" },
+        { "name": "SF_FORMAT_RG16_SNORM", "value": 18, "doc": "" },
+        { "name": "SF_FORMAT_RG16_UINT", "value": 19, "doc": "" },
+        { "name": "SF_FORMAT_RG16_SINT", "value": 20, "doc": "" },
+        { "name": "SF_FORMAT_RG16_FLOAT", "value": 21, "doc": "" },
+        { "name": "SF_FORMAT_RGBA8_UNORM", "value": 22, "doc": "" },
+        { "name": "SF_FORMAT_RGBA8_UNORM_SRGB", "value": 23, "doc": "" },
+        { "name": "SF_FORMAT_RGBA8_SNORM", "value": 24, "doc": "" },
+        { "name": "SF_FORMAT_RGBA8_UINT", "value": 25, "doc": "" },
+        { "name": "SF_FORMAT_RGBA8_SINT", "value": 26, "doc": "" },
+        { "name": "SF_FORMAT_BGRA8_UNORM", "value": 27, "doc": "" },
+        { "name": "SF_FORMAT_BGRA8_UNORM_SRGB", "value": 28, "doc": "" },
+        { "name": "SF_FORMAT_RGB10A2_UINT", "value": 29, "doc": "" },
+        { "name": "SF_FORMAT_RGB10A2_UNORM", "value": 30, "doc": "" },
+        { "name": "SF_FORMAT_RG11B10_UFLOAT", "value": 31, "doc": "" },
+        { "name": "SF_FORMAT_RGB9E5_UFLOAT", "value": 32, "doc": "" },
+        { "name": "SF_FORMAT_RG32_FLOAT", "value": 33, "doc": "" },
+        { "name": "SF_FORMAT_RG32_UINT", "value": 34, "doc": "" },
+        { "name": "SF_FORMAT_RG32_SINT", "value": 35, "doc": "" },
+        { "name": "SF_FORMAT_RGBA16_UNORM", "value": 36, "doc": "" },
+        { "name": "SF_FORMAT_RGBA16_SNORM", "value": 37, "doc": "" },
+        { "name": "SF_FORMAT_RGBA16_UINT", "value": 38, "doc": "" },
+        { "name": "SF_FORMAT_RGBA16_SINT", "value": 39, "doc": "" },
+        { "name": "SF_FORMAT_RGBA16_FLOAT", "value": 40, "doc": "" },
+        { "name": "SF_FORMAT_RGBA32_FLOAT", "value": 41, "doc": "" },
+        { "name": "SF_FORMAT_RGBA32_UINT", "value": 42, "doc": "" },
+        { "name": "SF_FORMAT_RGBA32_SINT", "value": 43, "doc": "" },
+        { "name": "SF_FORMAT_STENCIL8", "value": 44, "doc": "" },
+        { "name": "SF_FORMAT_DEPTH16_UNORM", "value": 45, "doc": "" },
+        { "name": "SF_FORMAT_DEPTH24_PLUS", "value": 46, "doc": "" },
+        { "name": "SF_FORMAT_DEPTH24_PLUS_STENCIL8", "value": 47, "doc": "" },
+        { "name": "SF_FORMAT_DEPTH32_FLOAT", "value": 48, "doc": "" },
+        { "name": "SF_FORMAT_DEPTH32_FLOAT_STENCIL8", "value": 49, "doc": "" },
+        { "name": "SF_FORMAT_BC1RGBA_UNORM", "value": 50, "doc": "" },
+        { "name": "SF_FORMAT_BC1RGBA_UNORM_SRGB", "value": 51, "doc": "" },
+        { "name": "SF_FORMAT_BC2RGBA_UNORM", "value": 52, "doc": "" },
+        { "name": "SF_FORMAT_BC2RGBA_UNORM_SRGB", "value": 53, "doc": "" },
+        { "name": "SF_FORMAT_BC3RGBA_UNORM", "value": 54, "doc": "" },
+        { "name": "SF_FORMAT_BC3RGBA_UNORM_SRGB", "value": 55, "doc": "" },
+        { "name": "SF_FORMAT_BC4R_UNORM", "value": 56, "doc": "" },
+        { "name": "SF_FORMAT_BC4R_SNORM", "value": 57, "doc": "" },
+        { "name": "SF_FORMAT_BC5RG_UNORM", "value": 58, "doc": "" },
+        { "name": "SF_FORMAT_BC5RG_SNORM", "value": 59, "doc": "" },
+        { "name": "SF_FORMAT_BC6HRGB_UFLOAT", "value": 60, "doc": "" },
+        { "name": "SF_FORMAT_BC6HRGB_FLOAT", "value": 61, "doc": "" },
+        { "name": "SF_FORMAT_BC7RGBA_UNORM", "value": 62, "doc": "" },
+        { "name": "SF_FORMAT_BC7RGBA_UNORM_SRGB", "value": 63, "doc": "" },
+        { "name": "SF_FORMAT_ETC2RGB8_UNORM", "value": 64, "doc": "" },
+        { "name": "SF_FORMAT_ETC2RGB8_UNORM_SRGB", "value": 65, "doc": "" },
+        { "name": "SF_FORMAT_ETC2RGB8A1_UNORM", "value": 66, "doc": "" },
+        { "name": "SF_FORMAT_ETC2RGB8A1_UNORM_SRGB", "value": 67, "doc": "" },
+        { "name": "SF_FORMAT_ETC2RGBA8_UNORM", "value": 68, "doc": "" },
+        { "name": "SF_FORMAT_ETC2RGBA8_UNORM_SRGB", "value": 69, "doc": "" },
+        { "name": "SF_FORMAT_EACR11_UNORM", "value": 70, "doc": "" },
+        { "name": "SF_FORMAT_EACR11_SNORM", "value": 71, "doc": "" },
+        { "name": "SF_FORMAT_EACRG11_UNORM", "value": 72, "doc": "" },
+        { "name": "SF_FORMAT_EACRG11_SNORM", "value": 73, "doc": "" },
+        { "name": "SF_FORMAT_ASTC4X4_UNORM", "value": 74, "doc": "" },
+        { "name": "SF_FORMAT_ASTC4X4_UNORM_SRGB", "value": 75, "doc": "" },
+        { "name": "SF_FORMAT_ASTC5X4_UNORM", "value": 76, "doc": "" },
+        { "name": "SF_FORMAT_ASTC5X4_UNORM_SRGB", "value": 77, "doc": "" },
+        { "name": "SF_FORMAT_ASTC5X5_UNORM", "value": 78, "doc": "" },
+        { "name": "SF_FORMAT_ASTC5X5_UNORM_SRGB", "value": 79, "doc": "" },
+        { "name": "SF_FORMAT_ASTC6X5_UNORM", "value": 80, "doc": "" },
+        { "name": "SF_FORMAT_ASTC6X5_UNORM_SRGB", "value": 81, "doc": "" },
+        { "name": "SF_FORMAT_ASTC6X6_UNORM", "value": 82, "doc": "" },
+        { "name": "SF_FORMAT_ASTC6X6_UNORM_SRGB", "value": 83, "doc": "" },
+        { "name": "SF_FORMAT_ASTC8X5_UNORM", "value": 84, "doc": "" },
+        { "name": "SF_FORMAT_ASTC8X5_UNORM_SRGB", "value": 85, "doc": "" },
+        { "name": "SF_FORMAT_ASTC8X6_UNORM", "value": 86, "doc": "" },
+        { "name": "SF_FORMAT_ASTC8X6_UNORM_SRGB", "value": 87, "doc": "" },
+        { "name": "SF_FORMAT_ASTC8X8_UNORM", "value": 88, "doc": "" },
+        { "name": "SF_FORMAT_ASTC8X8_UNORM_SRGB", "value": 89, "doc": "" },
+        { "name": "SF_FORMAT_ASTC10X5_UNORM", "value": 90, "doc": "" },
+        { "name": "SF_FORMAT_ASTC10X5_UNORM_SRGB", "value": 91, "doc": "" },
+        { "name": "SF_FORMAT_ASTC10X6_UNORM", "value": 92, "doc": "" },
+        { "name": "SF_FORMAT_ASTC10X6_UNORM_SRGB", "value": 93, "doc": "" },
+        { "name": "SF_FORMAT_ASTC10X8_UNORM", "value": 94, "doc": "" },
+        { "name": "SF_FORMAT_ASTC10X8_UNORM_SRGB", "value": 95, "doc": "" },
+        { "name": "SF_FORMAT_ASTC10X10_UNORM", "value": 96, "doc": "" },
+        { "name": "SF_FORMAT_ASTC10X10_UNORM_SRGB", "value": 97, "doc": "" },
+        { "name": "SF_FORMAT_ASTC12X10_UNORM", "value": 98, "doc": "" },
+        { "name": "SF_FORMAT_ASTC12X10_UNORM_SRGB", "value": 99, "doc": "" },
+        { "name": "SF_FORMAT_ASTC12X12_UNORM", "value": 100, "doc": "" },
+        { "name": "SF_FORMAT_ASTC12X12_UNORM_SRGB", "value": 101, "doc": "" }
+      ],
+      "doc": ""
+    }
+  ],
+
+  "flags": [
+    {
+      "name": "SfStageFlags",
+      "underlying": "uint32_t",
+      "bits": [
+        { "name": "SF_STAGE_TRANSFER_BIT", "bit": 0, "doc": "" },
+        { "name": "SF_STAGE_COMPUTE_BIT", "bit": 1, "doc": "" },
+        { "name": "SF_STAGE_RASTER_COLOR_OUT_BIT", "bit": 2, "doc": "" },
+        { "name": "SF_STAGE_RASTER_DEPTH_OUT_BIT", "bit": 3, "doc": "" },
+        { "name": "SF_STAGE_PIXEL_SHADER_BIT", "bit": 4, "doc": "" },
+        { "name": "SF_STAGE_VERTEX_SHADER_BIT", "bit": 5, "doc": "" }
+      ],
+      "combinations": [
+        {
+          "name": "SF_STAGE_ALL",
+          "bits": [
+            "SF_STAGE_TRANSFER_BIT",
+            "SF_STAGE_COMPUTE_BIT",
+            "SF_STAGE_RASTER_COLOR_OUT_BIT",
+            "SF_STAGE_RASTER_DEPTH_OUT_BIT",
+            "SF_STAGE_PIXEL_SHADER_BIT",
+            "SF_STAGE_VERTEX_SHADER_BIT"
+          ],
+          "doc": ""
+        }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfHazardFlags",
+      "underlying": "uint32_t",
+      "bits": [
+        { "name": "SF_HAZARD_DRAW_ARGUMENTS_BIT", "bit": 0, "doc": "" },
+        { "name": "SF_HAZARD_DESCRIPTORS_BIT", "bit": 1, "doc": "" },
+        { "name": "SF_HAZARD_DEPTH_STENCIL_BIT", "bit": 2, "doc": "" }
+      ],
+      "combinations": [],
+      "doc": ""
+    },
+    {
+      "name": "SfTextureUsageFlags",
+      "underlying": "uint32_t",
+      "bits": [
+        { "name": "SF_TEXTURE_USAGE_SAMPLED_BIT", "bit": 0, "doc": "" },
+        { "name": "SF_TEXTURE_USAGE_STORAGE_BIT", "bit": 1, "doc": "" },
+        { "name": "SF_TEXTURE_USAGE_COLOR_ATTACHMENT_BIT", "bit": 2, "doc": "" },
+        { "name": "SF_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT", "bit": 3, "doc": "" }
+      ],
+      "combinations": [],
+      "doc": ""
+    },
+    {
+      "name": "SfColorWriteMask",
+      "underlying": "uint32_t",
+      "bits": [
+        { "name": "SF_COLOR_WRITE_MASK_R_BIT", "bit": 0, "doc": "" },
+        { "name": "SF_COLOR_WRITE_MASK_G_BIT", "bit": 1, "doc": "" },
+        { "name": "SF_COLOR_WRITE_MASK_B_BIT", "bit": 2, "doc": "" },
+        { "name": "SF_COLOR_WRITE_MASK_A_BIT", "bit": 3, "doc": "" }
+      ],
+      "combinations": [
+        {
+          "name": "SF_COLOR_WRITE_MASK_ALL",
+          "bits": [
+            "SF_COLOR_WRITE_MASK_R_BIT",
+            "SF_COLOR_WRITE_MASK_G_BIT",
+            "SF_COLOR_WRITE_MASK_B_BIT",
+            "SF_COLOR_WRITE_MASK_A_BIT"
+          ],
+          "doc": ""
+        }
+      ],
+      "doc": ""
+    }
+  ],
+
+  "functions": [
+    {
+      "name": "sfCreateInstance",
+      "group": "SfInstance",
+      "return": { "base": "SfInstance", "ptr": [{}] },
+      "params": [
+        { "name": "allocator", "type": { "base": "SfAllocator", "ptr": [{ "optional": true }] }, "doc": "" },
+        { "name": "get_instance_proc_addr", "type": { "base": "PFN_vkGetInstanceProcAddr" }, "doc": "" },
+        { "name": "required_surface_extension_count", "type": { "base": "size_t" }, "doc": "" },
+        { "name": "required_surface_extensions", "type": { "base": "char", "ptr": [{ "const": true, "len": "null_terminated" }, { "const": true, "len": "required_surface_extension_count" }] }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfDestroyInstance",
+      "group": "SfInstance",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "instance", "type": { "base": "SfInstance", "ptr": [{}] }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfEnumerateAdapters",
+      "group": "SfInstance",
+      "enumerate": true,
+      "return": { "base": "void" },
+      "params": [
+        { "name": "instance", "type": { "base": "SfInstance", "ptr": [{}] }, "doc": "" },
+        { "name": "adapters_capacity", "type": { "base": "size_t" }, "doc": "" },
+        { "name": "adapters", "type": { "base": "SfAdapter", "ptr": [{}, { "optional": true, "len": "adapters_capacity" }] }, "out": true, "doc": "" },
+        { "name": "adapter_count", "type": { "base": "size_t", "ptr": [{}] }, "out": true, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfCreateSurfaceWin32",
+      "group": "SfSurface",
+      "platform": "win32",
+      "return": { "base": "SfSurface", "ptr": [{}] },
+      "params": [
+        { "name": "instance", "type": { "base": "SfInstance", "ptr": [{}] }, "doc": "" },
+        { "name": "desc", "type": { "base": "SfSurfaceWin32Desc" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfDestroySurface",
+      "group": "SfSurface",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "surface", "type": { "base": "SfSurface", "ptr": [{}] }, "doc": "" },
+        { "name": "instance", "type": { "base": "SfInstance", "ptr": [{}] }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfSurfaceSupportedUsage",
+      "group": "SfSurface",
+      "return": { "base": "SfTextureUsageFlags" },
+      "params": [
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "surface", "type": { "base": "SfSurface", "ptr": [{}] }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfSurfaceFormats",
+      "group": "SfSurface",
+      "enumerate": true,
+      "return": { "base": "void" },
+      "params": [
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "surface", "type": { "base": "SfSurface", "ptr": [{}] }, "doc": "" },
+        { "name": "formats_capacity", "type": { "base": "size_t" }, "doc": "" },
+        { "name": "formats", "type": { "base": "SfFormat", "ptr": [{ "optional": true, "len": "formats_capacity" }] }, "out": true, "doc": "" },
+        { "name": "format_count", "type": { "base": "size_t", "ptr": [{}] }, "out": true, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfSurfacePresentModes",
+      "group": "SfSurface",
+      "enumerate": true,
+      "return": { "base": "void" },
+      "params": [
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "surface", "type": { "base": "SfSurface", "ptr": [{}] }, "doc": "" },
+        { "name": "present_modes_capacity", "type": { "base": "size_t" }, "doc": "" },
+        { "name": "present_modes", "type": { "base": "SfPresentMode", "ptr": [{ "optional": true, "len": "present_modes_capacity" }] }, "out": true, "doc": "" },
+        { "name": "present_mode_count", "type": { "base": "size_t", "ptr": [{}] }, "out": true, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfCreateDevice",
+      "group": "SfDevice",
+      "return": { "base": "SfDevice", "ptr": [{}] },
+      "params": [
+        { "name": "instance", "type": { "base": "SfInstance", "ptr": [{}] }, "doc": "" },
+        { "name": "adapter", "type": { "base": "SfAdapter", "ptr": [{}] }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfDestroyDevice",
+      "group": "SfDevice",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfDeviceToHostPointer",
+      "group": "SfDevice",
+      "return": { "base": "void", "ptr": [{}] },
+      "params": [
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "address", "type": { "base": "SfDeviceAddress" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfMalloc",
+      "group": "SfDevice",
+      "return": { "base": "SfDeviceAddress" },
+      "params": [
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "size", "type": { "base": "size_t" }, "doc": "" },
+        { "name": "alignment", "type": { "base": "size_t" }, "doc": "" },
+        { "name": "memory", "type": { "base": "SfMemory" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfFree",
+      "group": "SfDevice",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "address", "type": { "base": "SfDeviceAddress" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfDescriptorSizeAndHeapAlign",
+      "group": "SfDescriptor",
+      "return": { "base": "SfSizeAndAlign" },
+      "params": [
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfCreateQueue",
+      "group": "SfQueue",
+      "return": { "base": "SfQueue", "ptr": [{}] },
+      "params": [
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "queue_type", "type": { "base": "SfQueueType" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfStartCommandRecording",
+      "group": "SfQueue",
+      "return": { "base": "SfCommandBuffer", "ptr": [{}] },
+      "params": [
+        { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfSubmit",
+      "group": "SfQueue",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "command_buffer_count", "type": { "base": "size_t" }, "doc": "" },
+        { "name": "command_buffers", "type": { "base": "SfCommandBuffer", "ptr": [{}, { "const": true, "len": "command_buffer_count" }] }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfSubmitAndSignal",
+      "group": "SfQueue",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "command_buffer_count", "type": { "base": "size_t" }, "doc": "" },
+        { "name": "command_buffers", "type": { "base": "SfCommandBuffer", "ptr": [{}, { "const": true, "len": "command_buffer_count" }] }, "doc": "" },
+        { "name": "signal_semaphore", "type": { "base": "SfSemaphore", "ptr": [{}] }, "doc": "" },
+        { "name": "signal_value", "type": { "base": "uint64_t" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfCreateSemaphore",
+      "group": "SfSemaphore",
+      "return": { "base": "SfSemaphore", "ptr": [{}] },
+      "params": [
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "initial_value", "type": { "base": "uint64_t" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfDestroySemaphore",
+      "group": "SfSemaphore",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "semaphore", "type": { "base": "SfSemaphore", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfWaitSemaphore",
+      "group": "SfSemaphore",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "semaphore", "type": { "base": "SfSemaphore", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "value", "type": { "base": "uint64_t" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfCreateSwapchain",
+      "group": "SfSwapchain",
+      "return": { "base": "SfSwapchain", "ptr": [{}] },
+      "params": [
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
+        { "name": "surface", "type": { "base": "SfSurface", "ptr": [{}] }, "doc": "" },
+        { "name": "desc", "type": { "base": "SfSwapchainDesc" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfDestroySwapchain",
+      "group": "SfSwapchain",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "swapchain", "type": { "base": "SfSwapchain", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfSwapchainAcquireNextTexture",
+      "group": "SfSwapchain",
+      "return": { "base": "SfTexture", "ptr": [{}] },
+      "params": [
+        { "name": "swapchain", "type": { "base": "SfSwapchain", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
+        { "name": "width", "type": { "base": "uint32_t" }, "doc": "" },
+        { "name": "height", "type": { "base": "uint32_t" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfSwapchainPresent",
+      "group": "SfSwapchain",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "swapchain", "type": { "base": "SfSwapchain", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
+        { "name": "semaphore", "type": { "base": "SfSemaphore", "ptr": [{}] }, "doc": "" },
+        { "name": "semaphore_value", "type": { "base": "uint64_t" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfSetActiveTextureHeap",
+      "group": "SfCommandBuffer",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "heap_address", "type": { "base": "SfDeviceAddress" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfSetPipeline",
+      "group": "SfCommandBuffer",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "pipeline", "type": { "base": "SfPipeline", "ptr": [{}] }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfDispatch",
+      "group": "SfCommandBuffer",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "x", "type": { "base": "uint32_t" }, "doc": "" },
+        { "name": "y", "type": { "base": "uint32_t" }, "doc": "" },
+        { "name": "z", "type": { "base": "uint32_t" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfBarrier",
+      "group": "SfCommandBuffer",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "before", "type": { "base": "SfStageFlags" }, "doc": "" },
+        { "name": "after", "type": { "base": "SfStageFlags" }, "doc": "" },
+        { "name": "hazard", "type": { "base": "SfHazardFlags" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfCopyTextureToBuffer",
+      "group": "SfCommandBuffer",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "destination", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "source", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" }
+      ],
+      "doc": "256 bytes is a typical optimal alignment for destination"
+    },
+    {
+      "name": "sfCopyBufferToTexture",
+      "group": "SfCommandBuffer",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "destination", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "source", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfBeginRenderPass",
+      "group": "SfCommandBuffer",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "desc", "type": { "base": "SfRenderPassDesc" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfEndRenderPass",
+      "group": "SfCommandBuffer",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfDraw",
+      "group": "SfCommandBuffer",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "vertex_data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "pixel_data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "vertex_count", "type": { "base": "uint32_t" }, "doc": "" },
+        { "name": "instance_count", "type": { "base": "uint32_t" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfDrawIndexed",
+      "group": "SfCommandBuffer",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "vertex_data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "pixel_data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "index_type", "type": { "base": "SfIndexType" }, "doc": "" },
+        { "name": "indices", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "index_count", "type": { "base": "uint32_t" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfDrawIndexedInstanced",
+      "group": "SfCommandBuffer",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "vertex_data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "pixel_data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "index_type", "type": { "base": "SfIndexType" }, "doc": "" },
+        { "name": "indices", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "index_count", "type": { "base": "uint32_t" }, "doc": "" },
+        { "name": "instance_count", "type": { "base": "uint32_t" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfDrawIndexedInstancedIndirect",
+      "group": "SfCommandBuffer",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "vertex_data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "pixel_data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "index_type", "type": { "base": "SfIndexType" }, "doc": "" },
+        { "name": "indices", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "arguments", "type": { "base": "SfDeviceAddress" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfTextureSizeAndAlign",
+      "group": "SfTexture",
+      "return": { "base": "SfSizeAndAlign" },
+      "params": [
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "desc", "type": { "base": "SfTextureDesc" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfCreateTexture",
+      "group": "SfTexture",
+      "return": { "base": "SfTexture", "ptr": [{}] },
+      "params": [
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "desc", "type": { "base": "SfTextureDesc" }, "doc": "" },
+        { "name": "data", "type": { "base": "SfDeviceAddress" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfDestroyTexture",
+      "group": "SfTexture",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfTextureStorageDescriptor",
+      "group": "SfTexture",
+      "return": { "base": "SfDescriptor" },
+      "params": [
+        { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "desc", "type": { "base": "SfTextureViewDesc" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfTextureViewDescriptor",
+      "group": "SfTexture",
+      "return": { "base": "SfDescriptor" },
+      "params": [
+        { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "desc", "type": { "base": "SfTextureViewDesc" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfCreateComputePipeline",
+      "group": "SfPipeline",
+      "return": { "base": "SfPipeline", "ptr": [{}] },
+      "params": [
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "ir_size", "type": { "base": "size_t" }, "doc": "" },
+        { "name": "ir", "type": { "base": "uint8_t", "ptr": [{ "const": true, "len": "ir_size" }] }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfCreateGraphicsPipeline",
+      "group": "SfPipeline",
+      "return": { "base": "SfPipeline", "ptr": [{}] },
+      "params": [
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "vertex_ir_size", "type": { "base": "size_t" }, "doc": "" },
+        { "name": "vertex_ir", "type": { "base": "uint8_t", "ptr": [{ "const": true, "len": "vertex_ir_size" }] }, "doc": "" },
+        { "name": "pixel_ir_size", "type": { "base": "size_t" }, "doc": "" },
+        { "name": "pixel_ir", "type": { "base": "uint8_t", "ptr": [{ "const": true, "len": "pixel_ir_size" }] }, "doc": "" },
+        { "name": "desc", "type": { "base": "SfGraphicsPipelineDesc" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfDestroyPipeline",
+      "group": "SfPipeline",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "pipeline", "type": { "base": "SfPipeline", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" }
+      ],
+      "doc": ""
+    }
+  ]
+}
