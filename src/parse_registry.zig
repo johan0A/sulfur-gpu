@@ -1,13 +1,10 @@
 const std = @import("std");
 
-pub fn main(init: std.process.Init) !void {
-    const arena = init.arena.allocator();
-    const parsed = try std.json.parseFromSlice(Registry, arena, @embedFile("sulfur.json"), .{});
-    _ = parsed; // autofix
+pub fn parse(arena: std.mem.Allocator, bytes: []const u8) Registry {
+    return try std.json.parseFromSliceLeaky(Registry, arena, bytes, .{});
 }
 
-const Registry = struct {
-    registry: []u8,
+pub const Registry = struct {
     version: []u8,
 
     fn_prefix: []u8,
@@ -24,57 +21,57 @@ const Registry = struct {
 
     functions: []Function,
 
-    const Constant = struct {
+    pub const Constant = struct {
         name: []u8,
         type: []u8,
         value: []u8,
         doc: []u8,
     };
 
-    const TypeDef = struct {
+    pub const TypeDef = struct {
         name: []u8,
-        underlying: []u8,
+        type: []u8,
         doc: []u8,
     };
 
-    const Opaque = struct {
+    pub const Opaque = struct {
         name: []u8,
         doc: []u8,
     };
 
-    const FunctionPointer = struct {
+    pub const FunctionPointer = struct {
         name: []u8,
         @"return": Type,
         params: []Param,
         doc: []u8,
     };
 
-    const Struct = struct {
+    pub const Struct = struct {
         name: []u8,
         platform: ?Platform = null,
         fields: []Field,
         doc: []u8,
     };
 
-    const Field = struct {
+    pub const Field = struct {
         name: []u8,
         type: Type,
         default: ?[]u8 = null,
         doc: []u8,
     };
 
-    const Type = struct {
+    pub const Type = struct {
         base: []u8,
         ptr: []Ptr = &.{},
         array: ?Array = null,
 
-        const Ptr = struct {
+        pub const Ptr = struct {
             optional: bool = false,
             @"const": bool = false,
             len: ?[]u8 = null,
         };
 
-        const Array = union(enum) {
+        pub const Array = union(enum) {
             int: u32,
             constant: []u8,
 
@@ -88,9 +85,9 @@ const Registry = struct {
         };
     };
 
-    const Enum = struct {
+    pub const Enum = struct {
         name: []u8,
-        underlying: []u8,
+        backing_type: []u8,
         values: []Value,
         doc: []u8,
 
@@ -101,9 +98,9 @@ const Registry = struct {
         };
     };
 
-    const Flags = struct {
+    pub const Flags = struct {
         name: []u8,
-        underlying: []u8,
+        backing_type: []u8,
         bits: []Bit,
         combinations: []Combination,
         doc: []u8,
@@ -121,7 +118,7 @@ const Registry = struct {
         };
     };
 
-    const Function = struct {
+    pub const Function = struct {
         name: []u8,
         platform: ?Platform = null,
         group: []u8,
@@ -131,14 +128,14 @@ const Registry = struct {
         doc: []u8,
     };
 
-    const Param = struct {
+    pub const Param = struct {
         name: []u8,
         type: Type,
         out: bool = false,
         doc: []u8,
     };
 
-    const Platform = enum {
+    pub const Platform = enum {
         win32,
     };
 };

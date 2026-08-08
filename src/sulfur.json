@@ -1,5 +1,4 @@
 {
-  "registry": "sulfur",
   "version": "0.1.0",
 
   "fn_prefix": "sf",
@@ -13,7 +12,7 @@
   ],
 
   "typedefs": [
-    { "name": "SfDeviceAddress", "underlying": "uint64_t", "doc": "" }
+    { "name": "SfDeviceAddress", "type": "uint64_t", "doc": "" }
   ],
 
   "opaques": [
@@ -226,7 +225,7 @@
   "enums": [
     {
       "name": "SfMemory",
-      "underlying": "uint32_t",
+      "backing_type": "uint32_t",
       "values": [
         { "name": "SF_MEMORY_DEFAULT", "value": 0, "doc": "" },
         { "name": "SF_MEMORY_GPU", "value": 1, "doc": "" },
@@ -236,7 +235,7 @@
     },
     {
       "name": "SfPresentMode",
-      "underlying": "uint32_t",
+      "backing_type": "uint32_t",
       "values": [
         { "name": "SF_PRESENT_MODE_IMMEDIATE", "value": 0, "doc": "" },
         { "name": "SF_PRESENT_MODE_MAILBOX", "value": 1, "doc": "" },
@@ -247,7 +246,7 @@
     },
     {
       "name": "SfCompareOp",
-      "underlying": "uint32_t",
+      "backing_type": "uint32_t",
       "values": [
         { "name": "SF_COMPARE_OP_NEVER", "value": 0, "doc": "" },
         { "name": "SF_COMPARE_OP_LESS", "value": 1, "doc": "" },
@@ -262,7 +261,7 @@
     },
     {
       "name": "SfQueueType",
-      "underlying": "uint32_t",
+      "backing_type": "uint32_t",
       "values": [
         { "name": "SF_QUEUE_TYPE_GRAPHICS", "value": 0, "doc": "" },
         { "name": "SF_QUEUE_TYPE_COMPUTE", "value": 1, "doc": "" },
@@ -272,7 +271,7 @@
     },
     {
       "name": "SfLoadOp",
-      "underlying": "uint32_t",
+      "backing_type": "uint32_t",
       "values": [
         { "name": "SF_LOAD_OP_LOAD", "value": 0, "doc": "" },
         { "name": "SF_LOAD_OP_CLEAR", "value": 1, "doc": "" },
@@ -282,7 +281,7 @@
     },
     {
       "name": "SfStoreOp",
-      "underlying": "uint32_t",
+      "backing_type": "uint32_t",
       "values": [
         { "name": "SF_STORE_OP_STORE", "value": 0, "doc": "" },
         { "name": "SF_STORE_OP_DONT_CARE", "value": 1, "doc": "" }
@@ -291,7 +290,7 @@
     },
     {
       "name": "SfIndexType",
-      "underlying": "uint32_t",
+      "backing_type": "uint32_t",
       "values": [
         { "name": "SF_INDEX_TYPE_UINT16", "value": 0, "doc": "" },
         { "name": "SF_INDEX_TYPE_UINT32", "value": 1, "doc": "" }
@@ -300,7 +299,7 @@
     },
     {
       "name": "SfTextureType",
-      "underlying": "uint32_t",
+      "backing_type": "uint32_t",
       "values": [
         { "name": "SF_TEXTURE_TYPE_1D", "value": 0, "doc": "" },
         { "name": "SF_TEXTURE_TYPE_2D", "value": 1, "doc": "" },
@@ -310,7 +309,7 @@
     },
     {
       "name": "SfTopology",
-      "underlying": "uint32_t",
+      "backing_type": "uint32_t",
       "values": [
         { "name": "SF_TOPOLOGY_TRIANGLE_LIST", "value": 0, "doc": "" },
         { "name": "SF_TOPOLOGY_TRIANGLE_STRIP", "value": 1, "doc": "" },
@@ -320,7 +319,7 @@
     },
     {
       "name": "SfCull",
-      "underlying": "uint32_t",
+      "backing_type": "uint32_t",
       "values": [
         { "name": "SF_CULL_CCW", "value": 0, "doc": "" },
         { "name": "SF_CULL_CW", "value": 1, "doc": "" },
@@ -331,7 +330,7 @@
     },
     {
       "name": "SfBlendOp",
-      "underlying": "uint32_t",
+      "backing_type": "uint32_t",
       "values": [
         { "name": "SF_BLEND_OP_ADD", "value": 0, "doc": "" },
         { "name": "SF_BLEND_OP_SUBTRACT", "value": 1, "doc": "" },
@@ -343,7 +342,7 @@
     },
     {
       "name": "SfBlendFactor",
-      "underlying": "uint32_t",
+      "backing_type": "uint32_t",
       "values": [
         { "name": "SF_BLEND_FACTOR_ZERO", "value": 0, "doc": "" },
         { "name": "SF_BLEND_FACTOR_ONE", "value": 1, "doc": "" },
@@ -355,7 +354,7 @@
     },
     {
       "name": "SfFormat",
-      "underlying": "uint32_t",
+      "backing_type": "uint32_t",
       "values": [
         { "name": "SF_FORMAT_NONE", "value": 0, "doc": "" },
         { "name": "SF_FORMAT_R8_UNORM", "value": 1, "doc": "" },
@@ -467,7 +466,7 @@
   "flags": [
     {
       "name": "SfStageFlags",
-      "underlying": "uint32_t",
+      "backing_type": "uint32_t",
       "bits": [
         { "name": "SF_STAGE_TRANSFER_BIT", "bit": 0, "doc": "" },
         { "name": "SF_STAGE_COMPUTE_BIT", "bit": 1, "doc": "" },
@@ -494,7 +493,7 @@
     },
     {
       "name": "SfHazardFlags",
-      "underlying": "uint32_t",
+      "backing_type": "uint32_t",
       "bits": [
         { "name": "SF_HAZARD_DRAW_ARGUMENTS_BIT", "bit": 0, "doc": "" },
         { "name": "SF_HAZARD_DESCRIPTORS_BIT", "bit": 1, "doc": "" },
@@ -505,7 +504,7 @@
     },
     {
       "name": "SfTextureUsageFlags",
-      "underlying": "uint32_t",
+      "backing_type": "uint32_t",
       "bits": [
         { "name": "SF_TEXTURE_USAGE_SAMPLED_BIT", "bit": 0, "doc": "" },
         { "name": "SF_TEXTURE_USAGE_STORAGE_BIT", "bit": 1, "doc": "" },
@@ -517,7 +516,7 @@
     },
     {
       "name": "SfColorWriteMask",
-      "underlying": "uint32_t",
+      "backing_type": "uint32_t",
       "bits": [
         { "name": "SF_COLOR_WRITE_MASK_R_BIT", "bit": 0, "doc": "" },
         { "name": "SF_COLOR_WRITE_MASK_G_BIT", "bit": 1, "doc": "" },
