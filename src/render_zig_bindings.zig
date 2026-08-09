@@ -2,200 +2,190 @@ const std = @import("std");
 const parse_registry = @import("parse_registry.zig");
 const Registry = parse_registry.Registry;
 
+const Writer = std.Io.Writer;
+const Error = Writer.Error;
+
 pub fn main(init: std.process.Init) !void {
     const arena = init.arena.allocator();
-    const parsed = try std.json.parseFromSlice(Registry, arena, @embedFile("sulfur.json"), .{});
-    const registry = parsed.value;
+    const io = init.io;
+    const args = try init.minimal.args.toSlice(arena);
+    const cwd: std.Io.Dir = .cwd();
 
-    var buf: [4096]u8 = undefined;
-    var file_writer = std.Io.File.stdout().writer(init.io, &buf);
-    try renderBinding(&file_writer.interface, registry);
-    try file_writer.interface.flush();
+    const input = try std.Io.Dir.readFileAlloc(cwd, io, args[1], arena, .unlimited);
+    const registry = try parse_registry.parse(arena, input);
+
+    const file = try cwd.createFile(io, args[2], .{});
+    var buf: [1024]u8 = undefined;
+    var file_writer = file.writer(io, &buf);
+    const w = &file_writer.interface;
+
+    try renderBinding(w, registry);
+    try w.flush();
 }
 
-fn renderBinding(w: *std.Io.Writer, registry: Registry) !void {
+fn renderBinding(w: *Writer, registry: Registry) Error!void {
     try w.print(
-        \\// Generated file do not edit.
+        \\// Generated file, do not edit.
         \\// version: {s}
         \\
-    , .{registry.version});
-    try w.writeAll(
         \\const std = @import("std");
-        \\
         \\const target = @import("builtin").target;
-        \\const sf_callconv: std.builtin.CallingConvention = switch (target.os.tag) {
-        \\    .windows => if (target.cpu.arch.isX86()) .{ .x86_stdcall = .{} } else .c,
-        \\    else => .c,
-        \\};
+        \\
+        \\pub const @"callconv": std.builtin.CallingConvention = switch (target.os.tag) {{
+        \\  .windows => if (target.cpu.arch == .x86) .{{ .x86_stdcall = .{{}} }} else .c,
+        \\  else => .c,
+        \\}};
         \\
         \\
-    );
+    , .{registry.version});
 
-    try sectionHeader(w, "Constants");
     for (registry.constants) |constant| {
-        try renderDoc(w, constant.doc, 0);
+        try renderDoc(w, constant.doc);
         try w.writeAll("pub const ");
-        try writeLowerIdent(w, stripPrefix(constant.name, registry.enum_prefix));
+        try renderConstName(w, registry, constant.name);
         try w.writeAll(": ");
-        try writeTypeName(w, registry, constant.type);
+        try renderTypeName(w, registry, constant.type);
         try w.print(" = {s};\n", .{constant.value});
     }
-    try w.writeByte('\n');
+    try w.writeAll("\n");
 
-    try sectionHeader(w, "Type aliases");
     for (registry.typedefs) |typedef| {
-        try renderDoc(w, typedef.doc, 0);
+        try renderDoc(w, typedef.doc);
         try w.writeAll("pub const ");
-        try writeTypeName(w, registry, typedef.name);
+        try renderTypeName(w, registry, typedef.name);
         try w.writeAll(" = ");
-        try writeTypeName(w, registry, typedef.type);
+        try renderTypeName(w, registry, typedef.type);
         try w.writeAll(";\n");
     }
-    try w.writeByte('\n');
+    try w.writeAll("\n");
 
-    try sectionHeader(w, "Opaque handles");
     for (registry.opaques) |@"opaque"| {
-        try renderDoc(w, @"opaque".doc, 0);
+        try renderDoc(w, @"opaque".doc);
         try w.writeAll("pub const ");
-        try writeTypeName(w, registry, @"opaque".name);
+        try renderTypeName(w, registry, @"opaque".name);
         try w.writeAll(" = opaque {};\n");
     }
-    try w.writeByte('\n');
+    try w.writeAll("\n");
 
-    try sectionHeader(w, "Enums");
     for (registry.enums) |@"enum"| {
-        try renderDoc(w, @"enum".doc, 0);
+        try renderDoc(w, @"enum".doc);
         try w.writeAll("pub const ");
-        try writeTypeName(w, registry, @"enum".name);
+        try renderTypeName(w, registry, @"enum".name);
         try w.writeAll(" = enum(");
-        try writeTypeName(w, registry, @"enum".backing_type);
+        try renderTypeName(w, registry, @"enum".backing_type);
         try w.writeAll(") {\n");
-        for (@"enum".values) |v| {
-            try renderDoc(w, v.doc, 1);
-            try w.writeAll("    ");
-            try writeMemberName(w, registry, @"enum".name, v.name);
-            try w.print(" = {d},\n", .{v.value});
+        for (@"enum".values) |value| {
+            try renderDoc(w, value.doc);
+            try renderMemberName(w, registry, @"enum".name, value.name);
+            try w.print(" = {d},\n", .{value.value});
         }
-        try w.writeAll("    _,\n};\n\n");
+        try w.writeAll("};\n\n");
     }
 
-    try sectionHeader(w, "Flags");
     for (registry.flags) |flags| {
-        const width = bitWidth(flags.backing_type);
-
-        try renderDoc(w, flags.doc, 0);
+        try renderDoc(w, flags.doc);
         try w.writeAll("pub const ");
-        try writeTypeName(w, registry, flags.name);
+        try renderTypeName(w, registry, flags.name);
         try w.writeAll(" = packed struct(");
-        try writeTypeName(w, registry, flags.backing_type);
+        try renderTypeName(w, registry, flags.backing_type);
         try w.writeAll(") {\n");
 
         var highest: u16 = 0;
-        for (flags.bits) |b| highest = @max(highest, b.bit + 1);
+        for (flags.bits) |bit| highest = @max(highest, bit.bit + 1);
 
-        var slot: u16 = 0;
-        while (slot < highest) : (slot += 1) {
-            const bit = for (flags.bits) |b| {
-                if (b.bit == slot) break b;
-            } else null;
-
-            if (bit) |b| {
-                try renderDoc(w, b.doc, 1);
-                try w.writeAll("    ");
-                try writeMemberName(w, registry, flags.name, b.name);
-                try w.writeAll(": bool = false,\n");
+        for (0..highest) |slot| {
+            const bit = for (flags.bits) |bit| {
+                if (bit.bit == slot) break bit;
             } else {
-                try w.print("    reserved_{d}: bool = false,\n", .{slot});
-            }
+                try w.print("reserved_{d}: bool = false,\n", .{slot});
+                continue;
+            };
+            try renderDoc(w, bit.doc);
+            try renderMemberName(w, registry, flags.name, bit.name);
+            try w.writeAll(": bool = false,\n");
         }
-        if (highest < width) {
-            try w.print("    padding: u{d} = 0,\n", .{width - highest});
-        }
+
+        const width = bitWidth(flags.backing_type);
+        if (highest < width) try w.print("padding: u{d} = 0,\n", .{width - highest});
 
         for (flags.combinations) |combination| {
-            try renderDoc(w, combination.doc, 1);
-            try w.writeAll("\n    pub const ");
-            try writeMemberName(w, registry, flags.name, combination.name);
+            try renderDoc(w, combination.doc);
+            try w.writeAll("\npub const ");
+            try renderMemberName(w, registry, flags.name, combination.name);
             try w.writeAll(": ");
-            try writeTypeName(w, registry, flags.name);
+            try renderTypeName(w, registry, flags.name);
             try w.writeAll(" = .{");
-            for (combination.bits, 0..) |bit, i| {
-                if (i != 0) try w.writeByte(',');
+            for (combination.bits) |bit| {
                 try w.writeAll(" .");
-                try writeMemberName(w, registry, flags.name, bit);
-                try w.writeAll(" = true");
+                try renderMemberName(w, registry, flags.name, bit);
+                try w.writeAll(" = true,");
             }
-            try w.writeAll(if (combination.bits.len == 0) "};\n" else " };\n");
+            try w.writeAll(" };\n");
         }
 
         try w.writeAll("};\n\n");
     }
 
-    try sectionHeader(w, "Function pointers");
     for (registry.function_pointers) |function_pointer| {
-        try renderDoc(w, function_pointer.doc, 0);
+        try renderDoc(w, function_pointer.doc);
         try w.writeAll("pub const ");
-        try writeTypeName(w, registry, function_pointer.name);
+        try renderTypeName(w, registry, function_pointer.name);
         try w.writeAll(" = *const fn (");
         try renderParams(w, registry, function_pointer.params);
-        try w.writeAll(") callconv(sf_callconv) ");
+        try w.writeAll(") callconv(@\"callconv\") ");
         try renderType(w, registry, function_pointer.@"return");
         try w.writeAll(";\n");
     }
-    try w.writeByte('\n');
+    try w.writeAll("\n");
 
-    try sectionHeader(w, "Structs");
     for (registry.structs) |@"struct"| {
-        try renderDoc(w, @"struct".doc, 0);
+        try renderDoc(w, @"struct".doc);
         try w.writeAll("pub const ");
-        try writeTypeName(w, registry, @"struct".name);
+        try renderTypeName(w, registry, @"struct".name);
         try w.writeAll(" = extern struct {\n");
         for (@"struct".fields) |field| {
-            try renderDoc(w, field.doc, 1);
-            try w.writeAll("    ");
-            try writeId(w, field.name);
+            try renderDoc(w, field.doc);
+            try renderId(w, field.name);
             try w.writeAll(": ");
             try renderType(w, registry, field.type);
+            if (field.default) |default| {
+                try w.writeAll(" = ");
+                try renderDefault(w, registry, field.type, default);
+            }
             try w.writeAll(",\n");
         }
         try w.writeAll("};\n\n");
     }
 
-    try sectionHeader(w, "Functions");
     for (registry.functions) |function| {
-        try renderDoc(w, function.doc, 0);
+        try renderDoc(w, function.doc);
         try w.print("extern fn {s}(", .{function.name});
         try renderParams(w, registry, function.params);
-        try w.writeAll(") callconv(sf_callconv) ");
+        try w.writeAll(") callconv(@\"callconv\") ");
         try renderType(w, registry, function.@"return");
         try w.writeAll(";\n");
+
         try w.writeAll("pub const ");
-
-        var buff: [1024]u8 = undefined;
-        var name: std.ArrayList(u8) = .initBuffer(&buff);
-        name.appendSliceAssumeCapacity(stripPrefix(function.name, registry.fn_prefix));
-        name.items[0] = std.ascii.toLower(buff[0]);
-        try writeId(w, name.items);
-
+        try renderFnName(w, registry, function.name);
         try w.print(" = {s};\n\n", .{function.name});
     }
 }
 
-fn renderParams(w: *std.Io.Writer, registry: Registry, params: []const Registry.Param) !void {
-    for (params, 0..) |p, i| {
+fn renderParams(w: *Writer, registry: Registry, params: []const Registry.Param) Error!void {
+    for (params, 0..) |param, i| {
         if (i != 0) try w.writeAll(", ");
-        try writeId(w, p.name);
+        try renderId(w, param.name);
         try w.writeAll(": ");
-        try renderType(w, registry, p.type);
+        try renderType(w, registry, param.type);
     }
 }
 
-fn renderType(w: *std.Io.Writer, registry: Registry, @"type": Registry.Type) !void {
+fn renderType(w: *Writer, registry: Registry, @"type": Registry.Type) Error!void {
     if (@"type".array) |array| switch (array) {
         .int => |n| try w.print("[{d}]", .{n}),
         .constant => |c| {
             try w.writeByte('[');
-            try writeLowerIdent(w, stripPrefix(c, registry.enum_prefix));
+            try renderConstName(w, registry, c);
             try w.writeByte(']');
         },
     };
@@ -206,32 +196,84 @@ fn renderType(w: *std.Io.Writer, registry: Registry, @"type": Registry.Type) !vo
         const ptr = @"type".ptr[i];
         if (ptr.optional) try w.writeByte('?');
         if (ptr.len) |len| {
-            if (std.mem.eql(u8, len, "null_terminated")) {
-                try w.writeAll("[*:0]");
-            } else {
-                try w.writeAll("[*]");
-            }
+            try w.writeAll(if (std.mem.eql(u8, len, "null_terminated")) "[*:0]" else "[*]");
         } else {
             try w.writeByte('*');
         }
         if (ptr.@"const") try w.writeAll("const ");
     }
 
-    try writeTypeName(w, registry, @"type".base);
+    if (@"type".ptr.len != 0 and std.mem.eql(u8, @"type".base, "void")) {
+        try w.writeAll("anyopaque");
+    } else {
+        try renderTypeName(w, registry, @"type".base);
+    }
 }
 
-fn renderDoc(w: *std.Io.Writer, doc: []const u8, indent: usize) !void {
+fn renderDefault(w: *Writer, registry: Registry, @"type": Registry.Type, value: []const u8) Error!void {
+    if (@"type".array != null) {
+        var element = @"type";
+        element.array = null;
+
+        if (value[0] != '{') {
+            try w.writeAll("@splat(");
+            try renderDefault(w, registry, element, value);
+            try w.writeAll(")");
+            return;
+        }
+
+        try w.writeAll(".{");
+        var it = std.mem.splitScalar(u8, value[1 .. value.len - 1], ',');
+        while (it.next()) |item| {
+            try renderDefault(w, registry, element, std.mem.trim(u8, item, " \t"));
+            try w.writeAll(",");
+        }
+        try w.writeAll("}");
+        return;
+    }
+
+    if (@"type".ptr.len != 0) return w.writeAll("null");
+
+    for (registry.enums) |@"enum"| {
+        if (!std.mem.eql(u8, @"enum".name, @"type".base)) continue;
+        try w.writeByte('.');
+        return renderMemberName(w, registry, @"enum".name, value);
+    }
+
+    for (registry.flags) |flags| {
+        if (!std.mem.eql(u8, flags.name, @"type".base)) continue;
+        if (std.mem.eql(u8, value, "0")) return w.writeAll(".{}");
+
+        for (flags.combinations) |combination| {
+            if (!std.mem.eql(u8, combination.name, value)) continue;
+            try w.writeByte('.');
+            return renderMemberName(w, registry, flags.name, combination.name);
+        }
+
+        try w.writeAll(".{");
+        var it = std.mem.splitScalar(u8, value, '|');
+        while (it.next()) |bit| {
+            try w.writeAll(" .");
+            try renderMemberName(w, registry, flags.name, std.mem.trim(u8, bit, " \t"));
+            try w.writeAll(" = true,");
+        }
+        return w.writeAll(" }");
+    }
+
+    if (std.mem.startsWith(u8, value, registry.enum_prefix)) return renderConstName(w, registry, value);
+
+    try w.writeAll(value);
+}
+
+fn renderDoc(w: *Writer, doc: []const u8) Error!void {
     const trimmed = std.mem.trim(u8, doc, " \t\r\n");
     if (trimmed.len == 0) return;
 
     var it = std.mem.splitScalar(u8, trimmed, '\n');
-    while (it.next()) |line| {
-        try writeIndent(w, indent);
-        try w.print("/// {s}\n", .{std.mem.trim(u8, line, " \t\r")});
-    }
+    while (it.next()) |line| try w.print("/// {s}\n", .{std.mem.trim(u8, line, " \t\r")});
 }
 
-fn writeTypeName(w: *std.Io.Writer, registry: Registry, name: []const u8) !void {
+fn renderTypeName(w: *Writer, registry: Registry, name: []const u8) Error!void {
     const primitives = .{
         .{ "void", "void" },   .{ "bool", "bool" },
         .{ "char", "u8" },     .{ "float", "f32" },
@@ -248,74 +290,62 @@ fn writeTypeName(w: *std.Io.Writer, registry: Registry, name: []const u8) !void 
     try w.writeAll(stripPrefix(name, registry.type_prefix));
 }
 
-fn writeMemberName(w: *std.Io.Writer, registry: Registry, owner: []const u8, name: []const u8) !void {
-    var buf: [256]u8 = undefined;
-    var rest = name;
+fn renderFnName(w: *Writer, registry: Registry, name: []const u8) Error!void {
+    const stripped = stripPrefix(name, registry.fn_prefix);
+    try w.writeByte(std.ascii.toLower(stripped[0]));
+    try renderId(w, stripped[1..]);
+}
 
-    const screaming = screamingCaseBuf(owner, &buf);
-    if (std.mem.startsWith(u8, rest, screaming) and rest.len > screaming.len) {
-        rest = rest[screaming.len..];
-    } else {
-        rest = stripPrefix(rest, registry.enum_prefix);
-    }
+fn renderConstName(w: *Writer, registry: Registry, name: []const u8) Error!void {
+    try renderLowerIdent(w, stripPrefix(name, registry.enum_prefix));
+}
+
+fn renderMemberName(w: *Writer, registry: Registry, owner: []const u8, name: []const u8) Error!void {
+    var buf: [256]u8 = undefined;
+    const screaming = screamingCase(owner, &buf);
+
+    var rest = if (std.mem.startsWith(u8, name, screaming))
+        name[screaming.len..]
+    else
+        stripPrefix(name, registry.enum_prefix);
+
     rest = std.mem.trimStart(u8, rest, "_");
     if (std.mem.endsWith(u8, rest, "_BIT")) rest = rest[0 .. rest.len - 4];
-    if (rest.len == 0) rest = name;
 
-    try writeLowerIdent(w, rest);
+    try renderLowerIdent(w, rest);
 }
 
-fn writeLowerIdent(w: *std.Io.Writer, name: []const u8) !void {
+fn renderLowerIdent(w: *Writer, name: []const u8) Error!void {
     var buf: [256]u8 = undefined;
-    const lowered = std.ascii.lowerString(buf[0..name.len], name);
-    try writeId(w, lowered);
+    try renderId(w, std.ascii.lowerString(buf[0..name.len], name));
 }
 
-fn writeId(w: *std.Io.Writer, name: []const u8) !void {
+fn renderId(w: *Writer, name: []const u8) Error!void {
     if (std.zig.isValidId(name)) return w.writeAll(name);
     try w.print("@\"{s}\"", .{name});
 }
 
 fn stripPrefix(name: []const u8, prefix: []const u8) []const u8 {
-    if (prefix.len != 0 and std.mem.startsWith(u8, name, prefix) and name.len > prefix.len) {
-        return name[prefix.len..];
-    }
+    if (std.mem.startsWith(u8, name, prefix)) return name[prefix.len..];
     return name;
 }
 
-fn bitWidth(underlying: []const u8) u16 {
-    if (std.mem.eql(u8, underlying, "uint8_t")) return 8;
-    if (std.mem.eql(u8, underlying, "uint16_t")) return 16;
-    if (std.mem.eql(u8, underlying, "uint64_t")) return 64;
-    std.debug.assert(std.mem.eql(u8, underlying, "uint32_t"));
+fn screamingCase(name: []const u8, buf: []u8) []const u8 {
+    var len: usize = 0;
+    for (name, 0..) |c, i| {
+        if (i != 0 and std.ascii.isUpper(c) and !std.ascii.isUpper(name[i - 1])) {
+            buf[len] = '_';
+            len += 1;
+        }
+        buf[len] = std.ascii.toUpper(c);
+        len += 1;
+    }
+    return buf[0..len];
+}
+
+fn bitWidth(backing_type: []const u8) u16 {
+    if (std.mem.eql(u8, backing_type, "uint8_t")) return 8;
+    if (std.mem.eql(u8, backing_type, "uint16_t")) return 16;
+    if (std.mem.eql(u8, backing_type, "uint64_t")) return 64;
     return 32;
 }
-
-fn writeIndent(w: *std.Io.Writer, indent: usize) !void {
-    try w.splatByteAll(' ', indent * 4);
-}
-
-fn sectionHeader(w: *std.Io.Writer, title: []const u8) !void {
-    try w.print("// {s}\n\n", .{title});
-}
-
-fn screamingCase(name: []const u8) ScreamingCase {
-    return .{ .name = name };
-}
-
-fn screamingCaseBuf(name: []const u8, buf: []u8) []const u8 {
-    return std.fmt.bufPrint(buf, "{f}", .{screamingCase(name)}) catch unreachable;
-}
-
-const ScreamingCase = struct {
-    name: []const u8,
-
-    pub fn format(self: ScreamingCase, w: *std.Io.Writer) std.Io.Writer.Error!void {
-        for (self.name, 0..) |c, i| {
-            if (i != 0 and std.ascii.isUpper(c) and !std.ascii.isUpper(self.name[i - 1])) {
-                try w.writeByte('_');
-            }
-            try w.writeByte(std.ascii.toUpper(c));
-        }
-    }
-};

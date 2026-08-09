@@ -1,35 +1,31 @@
 const std = @import("std");
 const build_options = @import("options");
-const gpu = @import("root.zig");
+const gpu = @import("sf_bindings.zig");
 const to_gpu = @import("bridge.zig").to_gpu;
 const to_vk = @import("bridge.zig").to_vk;
 const sfir = @import("sfir.zig");
 const vk = @import("vulkan");
-
-const Allocator = @import("DeviceAllocator.zig");
+const VulkanLoader = @import("VulkanLoader.zig");
+const target = @import("builtin").target;
 
 pub const Instance = struct {
     instance: vk.InstanceProxy,
-    presentation_enabled: bool,
+    loader: VulkanLoader,
+    vk_surface_supported: bool,
     debug_messenger: vk.DebugUtilsMessengerEXT,
     sf_gpa: gpu.Allocator,
     gpa: std.mem.Allocator,
 
-    pub export fn sfCreateInstance(
-        gpa: ?*gpu.Allocator,
-        proc: vk.PfnGetInstanceProcAddr,
-        required_surface_extensions_count: usize,
-        required_surface_extensions_ptr: [*]const [*:0]const u8,
-    ) *Instance {
-        return create(gpa, proc, required_surface_extensions_ptr[0..required_surface_extensions_count]) catch @panic("TODO");
+    pub fn sfCreateInstance(
+        host_allocator: ?*gpu.Allocator,
+    ) callconv(gpu.@"callconv") *Instance {
+        return create(host_allocator) catch @panic("TODO");
     }
     fn create(
-        gpa_opt: ?*gpu.Allocator,
-        proc: vk.PfnGetInstanceProcAddr,
-        required_surface_extensions: []const [*:0]const u8,
+        host_allocator: ?*gpu.Allocator,
     ) !*Instance {
-        const gpa: std.mem.Allocator = if (gpa_opt) |sf_gpa| .{
-            .ptr = @ptrCast(@alignCast(sf_gpa)),
+        const gpa: std.mem.Allocator = if (host_allocator) |ha| .{
+            .ptr = @ptrCast(@alignCast(ha)),
             .vtable = wrap_sf_allocator_vtable,
         } else std.heap.smp_allocator;
 
@@ -37,14 +33,22 @@ pub const Instance = struct {
         defer arena_impl.deinit();
         const arena = arena_impl.allocator();
 
-        const base_dispatch: vk.BaseWrapper = .load(proc);
+        const loader: VulkanLoader = try .open();
+
+        const base_dispatch: vk.BaseWrapper = .load(loader.proc);
 
         const available_extensions = try base_dispatch.enumerateInstanceExtensionPropertiesAlloc(null, arena);
-        for (required_surface_extensions) |required_ext| {
+
+        const surface_extensions: []const [*:0]const u8 = switch (target.os.tag) {
+            .windows => &.{ vk.extensions.khr_surface.name, vk.extensions.khr_win_32_surface.name },
+            else => &.{},
+        };
+
+        const vk_surface_supported = for (surface_extensions) |required_ext| {
             for (available_extensions) |available_ext| {
                 if (std.mem.eql(u8, std.mem.span(required_ext), std.mem.sliceTo(&available_ext.extension_name, 0))) break;
-            } else return error.RequiredSurfaceExtensionNotAvailable;
-        }
+            } else break false;
+        } else true;
 
         const validation_layer = "VK_LAYER_KHRONOS_validation";
         var enable_validation_layers = build_options.validation_layers;
@@ -60,15 +64,13 @@ pub const Instance = struct {
         }
 
         var extensions: std.ArrayList([*:0]const u8) = .empty;
-        try extensions.appendSlice(arena, @ptrCast(required_surface_extensions));
+        try extensions.appendSlice(arena, surface_extensions);
         try extensions.append(arena, vk.extensions.ext_debug_utils.name.ptr);
 
         const create_info: vk.InstanceCreateInfo = .{
             .p_application_info = &.{
-                .p_application_name = "Vulkan Tutorial",
-                .application_version = vk.makeApiVersion(1, 0, 0, 0).toU32(),
-                .p_engine_name = "No Engine",
-                .engine_version = vk.makeApiVersion(1, 0, 0, 0).toU32(),
+                .application_version = 0,
+                .engine_version = 0,
                 .api_version = vk.makeApiVersion(1, 3, 0, 0).toU32(),
             },
             .enabled_extension_count = @intCast(extensions.items.len),
@@ -92,25 +94,27 @@ pub const Instance = struct {
         const instance = try gpa.create(Instance);
         instance.* = .{
             .instance = handle,
-            .presentation_enabled = required_surface_extensions.len != 0,
+            .loader = loader,
+            .vk_surface_supported = vk_surface_supported,
             .debug_messenger = debug_messenger,
-            .sf_gpa = if (gpa_opt) |g| g.* else undefined,
-            .gpa = if (gpa_opt) |sf_gpa| .{
-                .ptr = @ptrCast(@alignCast(sf_gpa)),
+            .sf_gpa = if (host_allocator) |ha| ha.* else undefined,
+            .gpa = if (host_allocator) |ha| .{
+                .ptr = @ptrCast(@alignCast(ha)),
                 .vtable = wrap_sf_allocator_vtable,
             } else std.heap.smp_allocator,
         };
         return instance;
     }
 
-    pub export fn sfDestroyInstance(instance: *Instance) void {
+    pub fn sfDestroyInstance(instance: *Instance) callconv(gpu.@"callconv") void {
         instance.instance.destroyDebugUtilsMessengerEXT(instance.debug_messenger, null);
         instance.instance.destroyInstance(null);
+        instance.loader.close();
         instance.gpa.destroy(instance.instance.wrapper);
         instance.gpa.destroy(instance);
     }
 
-    pub export fn sfEnumerateAdapters(instance: *Instance, adapters_buffer_size: usize, adapters_buffer: ?[*]*Adapter, adapters_count: *usize) void {
+    pub fn sfEnumerateAdapters(instance: *Instance, adapters_buffer_size: usize, adapters_buffer: ?[*]*Adapter, adapters_count: *usize) callconv(gpu.@"callconv") void {
         enumerateAdapters(instance, if (adapters_buffer) |buf| buf[0..adapters_buffer_size] else null, adapters_count) catch @panic("TODO");
     }
     fn enumerateAdapters(instance: *Instance, adapters_buffer_opt: ?[]*Adapter, adapters_count: *usize) !void {
@@ -128,17 +132,17 @@ pub const Instance = struct {
 pub const Surface = struct {
     surface: vk.SurfaceKHR,
 
-    pub export fn sfCreateSurfaceWin32(instance: *Instance, desc: gpu.Surface.Win32Desc) *Surface {
+    pub fn sfCreateSurfaceWin32(instance: *Instance, desc: gpu.SurfaceWin32Desc) callconv(gpu.@"callconv") *Surface {
         return createWin32(instance, desc) catch @panic("TODO");
     }
-    fn createWin32(instance: *Instance, desc: gpu.Surface.Win32Desc) !*Surface {
+    fn createWin32(instance: *Instance, desc: gpu.SurfaceWin32Desc) !*Surface {
         const info: vk.Win32SurfaceCreateInfoKHR = .{ .hinstance = @ptrCast(desc.hinstance), .hwnd = @ptrCast(desc.hwnd) };
         const surface = try instance.gpa.create(Surface);
         surface.* = .{ .surface = try instance.instance.createWin32SurfaceKHR(&info, null) };
         return surface;
     }
 
-    pub export fn sfDestroySurface(surface: *Surface, instance: *Instance) void {
+    pub fn sfDestroySurface(surface: *Surface, instance: *Instance) callconv(gpu.@"callconv") void {
         destroy(surface, instance);
     }
     fn destroy(surface: *Surface, instance: *Instance) void {
@@ -166,8 +170,8 @@ pub const Device = struct {
 
     queue_states: [max_queue_state_count]QueueState,
     queue_state_count: u8,
-    queue_id_from_type: std.EnumArray(gpu.Queue.Type, QueueId),
-    queues: std.EnumArray(gpu.Queue.Type, Queue),
+    queue_id_from_type: std.EnumArray(gpu.QueueType, QueueId),
+    queues: std.EnumArray(gpu.QueueType, Queue),
 
     gpa: std.mem.Allocator,
 
@@ -177,12 +181,12 @@ pub const Device = struct {
 
     texture_heap_set_layout: vk.DescriptorSetLayout,
 
-    pending_general_layout_transitions: std.array_hash_map.Auto(vk.Image, Texture.Desc),
+    pending_general_layout_transitions: std.array_hash_map.Auto(vk.Image, gpu.TextureDesc),
 
     memory_properties: vk.PhysicalDeviceMemoryProperties,
     has_host_visible_device_local: bool,
 
-    const max_queue_state_count = @typeInfo(gpu.Queue.Type).@"enum".fields.len;
+    const max_queue_state_count = @typeInfo(gpu.QueueType).@"enum".fields.len;
 
     const QueueId = enum(u8) { _ };
 
@@ -210,7 +214,7 @@ pub const Device = struct {
             buffer: vk.Buffer,
             memory: vk.DeviceMemory,
             size: usize,
-            device_addr: gpu.DeviceAdrr,
+            device_addr: gpu.DeviceAddress,
             host_addr: ?usize,
 
             fn destroy(entry: *Entry, d: Device) void {
@@ -220,17 +224,17 @@ pub const Device = struct {
             }
         };
 
-        fn addrToEntryAndOffset(map: *const AddressMap, device_addr: gpu.DeviceAdrr) struct { Entry, vk.DeviceSize } {
+        fn addrToEntryAndOffset(map: *const AddressMap, device_addr: gpu.DeviceAddress) struct { Entry, vk.DeviceSize } {
             const entry = map.addrToEntry(device_addr);
             const offset = device_addr - entry.device_addr;
             return .{ entry, @intCast(offset) };
         }
 
-        fn addrToEntry(map: *const AddressMap, device_addr: gpu.DeviceAdrr) Entry {
+        fn addrToEntry(map: *const AddressMap, device_addr: gpu.DeviceAddress) Entry {
             return map.entries.items[map.indexFromAddr(device_addr)];
         }
 
-        fn indexFromAddr(map: *const AddressMap, device_addr: gpu.DeviceAdrr) usize {
+        fn indexFromAddr(map: *const AddressMap, device_addr: gpu.DeviceAddress) usize {
             return std.sort.upperBound(
                 Entry,
                 map.entries.items,
@@ -258,10 +262,10 @@ pub const Device = struct {
         }
     };
 
-    pub export fn sfCreateDevice(
+    pub fn sfCreateDevice(
         instance: *Instance,
         adapter: *Adapter,
-    ) *Device {
+    ) callconv(gpu.@"callconv") *Device {
         return @ptrCast(create(
             instance,
             adapter,
@@ -275,7 +279,7 @@ pub const Device = struct {
         defer arena_impl.deinit();
         const arena = arena_impl.allocator();
 
-        const device_handle = try createLogicalDevice(arena, adapter.asPhysicalDevice(), instance.instance.wrapper, instance.presentation_enabled);
+        const device_handle = try createLogicalDevice(arena, adapter.asPhysicalDevice(), instance.instance.wrapper, instance.vk_surface_supported);
         const device_dispatch = try instance.gpa.create(vk.DeviceWrapper);
         device_dispatch.* = .load(device_handle, instance.instance.wrapper.dispatch.vkGetDeviceProcAddr.?);
         const handle: vk.DeviceProxy = .init(device_handle, device_dispatch);
@@ -321,9 +325,9 @@ pub const Device = struct {
 
         var queue_states: [max_queue_state_count]QueueState = undefined;
         var queue_state_count: u8 = 0;
-        var queue_of_type: std.EnumArray(gpu.Queue.Type, QueueId) = .initUndefined();
+        var queue_of_type: std.EnumArray(gpu.QueueType, QueueId) = .initUndefined();
 
-        for (std.enums.values(gpu.Queue.Type)) |queue_type| {
+        for (std.enums.values(gpu.QueueType)) |queue_type| {
             const family_index = queue_family_indices.get(queue_type);
             const existing: ?QueueId = for (queue_states[0..queue_state_count], 0..) |q, i| {
                 if (q.family == family_index) break @enumFromInt(i);
@@ -382,7 +386,7 @@ pub const Device = struct {
         return device;
     }
 
-    pub export fn sfDestroyDevice(d: *Device) void {
+    pub fn sfDestroyDevice(d: *Device) callconv(gpu.@"callconv") void {
         return destroy(d);
     }
     fn destroy(d: *Device) void {
@@ -404,21 +408,21 @@ pub const Device = struct {
         gpa.destroy(d);
     }
 
-    pub export fn sfSurfaceSupportedUsage(d: *Device, surface: *Surface) gpu.Texture.Usage {
+    pub fn sfSurfaceSupportedUsage(d: *Device, surface: *Surface) callconv(gpu.@"callconv") gpu.TextureUsage {
         return surfaceUsage(d, surface) catch @panic("TODO");
     }
-    fn surfaceUsage(d: *Device, surface: *Surface) !gpu.Texture.Usage {
+    fn surfaceUsage(d: *Device, surface: *Surface) !gpu.TextureUsage {
         const vk_capabilities = try d.instance.getPhysicalDeviceSurfaceCapabilitiesKHR(d.physical_device, surface.surface);
         return to_gpu.usageFlags(vk_capabilities.supported_usage_flags);
     }
 
-    pub export fn sfSurfaceFormats(
+    pub fn sfSurfaceFormats(
         d: *Device,
         surface: *Surface,
         formats_buffer_size: usize,
         formats_buffer: ?[*]gpu.Format,
         formats_count: *usize,
-    ) void {
+    ) callconv(gpu.@"callconv") void {
         surfaceFormats(d, surface, if (formats_buffer) |buf| buf[0..formats_buffer_size] else null, formats_count) catch @panic("TODO");
     }
     fn surfaceFormats(
@@ -450,13 +454,13 @@ pub const Device = struct {
         );
     }
 
-    pub export fn sfSurfacePresentModes(
+    pub fn sfSurfacePresentModes(
         d: *Device,
         surface: *Surface,
         modes_buffer_size: usize,
         modes_buffer: ?[*]gpu.PresentMode,
         modes_count: *usize,
-    ) void {
+    ) callconv(gpu.@"callconv") void {
         surfacePresentModes(
             d,
             surface,
@@ -493,10 +497,7 @@ pub const Device = struct {
         );
     }
 
-    pub export fn sfDeviceToHostPointer(d: *Device, ptr: u64) *anyopaque {
-        return deviceToHostPointer(d, ptr);
-    }
-    pub export fn deviceToHostPointer(d: *Device, ptr: u64) *anyopaque {
+    pub fn sfDeviceToHostPointer(d: *Device, ptr: gpu.DeviceAddress) callconv(gpu.@"callconv") *anyopaque {
         const entry = d.heap.addrToEntry(ptr);
         const offset = ptr - entry.device_addr;
         return @ptrFromInt(entry.host_addr.? + offset);
@@ -595,7 +596,7 @@ pub const Device = struct {
         arena: std.mem.Allocator,
         physical_device: vk.PhysicalDevice,
         instance_dispatch: *const vk.InstanceWrapper,
-    ) !std.EnumArray(gpu.Queue.Type, u32) {
+    ) !std.EnumArray(gpu.QueueType, u32) {
         const queue_family_indices = try instance_dispatch.getPhysicalDeviceQueueFamilyPropertiesAlloc(physical_device, arena);
 
         var graphics: u32 = std.math.maxInt(u32);
@@ -632,7 +633,7 @@ pub const Device = struct {
         });
     }
 
-    fn queueStateForQueueType(d: *Device, queue_type: gpu.Queue.Type) *QueueState {
+    fn queueStateForQueueType(d: *Device, queue_type: gpu.QueueType) *QueueState {
         const queue_id = d.queue_id_from_type.get(queue_type);
         return d.queueStateForQueueId(queue_id);
     }
@@ -641,7 +642,7 @@ pub const Device = struct {
         return &d.queue_states[@intFromEnum(queue_id)];
     }
 
-    fn acquireCommandBuffer(d: *Device, queue_type: gpu.Queue.Type) !CommandBuffer {
+    fn acquireCommandBuffer(d: *Device, queue_type: gpu.QueueType) !CommandBuffer {
         const queue_id = d.queue_id_from_type.get(queue_type);
         if (d.queueStateForQueueId(queue_id).free_command_buffers.pop()) |command_buffer| {
             try d.device.resetCommandBuffer(command_buffer, .{});
@@ -688,19 +689,19 @@ pub const Device = struct {
 
 pub const Queue = struct {
     id: Device.QueueId,
-    queue_type: gpu.Queue.Type,
+    queue_type: gpu.QueueType,
 
-    pub export fn sfCreateQueue(d: *Device, queue_type: gpu.Queue.Type) *Queue {
+    pub fn sfCreateQueue(d: *Device, queue_type: gpu.QueueType) callconv(gpu.@"callconv") *Queue {
         return create(d, queue_type);
     }
-    fn create(d: *Device, queue_type: gpu.Queue.Type) *Queue {
+    fn create(d: *Device, queue_type: gpu.QueueType) *Queue {
         const id = d.queue_id_from_type.get(queue_type);
         const queue = d.queues.getPtr(queue_type);
         queue.* = .{ .id = id, .queue_type = queue_type };
         return queue;
     }
 
-    pub export fn sfStartCommandRecording(queue: *Queue, d: *Device) *CommandBuffer {
+    pub fn sfStartCommandRecording(queue: *Queue, d: *Device) callconv(gpu.@"callconv") *CommandBuffer {
         const dv: *Device = d;
         const cb = dv.gpa.create(CommandBuffer) catch @panic("TODO");
         cb.* = startCommandRecording(queue, dv) catch @panic("TODO");
@@ -717,12 +718,12 @@ pub const Queue = struct {
         return command_buffer;
     }
 
-    pub export fn sfSubmit(
+    pub fn sfSubmit(
         queue: *Queue,
         d: *Device,
         command_buffer_count: usize,
         command_buffers: [*]const *CommandBuffer,
-    ) void {
+    ) callconv(gpu.@"callconv") void {
         submit(
             queue,
             d,
@@ -731,14 +732,14 @@ pub const Queue = struct {
         ) catch @panic("TODO");
     }
 
-    pub export fn sfSubmitAndSignal(
+    pub fn sfSubmitAndSignal(
         queue: *Queue,
         d: *Device,
         command_buffer_count: usize,
         command_buffers: [*]const *CommandBuffer,
         signal_semaphore: *Semaphore,
         signal_value: u64,
-    ) void {
+    ) callconv(gpu.@"callconv") void {
         submit(
             queue,
             d,
@@ -875,7 +876,7 @@ pub const Queue = struct {
 pub const Semaphore = struct {
     semaphore: vk.Semaphore,
 
-    pub export fn sfCreateSemaphore(d: *Device, init_value: u64) *Semaphore {
+    pub fn sfCreateSemaphore(d: *Device, init_value: u64) callconv(gpu.@"callconv") *Semaphore {
         return @ptrCast(create(d, init_value) catch @panic("TODO"));
     }
     fn create(d: *Device, init_value: u64) !*Semaphore {
@@ -885,7 +886,7 @@ pub const Semaphore = struct {
         return semaphore;
     }
 
-    pub export fn sfDestroySemaphore(semaphore: *Semaphore, d: *Device) void {
+    pub fn sfDestroySemaphore(semaphore: *Semaphore, d: *Device) callconv(gpu.@"callconv") void {
         const dv: *Device = d;
         const s: *Semaphore = semaphore;
         destroy(s, dv);
@@ -895,7 +896,7 @@ pub const Semaphore = struct {
         destroyVkDevice(semaphore, d.device);
     }
 
-    pub export fn sfWaitSemaphore(semaphore: *Semaphore, d: *Device, value: u64) void {
+    pub fn sfWaitSemaphore(semaphore: *Semaphore, d: *Device, value: u64) callconv(gpu.@"callconv") void {
         wait(semaphore, d, value) catch @panic("TODO");
     }
     fn wait(semaphore: *const Semaphore, d: *Device, value: u64) !void {
@@ -925,7 +926,7 @@ pub const Semaphore = struct {
 pub const Swapchain = struct {
     swapchain: vk.SwapchainKHR,
     surface: vk.SurfaceKHR,
-    desc: gpu.Swapchain.Desc,
+    desc: gpu.SwapchainDesc,
     queue: *Queue,
 
     textures: []SwapchainTexture,
@@ -946,19 +947,19 @@ pub const Swapchain = struct {
         },
     };
 
-    pub export fn sfCreateSwpachain(
+    pub fn sfCreateSwapchain(
         d: *Device,
         queue: *Queue,
         surface: *Surface,
-        options: gpu.Swapchain.Desc,
-    ) *Swapchain {
+        options: gpu.SwapchainDesc,
+    ) callconv(gpu.@"callconv") *Swapchain {
         return create(d, queue, surface, options) catch @panic("TODO");
     }
     fn create(
         d: *Device,
         queue: *Queue,
         surface: *Surface,
-        options: gpu.Swapchain.Desc,
+        options: gpu.SwapchainDesc,
     ) !*Swapchain {
         const queue_family = d.queueStateForQueueId(queue.id).family;
 
@@ -979,7 +980,7 @@ pub const Swapchain = struct {
         return swapchain;
     }
 
-    pub export fn sfDestroySwapchain(swapchain: *Swapchain, d: *Device) void {
+    pub fn sfDestroySwapchain(swapchain: *Swapchain, d: *Device) callconv(gpu.@"callconv") void {
         destroy(swapchain, d);
     }
     fn destroy(swapchain: *Swapchain, d: *Device) void {
@@ -990,7 +991,7 @@ pub const Swapchain = struct {
         d.gpa.destroy(swapchain);
     }
 
-    pub export fn sfSwapchainAcquireNextTexture(swapchain: *Swapchain, d: *Device, queue: *Queue, width: u32, height: u32) *Texture {
+    pub fn sfSwapchainAcquireNextTexture(swapchain: *Swapchain, d: *Device, queue: *Queue, width: u32, height: u32) callconv(gpu.@"callconv") *Texture {
         return acquireNextTexture(swapchain, d, queue, width, height) catch @panic("TODO");
     }
     fn acquireNextTexture(swapchain: *Swapchain, d: *Device, queue: *Queue, width: u32, height: u32) !*Texture {
@@ -1027,13 +1028,13 @@ pub const Swapchain = struct {
         }
     }
 
-    pub export fn sfSwapchainPresent(
+    pub fn sfSwapchainPresent(
         swapchain: *Swapchain,
         d: *Device,
         queue: *Queue,
         semaphore: *Semaphore,
         semaphore_value: u64,
-    ) void {
+    ) callconv(gpu.@"callconv") void {
         present(swapchain, d, queue, semaphore, semaphore_value) catch @panic("TODO");
     }
     fn present(
@@ -1143,7 +1144,7 @@ pub const Swapchain = struct {
         errdefer d.gpa.free(textures);
 
         for (textures, images) |*texture, image| {
-            const texture_info: Texture.Desc = .{
+            const texture_info: gpu.TextureDesc = .{
                 .type = .@"2d",
                 .dimensions = .{ surface_extent.width, surface_extent.height, 1 },
                 .mip_count = 1,
@@ -1219,17 +1220,17 @@ pub const CommandBuffer = struct {
     pipeline_bind_point: vk.PipelineBindPoint = undefined,
     texture_heap_ptr: ?vk.DeviceAddress = null,
 
-    pub export fn sfSetActiveTextureHeapPtr(
+    pub fn sfSetActiveTextureHeap(
         command_buffer: *CommandBuffer,
         d: *Device,
-        heap_ptr: gpu.DeviceAdrr,
-    ) void {
-        setActiveTextureHeapPtr(command_buffer, d, heap_ptr);
+        heap_ptr: gpu.DeviceAddress,
+    ) callconv(gpu.@"callconv") void {
+        setActiveTextureHeap(command_buffer, d, heap_ptr);
     }
-    fn setActiveTextureHeapPtr(
+    fn setActiveTextureHeap(
         command_buffer: *CommandBuffer,
         d: *Device,
-        heap_ptr: gpu.DeviceAdrr,
+        heap_ptr: gpu.DeviceAddress,
     ) void {
         const address: vk.DeviceAddress = heap_ptr;
         if (command_buffer.texture_heap_ptr == address) return;
@@ -1247,7 +1248,7 @@ pub const CommandBuffer = struct {
         }
     }
 
-    pub export fn sfSetPipeline(command_buffer: *CommandBuffer, d: *Device, pipeline: *Pipeline) void {
+    pub fn sfSetPipeline(command_buffer: *CommandBuffer, d: *Device, pipeline: *Pipeline) callconv(gpu.@"callconv") void {
         return setPipeline(command_buffer, d, pipeline);
     }
     fn setPipeline(command_buffer: *CommandBuffer, d: *Device, pipeline: *Pipeline) void {
@@ -1269,20 +1270,20 @@ pub const CommandBuffer = struct {
         }
     }
 
-    pub export fn sfDispatch(
+    pub fn sfDispatch(
         command_buffer: *CommandBuffer,
         d: *Device,
-        data: gpu.DeviceAdrr,
+        data: gpu.DeviceAddress,
         x: u32,
         y: u32,
         z: u32,
-    ) void {
+    ) callconv(gpu.@"callconv") void {
         dispatch(command_buffer, d, data, x, y, z);
     }
     fn dispatch(
         command_buffer: *CommandBuffer,
         d: *Device,
-        data: gpu.DeviceAdrr,
+        data: gpu.DeviceAddress,
         x: u32,
         y: u32,
         z: u32,
@@ -1304,13 +1305,13 @@ pub const CommandBuffer = struct {
         );
     }
 
-    pub export fn sfBarrier(
+    pub fn sfBarrier(
         command_buffer: *CommandBuffer,
         d: *Device,
         before: gpu.Stage,
         after: gpu.Stage,
         hazard: gpu.Hazard,
-    ) void {
+    ) callconv(gpu.@"callconv") void {
         barrier(command_buffer, d, before, after, hazard);
     }
     fn barrier(
@@ -1350,20 +1351,20 @@ pub const CommandBuffer = struct {
     }
 
     /// 256 bytes is a typical optimal alignment for dest
-    pub export fn sfCopyTextureToBuffer(
+    pub fn sfCopyTextureToBuffer(
         command_buffer: *CommandBuffer,
         d: *Device,
-        dest: gpu.DeviceAdrr,
-        src: gpu.DeviceAdrr,
+        dest: gpu.DeviceAddress,
+        src: gpu.DeviceAddress,
         texture: *Texture,
-    ) void {
+    ) callconv(gpu.@"callconv") void {
         copyTextureToBuffer(command_buffer, d, dest, src, texture);
     }
     fn copyTextureToBuffer(
         command_buffer: *CommandBuffer,
         d: *Device,
-        dest: gpu.DeviceAdrr,
-        src: gpu.DeviceAdrr,
+        dest: gpu.DeviceAddress,
+        src: gpu.DeviceAddress,
         texture: *Texture,
     ) void {
         _ = src;
@@ -1395,22 +1396,22 @@ pub const CommandBuffer = struct {
         d.device.cmdCopyImageToBuffer2(command_buffer.command_buffer, &info);
     }
 
-    pub export fn sfCopyBufferToTexture(
+    pub fn sfCopyBufferToTexture(
         command_buffer: *CommandBuffer,
         d: *Device,
         size: usize,
-        dest: gpu.DeviceAdrr,
-        src: gpu.DeviceAdrr,
+        dest: gpu.DeviceAddress,
+        src: gpu.DeviceAddress,
         texture: *Texture,
-    ) void {
+    ) callconv(gpu.@"callconv") void {
         copyBufferToTexture(command_buffer, d, size, dest, src, texture);
     }
     fn copyBufferToTexture(
         command_buffer: *CommandBuffer,
         d: *Device,
         size: usize,
-        dest: gpu.DeviceAdrr,
-        src: gpu.DeviceAdrr,
+        dest: gpu.DeviceAddress,
+        src: gpu.DeviceAddress,
         texture: *Texture,
     ) void {
         _ = size; // TODO
@@ -1443,11 +1444,11 @@ pub const CommandBuffer = struct {
         d.device.cmdCopyBufferToImage2(command_buffer.command_buffer, &info);
     }
 
-    pub export fn sfBeginRenderPass(cb: *CommandBuffer, d: *Device, desc: gpu.CommandBuffer.RenderPassDesc) void {
+    pub fn sfBeginRenderPass(cb: *CommandBuffer, d: *Device, desc: gpu.RenderPassDesc) callconv(gpu.@"callconv") void {
         beginRenderPass(cb, d, desc);
     }
-    pub export fn beginRenderPass(cb: *CommandBuffer, d: *Device, desc: gpu.CommandBuffer.RenderPassDesc) void {
-        const color_targets = desc.color_targets[0..desc.color_target_count];
+    fn beginRenderPass(cb: *CommandBuffer, d: *Device, desc: gpu.RenderPassDesc) void {
+        const color_targets = if (desc.color_attachments) |color_attachments| color_attachments[0..desc.color_attachment_count] else &.{};
         std.debug.assert(color_targets.len <= 8);
 
         var color_attachments: [8]vk.RenderingAttachmentInfo = undefined;
@@ -1466,7 +1467,7 @@ pub const CommandBuffer = struct {
         }
 
         var depth_attachment: vk.RenderingAttachmentInfo = undefined;
-        if (desc.depth_target.texture) |t| {
+        if (desc.depth_attachment.texture) |t| {
             const texture: *const Texture = @ptrCast(@alignCast(t));
             depth_attachment = .{
                 .image_view = texture.default_view,
@@ -1474,14 +1475,14 @@ pub const CommandBuffer = struct {
                 .resolve_mode = .{},
                 .resolve_image_view = .null_handle,
                 .resolve_image_layout = .undefined,
-                .load_op = to_vk.attachmentLoadOp(desc.depth_target.load_op),
-                .store_op = to_vk.attachmentStoreOp(desc.depth_target.store_op),
-                .clear_value = .{ .depth_stencil = .{ .depth = desc.depth_target.clear_value, .stencil = 0 } },
+                .load_op = to_vk.attachmentLoadOp(desc.depth_attachment.load_op),
+                .store_op = to_vk.attachmentStoreOp(desc.depth_attachment.store_op),
+                .clear_value = .{ .depth_stencil = .{ .depth = desc.depth_attachment.clear_value, .stencil = 0 } },
             };
         }
 
         var stencil_attachment: vk.RenderingAttachmentInfo = undefined;
-        if (desc.stencil_target.texture) |t| {
+        if (desc.stencil_attachment.texture) |t| {
             const texture: *const Texture = @ptrCast(@alignCast(t));
             stencil_attachment = .{
                 .image_view = texture.default_view,
@@ -1489,9 +1490,9 @@ pub const CommandBuffer = struct {
                 .resolve_mode = .{},
                 .resolve_image_view = .null_handle,
                 .resolve_image_layout = .undefined,
-                .load_op = to_vk.attachmentLoadOp(desc.stencil_target.load_op),
-                .store_op = to_vk.attachmentStoreOp(desc.stencil_target.store_op),
-                .clear_value = .{ .depth_stencil = .{ .depth = 0, .stencil = desc.stencil_target.clear_value } },
+                .load_op = to_vk.attachmentLoadOp(desc.stencil_attachment.load_op),
+                .store_op = to_vk.attachmentStoreOp(desc.stencil_attachment.store_op),
+                .clear_value = .{ .depth_stencil = .{ .depth = 0, .stencil = desc.stencil_attachment.clear_value } },
             };
         }
 
@@ -1503,11 +1504,11 @@ pub const CommandBuffer = struct {
                     texture.desc.dimensions[1],
                 };
             }
-            if (desc.depth_target.texture) |t| {
+            if (desc.depth_attachment.texture) |t| {
                 const texture: *const Texture = @ptrCast(@alignCast(t));
                 break :blk .{ texture.desc.dimensions[0], texture.desc.dimensions[1] };
             }
-            if (desc.stencil_target.texture) |t| {
+            if (desc.stencil_attachment.texture) |t| {
                 const texture: *const Texture = @ptrCast(@alignCast(t));
                 break :blk .{ texture.desc.dimensions[0], texture.desc.dimensions[1] };
             }
@@ -1523,8 +1524,8 @@ pub const CommandBuffer = struct {
             .view_mask = 0,
             .color_attachment_count = @intCast(color_targets.len),
             .p_color_attachments = &color_attachments,
-            .p_depth_attachment = if (desc.depth_target.texture != null) &depth_attachment else null,
-            .p_stencil_attachment = if (desc.stencil_target.texture != null) &stencil_attachment else null,
+            .p_depth_attachment = if (desc.depth_attachment.texture != null) &depth_attachment else null,
+            .p_stencil_attachment = if (desc.stencil_attachment.texture != null) &stencil_attachment else null,
         };
         d.device.cmdBeginRendering(cb.command_buffer, &rendering_info);
 
@@ -1547,28 +1548,28 @@ pub const CommandBuffer = struct {
         d.device.cmdSetStencilTestEnable(cb.command_buffer, .false);
     }
 
-    pub export fn sfEndRenderPass(cb: *CommandBuffer, d: *Device) void {
+    pub fn sfEndRenderPass(cb: *CommandBuffer, d: *Device) callconv(gpu.@"callconv") void {
         endRenderPass(cb, d);
     }
     fn endRenderPass(cb: *CommandBuffer, d: *Device) void {
         d.device.cmdEndRendering(cb.command_buffer);
     }
 
-    pub export fn sfDraw(
+    pub fn sfDraw(
         cb: *CommandBuffer,
         d: *Device,
-        vertex_data: gpu.DeviceAdrr,
-        pixel_data: gpu.DeviceAdrr,
+        vertex_data: gpu.DeviceAddress,
+        pixel_data: gpu.DeviceAddress,
         vertex_count: u32,
         instance_count: u32,
-    ) void {
+    ) callconv(gpu.@"callconv") void {
         draw(cb, d, vertex_data, pixel_data, vertex_count, instance_count);
     }
     fn draw(
         cb: *CommandBuffer,
         d: *Device,
-        vertex_data: gpu.DeviceAdrr,
-        pixel_data: gpu.DeviceAdrr,
+        vertex_data: gpu.DeviceAddress,
+        pixel_data: gpu.DeviceAddress,
         vertex_count: u32,
         instance_count: u32,
     ) void {
@@ -1576,42 +1577,42 @@ pub const CommandBuffer = struct {
         d.device.cmdDraw(cb.command_buffer, vertex_count, instance_count, 0, 0);
     }
 
-    pub export fn sfDrawIndexed(
+    pub fn sfDrawIndexed(
         cb: *CommandBuffer,
         d: *Device,
-        vertex_data: gpu.DeviceAdrr,
-        pixel_data: gpu.DeviceAdrr,
-        index_type: gpu.CommandBuffer.IndexType,
-        indices: gpu.DeviceAdrr,
+        vertex_data: gpu.DeviceAddress,
+        pixel_data: gpu.DeviceAddress,
+        index_type: gpu.IndexType,
+        indices: gpu.DeviceAddress,
         index_count: u32,
-    ) void {
+    ) callconv(gpu.@"callconv") void {
         cb.sfDrawIndexedInstanced(d, vertex_data, pixel_data, index_type, indices, index_count, 1);
     }
 
-    pub export fn sfDrawIndexedInstanced(
+    pub fn sfDrawIndexedInstanced(
         cb: *CommandBuffer,
         d: *Device,
-        vertex_data: gpu.DeviceAdrr,
-        pixel_data: gpu.DeviceAdrr,
-        index_type: gpu.CommandBuffer.IndexType,
-        indices: gpu.DeviceAdrr,
+        vertex_data: gpu.DeviceAddress,
+        pixel_data: gpu.DeviceAddress,
+        index_type: gpu.IndexType,
+        indices: gpu.DeviceAddress,
         index_count: u32,
         instance_count: u32,
-    ) void {
+    ) callconv(gpu.@"callconv") void {
         cb.pushRootPointers(d, vertex_data, pixel_data);
         cb.bindIndexPointer(d, index_type, indices);
         d.device.cmdDrawIndexed(cb.command_buffer, index_count, instance_count, 0, 0, 0);
     }
 
-    pub export fn sfDrawIndexedInstancedIndirect(
+    pub fn sfDrawIndexedInstancedIndirect(
         cb: *CommandBuffer,
         d: *Device,
-        vertex_data: gpu.DeviceAdrr,
-        pixel_data: gpu.DeviceAdrr,
-        index_type: gpu.CommandBuffer.IndexType,
-        indices: gpu.DeviceAdrr,
-        args: gpu.DeviceAdrr,
-    ) void {
+        vertex_data: gpu.DeviceAddress,
+        pixel_data: gpu.DeviceAddress,
+        index_type: gpu.IndexType,
+        indices: gpu.DeviceAddress,
+        args: gpu.DeviceAddress,
+    ) callconv(gpu.@"callconv") void {
         cb.pushRootPointers(d, vertex_data, pixel_data);
         cb.bindIndexPointer(d, index_type, indices);
         const entry, const offset = d.heap.addrToEntryAndOffset(args);
@@ -1620,7 +1621,7 @@ pub const CommandBuffer = struct {
             entry.buffer,
             offset,
             1,
-            @sizeOf(gpu.CommandBuffer.DrawIndexedArgs),
+            @sizeOf(gpu.DrawIndexedArguments),
         );
     }
 
@@ -1639,12 +1640,12 @@ pub const CommandBuffer = struct {
     fn bindIndexPointer(
         cb: *CommandBuffer,
         d: *Device,
-        index_type: gpu.CommandBuffer.IndexType,
-        indices: gpu.DeviceAdrr,
+        index_type: gpu.IndexType,
+        indices: gpu.DeviceAddress,
     ) void {
         const vk_index_type: vk.IndexType = switch (index_type) {
-            .u16 => .uint16,
-            .u32 => .uint32,
+            .uint16 => .uint16,
+            .uint32 => .uint32,
         };
         const entry, const offset = d.heap.addrToEntryAndOffset(indices);
         d.device.cmdBindIndexBuffer(cb.command_buffer, entry.buffer, offset, vk_index_type);
@@ -1666,15 +1667,14 @@ pub const Texture = struct {
     image: vk.Image,
     desc: Desc,
     default_view: vk.ImageView,
-    views: std.hash_map.AutoHashMapUnmanaged(ViewInfo, vk.ImageView),
+    views: std.hash_map.AutoHashMapUnmanaged(gpu.TextureViewDesc, vk.ImageView),
 
-    const Type = gpu.Texture.Type;
-    const Usage = gpu.Texture.Usage;
-    const Desc = gpu.Texture.Desc;
-    const ViewInfo = gpu.Texture.ViewInfo;
+    const Type = gpu.TextureType;
+    const Usage = gpu.TextureUsage;
+    const Desc = gpu.TextureDesc;
 
-    pub const Descriptor = struct {
-        pub export fn sfDescriptorSizeAndHeapAlign(d: *Device) gpu.SizeAndAlign {
+    pub const Descriptor = opaque {
+        pub fn sfDescriptorSizeAndHeapAlign(d: *Device) callconv(gpu.@"callconv") gpu.SizeAndAlign {
             return sizeAndHeapAlignment(d);
         }
         fn sizeAndHeapAlignment(d: *Device) gpu.SizeAndAlign {
@@ -1684,12 +1684,20 @@ pub const Texture = struct {
                     buffer_properties.sampled_image_descriptor_size,
                     buffer_properties.storage_image_descriptor_size,
                 ),
-                .@"align" = buffer_properties.descriptor_buffer_offset_alignment,
+                .alignment = buffer_properties.descriptor_buffer_offset_alignment,
             };
+        }
+
+        pub fn sfStoreDescriptor(descriptor: *const gpu.Descriptor, d: *Device, heap_ptr: [*]u8, index: usize) callconv(gpu.@"callconv") void {
+            const size_align = Descriptor.sfDescriptorSizeAndHeapAlign(d);
+            @memcpy(
+                @as([*]u8, @ptrCast(heap_ptr)) + size_align.size * index,
+                descriptor.data[0..size_align.size],
+            );
         }
     };
 
-    pub export fn sfTextureSizeAndAlign(d: *Device, info: Desc) gpu.SizeAndAlign {
+    pub fn sfTextureSizeAndAlign(d: *Device, info: Desc) callconv(gpu.@"callconv") gpu.SizeAndAlign {
         return sizeAndAlignment(d, info);
     }
     fn sizeAndAlignment(d: *Device, info: Desc) gpu.SizeAndAlign {
@@ -1701,14 +1709,14 @@ pub const Texture = struct {
         d.device.getDeviceImageMemoryRequirements(&device_image_memory_requirements, &req);
         return .{
             .size = req.memory_requirements.size,
-            .@"align" = req.memory_requirements.alignment,
+            .alignment = req.memory_requirements.alignment,
         };
     }
 
-    pub export fn sfCreateTexture(d: *Device, info: Desc, texture_data: gpu.DeviceAdrr) *Texture {
+    pub fn sfCreateTexture(d: *Device, info: Desc, texture_data: gpu.DeviceAddress) callconv(gpu.@"callconv") *Texture {
         return create(d, info, texture_data) catch @panic("TODO");
     }
-    fn create(d: *Device, info: Desc, texture_data: gpu.DeviceAdrr) !*Texture {
+    fn create(d: *Device, info: Desc, texture_data: gpu.DeviceAddress) !*Texture {
         const image = try d.device.createImage(&vkImageInfo(info), null);
         errdefer d.device.destroyImage(image, null);
 
@@ -1729,10 +1737,10 @@ pub const Texture = struct {
         return texture;
     }
 
-    pub export fn sfDestroyTexture(texture: *Texture, d: *Device) void {
+    pub fn sfDestroyTexture(texture: *Texture, d: *Device) callconv(gpu.@"callconv") void {
         destroy(texture, d);
     }
-    pub export fn destroy(texture: *Texture, d: *Device) void {
+    fn destroy(texture: *Texture, d: *Device) void {
         texture.destroyOptions(d, true);
         d.gpa.destroy(texture);
     }
@@ -1747,10 +1755,10 @@ pub const Texture = struct {
         texture.views.deinit(d.gpa);
     }
 
-    pub export fn sfTextureStorageDescriptor(texture: *Texture, d: *Device, view_info: ViewInfo) gpu.Texture.Descriptor {
+    pub fn sfTextureStorageDescriptor(texture: *Texture, d: *Device, view_info: gpu.TextureViewDesc) callconv(gpu.@"callconv") gpu.Descriptor {
         return storageDescriptor(texture, d, view_info) catch @panic("TODO");
     }
-    fn storageDescriptor(texture: *Texture, d: *Device, view_info: ViewInfo) !gpu.Texture.Descriptor {
+    fn storageDescriptor(texture: *Texture, d: *Device, view_info: gpu.TextureViewDesc) !gpu.Descriptor {
         const view = texture.views.get(view_info) orelse blk: {
             const view = try createView(d, texture.image, texture.desc, view_info);
             try texture.views.put(d.gpa, view_info, view);
@@ -1766,19 +1774,19 @@ pub const Texture = struct {
             .data = .{ .p_storage_image = &image_info },
         };
         const buffer_properties = d.descriptorBufferProperties();
-        var descriptor: gpu.Texture.Descriptor = .{ .data = @splat(0) };
+        var descriptor: gpu.Descriptor = .{ .data = @splat(0) };
         d.device.getDescriptorEXT(&get_info, buffer_properties.storage_image_descriptor_size, @ptrCast(&descriptor.data));
         return descriptor;
     }
 
-    pub export fn sfTextureViewDescriptor(texture: *Texture, d: *Device, view_info: ViewInfo) gpu.Texture.Descriptor {
+    pub fn sfTextureViewDescriptor(texture: *Texture, d: *Device, view_info: gpu.TextureViewDesc) callconv(gpu.@"callconv") gpu.Descriptor {
         return viewDescriptor(texture, d, view_info) catch @panic("TODO");
     }
     fn viewDescriptor(
         texture: *Texture,
         d: *Device,
-        view_info: ViewInfo,
-    ) !gpu.Texture.Descriptor {
+        view_info: gpu.TextureViewDesc,
+    ) !gpu.Descriptor {
         const view = texture.views.get(view_info) orelse blk: {
             const view = try createView(d, texture.image, texture.desc, view_info);
             try texture.views.put(d.gpa, view_info, view);
@@ -1794,7 +1802,7 @@ pub const Texture = struct {
             .data = .{ .p_sampled_image = &image_info },
         };
         const properties = d.descriptorBufferProperties();
-        var descriptor: gpu.Texture.Descriptor = .{ .data = @splat(0) };
+        var descriptor: gpu.Descriptor = .{ .data = @splat(0) };
         d.device.getDescriptorEXT(&get_info, properties.sampled_image_descriptor_size, @ptrCast(&descriptor.data));
         return descriptor;
     }
@@ -1814,9 +1822,9 @@ pub const Texture = struct {
         };
     }
 
-    fn createView(d: *Device, image: vk.Image, texture_info: Desc, view_info: ViewInfo) !vk.ImageView {
-        const mip_count = if (view_info.mip_count == ViewInfo.all_mips) vk.REMAINING_MIP_LEVELS else view_info.mip_count;
-        const layer_count = if (view_info.layer_count == ViewInfo.all_layers) vk.REMAINING_ARRAY_LAYERS else view_info.layer_count;
+    fn createView(d: *Device, image: vk.Image, texture_info: Desc, view_info: gpu.TextureViewDesc) !vk.ImageView {
+        const mip_count = if (view_info.mip_count == gpu.all_mips) vk.REMAINING_MIP_LEVELS else view_info.mip_count;
+        const layer_count = if (view_info.layer_count == gpu.all_layers) vk.REMAINING_ARRAY_LAYERS else view_info.layer_count;
         const format = if (view_info.format == .none) texture_info.format else view_info.format;
         const info: vk.ImageViewCreateInfo = .{
             .image = image,
@@ -1843,7 +1851,7 @@ pub const Pipeline = struct {
     samplers: []vk.Sampler,
     sampler_set_layout: vk.DescriptorSetLayout,
 
-    pub export fn sfCreateComputePipeline(d: *Device, ir_size: usize, ir: [*]const u8) *Pipeline {
+    pub fn sfCreateComputePipeline(d: *Device, ir_size: usize, ir: [*]const u8) callconv(gpu.@"callconv") *Pipeline {
         return createCompute(d, ir[0..ir_size]) catch @panic("TODO");
     }
     fn createCompute(d: *Device, ir: []const u8) !*Pipeline {
@@ -1899,23 +1907,23 @@ pub const Pipeline = struct {
         return pipeline;
     }
 
-    pub export fn sfCreateGraphicsPipeline(
+    pub fn sfCreateGraphicsPipeline(
         d: *Device,
         vertex_ir_size: usize,
         vertex_ir: [*]const u8,
         pixel_ir_size: usize,
         pixel_ir: [*]const u8,
-        desc: gpu.Pipeline.RasterDesc,
-    ) *Pipeline {
+        desc: gpu.GraphicsPipelineDesc,
+    ) callconv(gpu.@"callconv") *Pipeline {
         return @ptrCast(createGraphics(d, vertex_ir[0..vertex_ir_size], pixel_ir[0..pixel_ir_size], desc) catch @panic("TODO"));
     }
     fn createGraphics(
         d: *Device,
         vertex_ir: []const u8,
         pixel_ir: []const u8,
-        desc: gpu.Pipeline.RasterDesc,
+        desc: gpu.GraphicsPipelineDesc,
     ) !*Pipeline {
-        const color_targets: []const gpu.Pipeline.ColorTarget = desc.color_targets[0..desc.color_target_count];
+        const color_targets = if (desc.color_targets) |color_targets| color_targets[0..desc.color_target_count] else &.{};
         std.debug.assert(color_targets.len <= 8);
 
         const vertex_parser = try sfir.parse(vertex_ir);
@@ -1967,7 +1975,7 @@ pub const Pipeline = struct {
         };
 
         const multisample: vk.PipelineMultisampleStateCreateInfo = .{
-            .rasterization_samples = to_vk.sampleCount(desc.sample_count),
+            .rasterization_samples = to_vk.sampleCount(@intCast(desc.sample_count)),
             .sample_shading_enable = .false,
             .min_sample_shading = 0,
             .alpha_to_coverage_enable = if (desc.alpha_to_coverage) .true else .false,
@@ -2105,7 +2113,7 @@ pub const Pipeline = struct {
         return pipeline;
     }
 
-    pub export fn sfDestroyPipeline(pipeline: *Pipeline, d: *Device) void {
+    pub fn sfDestroyPipeline(pipeline: *Pipeline, d: *Device) callconv(gpu.@"callconv") void {
         destroy(pipeline, d);
     }
     fn destroy(pipeline: *Pipeline, d: *Device) void {
@@ -2177,12 +2185,12 @@ pub const Pipeline = struct {
 };
 
 pub const heap = struct {
-    pub export fn sfMalloc(
+    pub fn sfMalloc(
         d: *Device,
         bytes: usize,
         alignment: usize,
         memory: gpu.Memory,
-    ) gpu.DeviceAdrr {
+    ) callconv(gpu.@"callconv") gpu.DeviceAddress {
         return malloc(d, bytes, .fromByteUnits(alignment), memory) catch @panic("TODO");
     }
     fn malloc(
@@ -2190,7 +2198,7 @@ pub const heap = struct {
         bytes: usize,
         alignment: std.mem.Alignment,
         memory: gpu.Memory,
-    ) !gpu.DeviceAdrr {
+    ) !gpu.DeviceAddress {
         std.debug.assert(bytes > 0);
 
         const usage: vk.BufferUsageFlags = switch (memory) {
@@ -2310,10 +2318,10 @@ pub const heap = struct {
         return device_addr;
     }
 
-    pub export fn sfFree(d: *Device, ptr: gpu.DeviceAdrr) void {
+    pub fn sfFree(d: *Device, ptr: gpu.DeviceAddress) callconv(gpu.@"callconv") void {
         free(d, ptr);
     }
-    fn free(d: *Device, ptr: gpu.DeviceAdrr) void {
+    fn free(d: *Device, ptr: gpu.DeviceAddress) void {
         const index = d.heap.indexFromAddr(ptr);
         var entry = d.heap.entries.orderedRemove(index);
         entry.destroy(d.*);
@@ -2395,9 +2403,78 @@ fn debugCallback(
     return .false;
 }
 
+fn checkFunctionSignature(comptime ImplFn: type, comptime InterfaceFn: type) bool {
+    if (ImplFn == InterfaceFn) return true;
+    const a = @typeInfo(ImplFn);
+    const b = @typeInfo(InterfaceFn);
+    if (std.meta.activeTag(a) != std.meta.activeTag(b)) return false;
+    return switch (b) {
+        .@"fn" => |bf| blk: {
+            const af = a.@"fn";
+            if (af.params.len != bf.params.len) break :blk false;
+            if (!std.meta.eql(af.calling_convention, bf.calling_convention)) break :blk false;
+            for (af.params, bf.params) |pa, pb| if (!checkFunctionSignature(pa.type.?, pb.type.?)) break :blk false;
+            break :blk checkFunctionSignature(af.return_type.?, bf.return_type.?);
+        },
+        .pointer => |bp| bp.size == a.pointer.size and
+            bp.is_const == a.pointer.is_const and
+            (@typeInfo(bp.child) == .@"opaque" or checkFunctionSignature(a.pointer.child, bp.child)),
+        .optional => |bo| checkFunctionSignature(a.optional.child, bo.child),
+        else => false,
+    };
+}
+
+inline fn symbol(interface_func: anytype, func: anytype, name: []const u8) void {
+    if (!checkFunctionSignature(@TypeOf(func), @TypeOf(interface_func))) @compileError("type mismatch");
+    @export(&func, .{ .name = name });
+}
+
 comptime {
-    _ = Texture.Descriptor;
-    for (std.meta.declarations(@This())) |decl| {
-        _ = &@field(@This(), decl.name);
-    }
+    @setEvalBranchQuota(10000);
+    symbol(gpu.createInstance, Instance.sfCreateInstance, "sfCreateInstance");
+    symbol(gpu.destroyInstance, Instance.sfDestroyInstance, "sfDestroyInstance");
+    symbol(gpu.enumerateAdapters, Instance.sfEnumerateAdapters, "sfEnumerateAdapters");
+    symbol(gpu.createSurfaceWin32, Surface.sfCreateSurfaceWin32, "sfCreateSurfaceWin32");
+    symbol(gpu.destroySurface, Surface.sfDestroySurface, "sfDestroySurface");
+    symbol(gpu.surfaceSupportedUsage, Device.sfSurfaceSupportedUsage, "sfSurfaceSupportedUsage");
+    symbol(gpu.surfaceFormats, Device.sfSurfaceFormats, "sfSurfaceFormats");
+    symbol(gpu.surfacePresentModes, Device.sfSurfacePresentModes, "sfSurfacePresentModes");
+    symbol(gpu.createDevice, Device.sfCreateDevice, "sfCreateDevice");
+    symbol(gpu.destroyDevice, Device.sfDestroyDevice, "sfDestroyDevice");
+    symbol(gpu.deviceToHostPointer, Device.sfDeviceToHostPointer, "sfDeviceToHostPointer");
+    symbol(gpu.malloc, heap.sfMalloc, "sfMalloc");
+    symbol(gpu.free, heap.sfFree, "sfFree");
+    symbol(gpu.descriptorSizeAndHeapAlign, Texture.Descriptor.sfDescriptorSizeAndHeapAlign, "sfDescriptorSizeAndHeapAlign");
+    symbol(gpu.storeDescriptor, Texture.Descriptor.sfStoreDescriptor, "sfStoreDescriptor");
+    symbol(gpu.createQueue, Queue.sfCreateQueue, "sfCreateQueue");
+    symbol(gpu.startCommandRecording, Queue.sfStartCommandRecording, "sfStartCommandRecording");
+    symbol(gpu.submit, Queue.sfSubmit, "sfSubmit");
+    symbol(gpu.submitAndSignal, Queue.sfSubmitAndSignal, "sfSubmitAndSignal");
+    symbol(gpu.createSemaphore, Semaphore.sfCreateSemaphore, "sfCreateSemaphore");
+    symbol(gpu.destroySemaphore, Semaphore.sfDestroySemaphore, "sfDestroySemaphore");
+    symbol(gpu.waitSemaphore, Semaphore.sfWaitSemaphore, "sfWaitSemaphore");
+    symbol(gpu.createSwapchain, Swapchain.sfCreateSwapchain, "sfCreateSwapchain");
+    symbol(gpu.destroySwapchain, Swapchain.sfDestroySwapchain, "sfDestroySwapchain");
+    symbol(gpu.swapchainAcquireNextTexture, Swapchain.sfSwapchainAcquireNextTexture, "sfSwapchainAcquireNextTexture");
+    symbol(gpu.swapchainPresent, Swapchain.sfSwapchainPresent, "sfSwapchainPresent");
+    symbol(gpu.setActiveTextureHeap, CommandBuffer.sfSetActiveTextureHeap, "sfSetActiveTextureHeap");
+    symbol(gpu.setPipeline, CommandBuffer.sfSetPipeline, "sfSetPipeline");
+    symbol(gpu.dispatch, CommandBuffer.sfDispatch, "sfDispatch");
+    symbol(gpu.barrier, CommandBuffer.sfBarrier, "sfBarrier");
+    symbol(gpu.copyTextureToBuffer, CommandBuffer.sfCopyTextureToBuffer, "sfCopyTextureToBuffer");
+    symbol(gpu.copyBufferToTexture, CommandBuffer.sfCopyBufferToTexture, "sfCopyBufferToTexture");
+    symbol(gpu.beginRenderPass, CommandBuffer.sfBeginRenderPass, "sfBeginRenderPass");
+    symbol(gpu.endRenderPass, CommandBuffer.sfEndRenderPass, "sfEndRenderPass");
+    symbol(gpu.draw, CommandBuffer.sfDraw, "sfDraw");
+    symbol(gpu.drawIndexed, CommandBuffer.sfDrawIndexed, "sfDrawIndexed");
+    symbol(gpu.drawIndexedInstanced, CommandBuffer.sfDrawIndexedInstanced, "sfDrawIndexedInstanced");
+    symbol(gpu.drawIndexedInstancedIndirect, CommandBuffer.sfDrawIndexedInstancedIndirect, "sfDrawIndexedInstancedIndirect");
+    symbol(gpu.textureSizeAndAlign, Texture.sfTextureSizeAndAlign, "sfTextureSizeAndAlign");
+    symbol(gpu.createTexture, Texture.sfCreateTexture, "sfCreateTexture");
+    symbol(gpu.destroyTexture, Texture.sfDestroyTexture, "sfDestroyTexture");
+    symbol(gpu.textureStorageDescriptor, Texture.sfTextureStorageDescriptor, "sfTextureStorageDescriptor");
+    symbol(gpu.textureViewDescriptor, Texture.sfTextureViewDescriptor, "sfTextureViewDescriptor");
+    symbol(gpu.createComputePipeline, Pipeline.sfCreateComputePipeline, "sfCreateComputePipeline");
+    symbol(gpu.createGraphicsPipeline, Pipeline.sfCreateGraphicsPipeline, "sfCreateGraphicsPipeline");
+    symbol(gpu.destroyPipeline, Pipeline.sfDestroyPipeline, "sfDestroyPipeline");
 }

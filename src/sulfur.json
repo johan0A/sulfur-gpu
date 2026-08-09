@@ -98,7 +98,7 @@
       "fields": [
         { "name": "format", "type": { "base": "SfFormat" }, "doc": "" },
         { "name": "present_mode", "type": { "base": "SfPresentMode" }, "doc": "" },
-        { "name": "usage", "type": { "base": "SfTextureUsageFlags" }, "doc": "" }
+        { "name": "usage", "type": { "base": "SfTextureUsage" }, "doc": "" }
       ],
       "doc": ""
     },
@@ -108,7 +108,7 @@
         { "name": "texture", "type": { "base": "SfTexture", "ptr": [{ "const": true, "optional": true }] }, "default": "NULL", "doc": "" },
         { "name": "load_op", "type": { "base": "SfLoadOp" }, "default": "SF_LOAD_OP_LOAD", "doc": "" },
         { "name": "store_op", "type": { "base": "SfStoreOp" }, "default": "SF_STORE_OP_STORE", "doc": "" },
-        { "name": "clear_value", "type": { "base": "float" }, "default": "1.0f", "doc": "" }
+        { "name": "clear_value", "type": { "base": "float" }, "default": "1.0", "doc": "" }
       ],
       "doc": ""
     },
@@ -161,7 +161,7 @@
         { "name": "mip_count", "type": { "base": "uint32_t" }, "default": "1", "doc": "" },
         { "name": "layer_count", "type": { "base": "uint32_t" }, "default": "1", "doc": "" },
         { "name": "format", "type": { "base": "SfFormat" }, "default": "SF_FORMAT_NONE", "doc": "" },
-        { "name": "usage", "type": { "base": "SfTextureUsageFlags" }, "default": "0", "doc": "" }
+        { "name": "usage", "type": { "base": "SfTextureUsage" }, "default": "0", "doc": "" }
       ],
       "doc": ""
     },
@@ -465,7 +465,7 @@
 
   "flags": [
     {
-      "name": "SfStageFlags",
+      "name": "SfStage",
       "backing_type": "uint32_t",
       "bits": [
         { "name": "SF_STAGE_TRANSFER_BIT", "bit": 0, "doc": "" },
@@ -492,7 +492,7 @@
       "doc": ""
     },
     {
-      "name": "SfHazardFlags",
+      "name": "SfHazard",
       "backing_type": "uint32_t",
       "bits": [
         { "name": "SF_HAZARD_DRAW_ARGUMENTS_BIT", "bit": 0, "doc": "" },
@@ -503,7 +503,7 @@
       "doc": ""
     },
     {
-      "name": "SfTextureUsageFlags",
+      "name": "SfTextureUsage",
       "backing_type": "uint32_t",
       "bits": [
         { "name": "SF_TEXTURE_USAGE_SAMPLED_BIT", "bit": 0, "doc": "" },
@@ -545,10 +545,7 @@
       "group": "SfInstance",
       "return": { "base": "SfInstance", "ptr": [{}] },
       "params": [
-        { "name": "allocator", "type": { "base": "SfAllocator", "ptr": [{ "optional": true }] }, "doc": "" },
-        { "name": "get_instance_proc_addr", "type": { "base": "PFN_vkGetInstanceProcAddr" }, "doc": "" },
-        { "name": "required_surface_extension_count", "type": { "base": "size_t" }, "doc": "" },
-        { "name": "required_surface_extensions", "type": { "base": "char", "ptr": [{ "const": true, "len": "null_terminated" }, { "const": true, "len": "required_surface_extension_count" }] }, "doc": "" }
+        { "name": "allocator", "type": { "base": "SfAllocator", "ptr": [{ "optional": true }] }, "doc": "" }
       ],
       "doc": ""
     },
@@ -598,7 +595,7 @@
     {
       "name": "sfSurfaceSupportedUsage",
       "group": "SfSurface",
-      "return": { "base": "SfTextureUsageFlags" },
+      "return": { "base": "SfTextureUsage" },
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "surface", "type": { "base": "SfSurface", "ptr": [{}] }, "doc": "" }
@@ -690,6 +687,18 @@
       "return": { "base": "SfSizeAndAlign" },
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfStoreDescriptor",
+      "group": "SfDescriptor",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "descriptor", "type": { "base": "SfDescriptor", "ptr": [{ "const": true }] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "heap", "type": { "base": "uint8_t", "ptr": [{ "len": "none" }] }, "doc": "" },
+        { "name": "index", "type": { "base": "size_t" }, "doc": "" }
       ],
       "doc": ""
     },
@@ -861,9 +870,9 @@
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
-        { "name": "before", "type": { "base": "SfStageFlags" }, "doc": "" },
-        { "name": "after", "type": { "base": "SfStageFlags" }, "doc": "" },
-        { "name": "hazard", "type": { "base": "SfHazardFlags" }, "doc": "" }
+        { "name": "before", "type": { "base": "SfStage" }, "doc": "" },
+        { "name": "after", "type": { "base": "SfStage" }, "doc": "" },
+        { "name": "hazard", "type": { "base": "SfHazard" }, "doc": "" }
       ],
       "doc": ""
     },
@@ -887,6 +896,7 @@
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "size", "type": { "base": "size_t" }, "doc": "" },
         { "name": "destination", "type": { "base": "SfDeviceAddress" }, "doc": "" },
         { "name": "source", "type": { "base": "SfDeviceAddress" }, "doc": "" },
         { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" }

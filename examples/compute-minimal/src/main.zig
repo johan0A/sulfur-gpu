@@ -1,62 +1,60 @@
 pub fn main(init: std.process.Init) !void {
-    var loader = try VulkanLoader.open();
-    defer loader.close();
-
-    var instance: *gpu.Instance = .sfCreateInstance(null, loader.proc, 0, &.{});
-    defer instance.sfDestroyInstance();
+    const instance: *gpu.Instance = gpu.createInstance(null);
+    defer gpu.destroyInstance(instance);
 
     var adapters_buff: [64]*gpu.Adapter = undefined;
     var adapters: []*gpu.Adapter = adapters_buff[0..0];
-    instance.sfEnumerateAdapters(adapters_buff.len, &adapters_buff, &adapters.len);
+    gpu.enumerateAdapters(instance, adapters_buff.len, &adapters_buff, &adapters.len);
 
     // TODO: pick adapter
     const adapter = adapters[0];
 
-    var device: *gpu.Device = .sfCreateDevice(instance, adapter);
-    defer device.sfDestroyDevice();
+    const device: *gpu.Device = gpu.createDevice(instance, adapter);
+    defer gpu.destroyDevice(device);
 
-    const queue: *gpu.Queue = .sfCreateQueue(device, .graphics);
+    const queue: *gpu.Queue = gpu.createQueue(device, .graphics);
 
     const dimensions: [3]u32 = .{ 256, 256, 1 };
-    const texture_info: gpu.Texture.Desc = .{
+    const texture_info: gpu.TextureDesc = .{
         .dimensions = dimensions,
         .format = .rgba8_unorm,
         .usage = .{ .storage = true },
     };
 
-    const texture_size_align = gpu.Texture.sfTextureSizeAndAlign(device, texture_info);
-    const texture_gpu = device.sfMalloc(texture_size_align.size, texture_size_align.@"align", .gpu);
-    defer device.sfFree(texture_gpu);
+    const texture_size_align = gpu.textureSizeAndAlign(device, texture_info);
+    const texture_gpu = gpu.malloc(device, texture_size_align.size, texture_size_align.alignment, .gpu);
+    defer gpu.free(device, texture_gpu);
 
-    var texture: *gpu.Texture = .sfCreateTexture(device, texture_info, texture_gpu);
-    defer texture.sfDestroyTexture(device);
+    const texture: *gpu.Texture = gpu.createTexture(device, texture_info, texture_gpu);
+    defer gpu.destroyTexture(texture, device);
 
-    const descriptor_size_and_align = gpu.Texture.Descriptor.sfDescriptorSizeAndHeapAlign(device);
-    const heap_gpu = device.sfMalloc(descriptor_size_and_align.size * 65536, descriptor_size_and_align.@"align", .default);
-    defer device.sfFree(heap_gpu);
-    const heap: [*]u8 = @ptrCast(@alignCast(device.sfDeviceToHostPointer(heap_gpu)));
+    const descriptor_size_and_align = gpu.descriptorSizeAndHeapAlign(device);
+    const heap_gpu = gpu.malloc(device, descriptor_size_and_align.size * 65536, descriptor_size_and_align.alignment, .default);
+    defer gpu.free(device, heap_gpu);
+    const heap: [*]u8 = @ptrCast(@alignCast(gpu.deviceToHostPointer(device, heap_gpu)));
 
-    const descriptor = texture.sfTextureStorageDescriptor(device, .{});
-    descriptor.store(device, heap[0 .. descriptor_size_and_align.size * 65536], 0);
+    const descriptor = gpu.textureStorageDescriptor(texture, device, .{});
+    gpu.storeDescriptor(&descriptor, device, heap, 0);
 
-    const data_gpu = device.sfMalloc(@sizeOf(Data), @alignOf(Data), .default);
-    defer device.sfFree(data_gpu);
-    const data_cpu: *Data = @ptrCast(@alignCast(device.sfDeviceToHostPointer(data_gpu)));
+    const data_gpu = gpu.malloc(device, @sizeOf(Data), @alignOf(Data), .default);
+    defer gpu.free(device, data_gpu);
+    const data_cpu: *Data = @ptrCast(@alignCast(gpu.deviceToHostPointer(device, data_gpu)));
     data_cpu.output_texture = 0;
 
     const pixel_buffer_size = dimensions[0] * dimensions[1] * 4;
-    const readback_gpu = device.sfMalloc(pixel_buffer_size, 256, .readback);
-    defer device.sfFree(readback_gpu);
-    const readback_cpu: [*]u8 = @ptrCast(device.sfDeviceToHostPointer(readback_gpu));
+    const readback_gpu = gpu.malloc(device, pixel_buffer_size, 256, .readback);
+    defer gpu.free(device, readback_gpu);
+    const readback_cpu: [*]u8 = @ptrCast(gpu.deviceToHostPointer(device, readback_gpu));
 
     const spv = @embedFile("generate_texture.spv");
-    var pipeline: *gpu.Pipeline = .sfCreateComputePipeline(device, spv.len, spv);
-    defer pipeline.sfDestroyPipeline(device);
+    const pipeline: *gpu.Pipeline = gpu.createComputePipeline(device, spv.len, spv);
+    defer gpu.destroyPipeline(pipeline, device);
 
-    var cb = queue.sfStartCommandRecording(device);
-    cb.sfSetActiveTextureHeapPtr(device, heap_gpu);
-    cb.sfSetPipeline(device, pipeline);
-    cb.sfDispatch(
+    const cb = gpu.startCommandRecording(queue, device);
+    gpu.setActiveTextureHeap(cb, device, heap_gpu);
+    gpu.setPipeline(cb, device, pipeline);
+    gpu.dispatch(
+        cb,
         device,
         data_gpu,
         (dimensions[0] + 7) / 8,
@@ -64,13 +62,13 @@ pub fn main(init: std.process.Init) !void {
         1,
     );
 
-    cb.sfBarrier(device, .{ .compute = true }, .{ .transfer = true }, .{});
-    cb.sfCopyTextureToBuffer(device, readback_gpu, texture_gpu, texture);
+    gpu.barrier(cb, device, .{ .compute = true }, .{ .transfer = true }, .{});
+    gpu.copyTextureToBuffer(cb, device, readback_gpu, texture_gpu, texture);
 
-    var done: *gpu.Semaphore = .sfCreateSemaphore(device, 0);
-    defer done.sfDestroySemaphore(device);
-    queue.sfSubmitAndSignal(device, 1, &.{cb}, done, 1);
-    done.sfWaitSemaphore(device, 1);
+    const done: *gpu.Semaphore = gpu.createSemaphore(device, 0);
+    defer gpu.destroySemaphore(done, device);
+    gpu.submitAndSignal(queue, device, 1, &.{cb}, done, 1);
+    gpu.waitSemaphore(done, device, 1);
 
     const pixel_buffer = readback_cpu[0..pixel_buffer_size];
 

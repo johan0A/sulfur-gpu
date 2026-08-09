@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub fn parse(arena: std.mem.Allocator, bytes: []const u8) Registry {
+pub fn parse(arena: std.mem.Allocator, bytes: []const u8) !Registry {
     return try std.json.parseFromSliceLeaky(Registry, arena, bytes, .{});
 }
 

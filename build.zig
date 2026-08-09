@@ -16,7 +16,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(lib);
 
     const root_module = b.addModule("sulfur", .{
-        .root_source_file = b.path("src/root.zig"),
+        .root_source_file = b.path("src/sf_bindings.zig"),
         .optimize = optimize,
         .target = target,
     });
@@ -41,6 +41,27 @@ pub fn build(b: *std.Build) void {
     vulkan_loader_module.addImport("vulkan", vulkan.module("vulkan-zig"));
     root_module.addImport("vulkan", vulkan.module("vulkan-zig"));
     lib.root_module.addImport("vulkan", vulkan.module("vulkan-zig"));
+
+    {
+        const generate_sf_bindings = b.step("generate-sf-bindings", "");
+
+        const generate_sf_bindings_exe = b.addExecutable(.{
+            .name = "generate-sf-bindings",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/render_zig_bindings.zig"),
+                .optimize = .Debug,
+                .target = b.graph.host,
+            }),
+        });
+
+        const generate = b.addRunArtifact(generate_sf_bindings_exe);
+        generate.addFileArg(b.path("src/sulfur.json"));
+        const bindings = generate.addOutputFileArg("sf_bindings.zig");
+
+        const update_source_files = b.addUpdateSourceFiles();
+        update_source_files.addCopyFileToSource(bindings, "src/sf_bindings.zig");
+        generate_sf_bindings.dependOn(&update_source_files.step);
+    }
 
     {
         const tests = b.addTest(.{ .name = "test", .root_module = root_module });

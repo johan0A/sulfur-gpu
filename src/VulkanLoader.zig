@@ -51,7 +51,7 @@ fn openWindows() !VulkanLoader {
 
 fn openPosix(names: []const [*:0]const u8) !VulkanLoader {
     for (names) |name| {
-        const library = std.c.dlopen(name, std.c.RTLD.LAZY) orelse continue;
+        const library = std.c.dlopen(name, .{ .LAZY = true }) orelse continue;
         const symbol = std.c.dlsym(library, "vkGetInstanceProcAddr") orelse {
             _ = std.c.dlclose(library);
             continue;

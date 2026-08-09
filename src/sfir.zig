@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const gpu = @import("root.zig");
+const sampler_desc = @import("sampler_desc.zig");
 
 pub const magic: [4]u8 = "sfir".*;
 
@@ -15,7 +15,7 @@ const header_len = 16;
 const sampler_len = @sizeOf(u64);
 
 comptime {
-    std.debug.assert(@sizeOf(gpu.Sampler) == sampler_len);
+    std.debug.assert(@sizeOf(sampler_desc.SamplerDesc) == sampler_len);
 }
 
 pub const max_spirv_len = 1 << 30;
@@ -37,7 +37,7 @@ pub const Shader = struct {
         return shader.sampler_bytes.len / sampler_len;
     }
 
-    pub fn sampler(shader: Shader, index: usize) gpu.Sampler {
+    pub fn sampler(shader: Shader, index: usize) sampler_desc.SamplerDesc {
         std.debug.assert(index < shader.samplerCount());
         const raw = shader.sampler_bytes[index * sampler_len ..][0..sampler_len];
         return @bitCast(std.mem.readInt(u64, raw, .little));
@@ -67,7 +67,7 @@ pub const SamplerIterator = struct {
     shader: Shader,
     index: usize = 0,
 
-    pub fn next(it: *SamplerIterator) ?gpu.Sampler {
+    pub fn next(it: *SamplerIterator) ?sampler_desc.SamplerDesc {
         if (it.index == it.shader.samplerCount()) return null;
         defer it.index += 1;
         return it.shader.sampler(it.index);
@@ -145,7 +145,7 @@ pub const Encoder = struct {
         try e.w.writeAll(bytes);
     }
 
-    pub fn sampler(e: *Encoder, s: gpu.Sampler) std.Io.Writer.Error!void {
+    pub fn sampler(e: *Encoder, s: sampler_desc.SamplerDesc) std.Io.Writer.Error!void {
         std.debug.assert(e.spirv_left == 0);
         std.debug.assert(e.samplers_left != 0);
         e.samplers_left -= 1;
@@ -177,7 +177,7 @@ pub fn main(init: std.process.Init) !void {
     for (sampler_args) |arg| {
         var out: [1024]u8 = undefined;
         const as_bytes = try std.fmt.hexToBytes(&out, arg);
-        const sampler: gpu.Sampler = @bitCast(as_bytes[0..8].*);
+        const sampler: sampler_desc.SamplerDesc = @bitCast(as_bytes[0..8].*);
         try encoder.sampler(sampler);
     }
 
