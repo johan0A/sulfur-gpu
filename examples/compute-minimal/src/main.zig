@@ -26,14 +26,14 @@ pub fn main(init: std.process.Init) !void {
     defer gpu.free(device, texture_gpu);
 
     const texture: *gpu.Texture = gpu.createTexture(device, texture_info, texture_gpu);
-    defer gpu.destroyTexture(texture, device);
+    defer gpu.destroyTexture(texture);
 
     const descriptor_size_and_align = gpu.descriptorSizeAndHeapAlign(device);
     const heap_gpu = gpu.malloc(device, descriptor_size_and_align.size * 65536, descriptor_size_and_align.alignment, .default);
     defer gpu.free(device, heap_gpu);
     const heap: [*]u8 = @ptrCast(@alignCast(gpu.deviceToHostPointer(device, heap_gpu)));
 
-    const descriptor = gpu.textureStorageDescriptor(texture, device, .{});
+    const descriptor = gpu.textureStorageDescriptor(texture, .{});
     gpu.storeDescriptor(&descriptor, device, heap, 0);
 
     const data_gpu = gpu.malloc(device, @sizeOf(Data), @alignOf(Data), .default);
@@ -48,27 +48,26 @@ pub fn main(init: std.process.Init) !void {
 
     const spv = @embedFile("generate_texture.spv");
     const pipeline: *gpu.Pipeline = gpu.createComputePipeline(device, spv.len, spv);
-    defer gpu.destroyPipeline(pipeline, device);
+    defer gpu.destroyPipeline(pipeline);
 
-    const cb = gpu.startCommandRecording(queue, device);
-    gpu.setActiveTextureHeap(cb, device, heap_gpu);
-    gpu.setPipeline(cb, device, pipeline);
+    const cb = gpu.startCommandRecording(queue);
+    gpu.setActiveTextureHeap(cb, heap_gpu);
+    gpu.setPipeline(cb, pipeline);
     gpu.dispatch(
         cb,
-        device,
         data_gpu,
         (dimensions[0] + 7) / 8,
         (dimensions[1] + 7) / 8,
         1,
     );
 
-    gpu.barrier(cb, device, .{ .compute = true }, .{ .transfer = true }, .{});
-    gpu.copyTextureToBuffer(cb, device, texture_gpu, readback_gpu, texture);
+    gpu.barrier(cb, .{ .compute = true }, .{ .transfer = true }, .{});
+    gpu.copyTextureToBuffer(cb, texture_gpu, readback_gpu, texture);
 
     const done: *gpu.Semaphore = gpu.createSemaphore(device, 0);
-    defer gpu.destroySemaphore(done, device);
-    gpu.submitAndSignal(queue, device, 1, &.{cb}, done, 1);
-    gpu.waitSemaphore(done, device, 1);
+    defer gpu.destroySemaphore(done);
+    gpu.submitAndSignal(queue, 1, &.{cb}, done, 1);
+    gpu.waitSemaphore(done, 1);
 
     const pixel_buffer = readback_cpu[0..pixel_buffer_size];
 

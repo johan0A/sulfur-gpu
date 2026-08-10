@@ -434,71 +434,71 @@ pub const storeDescriptor = sfStoreDescriptor;
 extern fn sfCreateQueue(device: *Device, queue_type: QueueType) callconv(@"callconv") *Queue;
 pub const createQueue = sfCreateQueue;
 
-extern fn sfStartCommandRecording(queue: *Queue, device: *Device) callconv(@"callconv") *CommandBuffer;
+extern fn sfStartCommandRecording(queue: *Queue) callconv(@"callconv") *CommandBuffer;
 pub const startCommandRecording = sfStartCommandRecording;
 
-extern fn sfSubmit(queue: *Queue, device: *Device, command_buffer_count: usize, command_buffers: [*]const *CommandBuffer) callconv(@"callconv") void;
+extern fn sfSubmit(queue: *Queue, command_buffer_count: usize, command_buffers: [*]const *CommandBuffer) callconv(@"callconv") void;
 pub const submit = sfSubmit;
 
-extern fn sfSubmitAndSignal(queue: *Queue, device: *Device, command_buffer_count: usize, command_buffers: [*]const *CommandBuffer, signal_semaphore: *Semaphore, signal_value: u64) callconv(@"callconv") void;
+extern fn sfSubmitAndSignal(queue: *Queue, command_buffer_count: usize, command_buffers: [*]const *CommandBuffer, signal_semaphore: *Semaphore, signal_value: u64) callconv(@"callconv") void;
 pub const submitAndSignal = sfSubmitAndSignal;
 
 extern fn sfCreateSemaphore(device: *Device, initial_value: u64) callconv(@"callconv") *Semaphore;
 pub const createSemaphore = sfCreateSemaphore;
 
-extern fn sfDestroySemaphore(semaphore: *Semaphore, device: *Device) callconv(@"callconv") void;
+extern fn sfDestroySemaphore(semaphore: *Semaphore) callconv(@"callconv") void;
 pub const destroySemaphore = sfDestroySemaphore;
 
-extern fn sfWaitSemaphore(semaphore: *Semaphore, device: *Device, value: u64) callconv(@"callconv") void;
+extern fn sfWaitSemaphore(semaphore: *Semaphore, value: u64) callconv(@"callconv") void;
 pub const waitSemaphore = sfWaitSemaphore;
 
-extern fn sfCreateSwapchain(device: *Device, queue: *Queue, surface: *Surface, desc: SwapchainDesc) callconv(@"callconv") *Swapchain;
+extern fn sfCreateSwapchain(queue: *Queue, surface: *Surface, desc: SwapchainDesc) callconv(@"callconv") *Swapchain;
 pub const createSwapchain = sfCreateSwapchain;
 
-extern fn sfDestroySwapchain(swapchain: *Swapchain, device: *Device) callconv(@"callconv") void;
+extern fn sfDestroySwapchain(swapchain: *Swapchain) callconv(@"callconv") void;
 pub const destroySwapchain = sfDestroySwapchain;
 
-extern fn sfSwapchainAcquireNextTexture(swapchain: *Swapchain, device: *Device, queue: *Queue, width: u32, height: u32) callconv(@"callconv") *Texture;
+extern fn sfSwapchainAcquireNextTexture(swapchain: *Swapchain, queue: *Queue, width: u32, height: u32) callconv(@"callconv") *Texture;
 pub const swapchainAcquireNextTexture = sfSwapchainAcquireNextTexture;
 
-extern fn sfSwapchainPresent(swapchain: *Swapchain, device: *Device, queue: *Queue, semaphore: *Semaphore, semaphore_value: u64) callconv(@"callconv") void;
+extern fn sfSwapchainPresent(swapchain: *Swapchain, queue: *Queue, semaphore: *Semaphore, semaphore_value: u64) callconv(@"callconv") void;
 pub const swapchainPresent = sfSwapchainPresent;
 
-extern fn sfSetActiveTextureHeap(command_buffer: *CommandBuffer, device: *Device, heap_address: DeviceAddress) callconv(@"callconv") void;
+extern fn sfSetActiveTextureHeap(command_buffer: *CommandBuffer, heap_address: DeviceAddress) callconv(@"callconv") void;
 pub const setActiveTextureHeap = sfSetActiveTextureHeap;
 
-extern fn sfSetPipeline(command_buffer: *CommandBuffer, device: *Device, pipeline: *Pipeline) callconv(@"callconv") void;
+extern fn sfSetPipeline(command_buffer: *CommandBuffer, pipeline: *Pipeline) callconv(@"callconv") void;
 pub const setPipeline = sfSetPipeline;
 
-extern fn sfDispatch(command_buffer: *CommandBuffer, device: *Device, data: DeviceAddress, x: u32, y: u32, z: u32) callconv(@"callconv") void;
+extern fn sfDispatch(command_buffer: *CommandBuffer, data: DeviceAddress, x: u32, y: u32, z: u32) callconv(@"callconv") void;
 pub const dispatch = sfDispatch;
 
-extern fn sfBarrier(command_buffer: *CommandBuffer, device: *Device, before: Stage, after: Stage, hazard: Hazard) callconv(@"callconv") void;
+extern fn sfBarrier(command_buffer: *CommandBuffer, before: Stage, after: Stage, hazard: Hazard) callconv(@"callconv") void;
 pub const barrier = sfBarrier;
 
 /// 256 bytes is a typical optimal alignment for destination
-extern fn sfCopyTextureToBuffer(command_buffer: *CommandBuffer, device: *Device, source: DeviceAddress, destination: DeviceAddress, texture: *Texture) callconv(@"callconv") void;
+extern fn sfCopyTextureToBuffer(command_buffer: *CommandBuffer, source: DeviceAddress, destination: DeviceAddress, texture: *Texture) callconv(@"callconv") void;
 pub const copyTextureToBuffer = sfCopyTextureToBuffer;
 
-extern fn sfCopyBufferToTexture(command_buffer: *CommandBuffer, device: *Device, source: DeviceAddress, destination: DeviceAddress, texture: *Texture) callconv(@"callconv") void;
+extern fn sfCopyBufferToTexture(command_buffer: *CommandBuffer, source: DeviceAddress, destination: DeviceAddress, texture: *Texture) callconv(@"callconv") void;
 pub const copyBufferToTexture = sfCopyBufferToTexture;
 
-extern fn sfBeginRenderPass(command_buffer: *CommandBuffer, device: *Device, desc: RenderPassDesc) callconv(@"callconv") void;
+extern fn sfBeginRenderPass(command_buffer: *CommandBuffer, desc: RenderPassDesc) callconv(@"callconv") void;
 pub const beginRenderPass = sfBeginRenderPass;
 
-extern fn sfEndRenderPass(command_buffer: *CommandBuffer, device: *Device) callconv(@"callconv") void;
+extern fn sfEndRenderPass(command_buffer: *CommandBuffer) callconv(@"callconv") void;
 pub const endRenderPass = sfEndRenderPass;
 
-extern fn sfDraw(command_buffer: *CommandBuffer, device: *Device, vertex_data: DeviceAddress, pixel_data: DeviceAddress, vertex_count: u32, instance_count: u32) callconv(@"callconv") void;
+extern fn sfDraw(command_buffer: *CommandBuffer, vertex_data: DeviceAddress, pixel_data: DeviceAddress, vertex_count: u32, instance_count: u32) callconv(@"callconv") void;
 pub const draw = sfDraw;
 
-extern fn sfDrawIndexed(command_buffer: *CommandBuffer, device: *Device, vertex_data: DeviceAddress, pixel_data: DeviceAddress, index_type: IndexType, indices: DeviceAddress, index_count: u32) callconv(@"callconv") void;
+extern fn sfDrawIndexed(command_buffer: *CommandBuffer, vertex_data: DeviceAddress, pixel_data: DeviceAddress, index_type: IndexType, indices: DeviceAddress, index_count: u32) callconv(@"callconv") void;
 pub const drawIndexed = sfDrawIndexed;
 
-extern fn sfDrawIndexedInstanced(command_buffer: *CommandBuffer, device: *Device, vertex_data: DeviceAddress, pixel_data: DeviceAddress, index_type: IndexType, indices: DeviceAddress, index_count: u32, instance_count: u32) callconv(@"callconv") void;
+extern fn sfDrawIndexedInstanced(command_buffer: *CommandBuffer, vertex_data: DeviceAddress, pixel_data: DeviceAddress, index_type: IndexType, indices: DeviceAddress, index_count: u32, instance_count: u32) callconv(@"callconv") void;
 pub const drawIndexedInstanced = sfDrawIndexedInstanced;
 
-extern fn sfDrawIndexedInstancedIndirect(command_buffer: *CommandBuffer, device: *Device, vertex_data: DeviceAddress, pixel_data: DeviceAddress, index_type: IndexType, indices: DeviceAddress, arguments: DeviceAddress) callconv(@"callconv") void;
+extern fn sfDrawIndexedInstancedIndirect(command_buffer: *CommandBuffer, vertex_data: DeviceAddress, pixel_data: DeviceAddress, index_type: IndexType, indices: DeviceAddress, arguments: DeviceAddress) callconv(@"callconv") void;
 pub const drawIndexedInstancedIndirect = sfDrawIndexedInstancedIndirect;
 
 extern fn sfTextureSizeAndAlign(device: *Device, desc: TextureDesc) callconv(@"callconv") SizeAndAlign;
@@ -507,13 +507,13 @@ pub const textureSizeAndAlign = sfTextureSizeAndAlign;
 extern fn sfCreateTexture(device: *Device, desc: TextureDesc, data: DeviceAddress) callconv(@"callconv") *Texture;
 pub const createTexture = sfCreateTexture;
 
-extern fn sfDestroyTexture(texture: *Texture, device: *Device) callconv(@"callconv") void;
+extern fn sfDestroyTexture(texture: *Texture) callconv(@"callconv") void;
 pub const destroyTexture = sfDestroyTexture;
 
-extern fn sfTextureStorageDescriptor(texture: *Texture, device: *Device, desc: TextureViewDesc) callconv(@"callconv") Descriptor;
+extern fn sfTextureStorageDescriptor(texture: *Texture, desc: TextureViewDesc) callconv(@"callconv") Descriptor;
 pub const textureStorageDescriptor = sfTextureStorageDescriptor;
 
-extern fn sfTextureViewDescriptor(texture: *Texture, device: *Device, desc: TextureViewDesc) callconv(@"callconv") Descriptor;
+extern fn sfTextureViewDescriptor(texture: *Texture, desc: TextureViewDesc) callconv(@"callconv") Descriptor;
 pub const textureViewDescriptor = sfTextureViewDescriptor;
 
 extern fn sfCreateComputePipeline(device: *Device, ir_size: usize, ir: [*]const u8) callconv(@"callconv") *Pipeline;
@@ -522,5 +522,5 @@ pub const createComputePipeline = sfCreateComputePipeline;
 extern fn sfCreateGraphicsPipeline(device: *Device, vertex_ir_size: usize, vertex_ir: [*]const u8, pixel_ir_size: usize, pixel_ir: [*]const u8, desc: GraphicsPipelineDesc) callconv(@"callconv") *Pipeline;
 pub const createGraphicsPipeline = sfCreateGraphicsPipeline;
 
-extern fn sfDestroyPipeline(pipeline: *Pipeline, device: *Device) callconv(@"callconv") void;
+extern fn sfDestroyPipeline(pipeline: *Pipeline) callconv(@"callconv") void;
 pub const destroyPipeline = sfDestroyPipeline;

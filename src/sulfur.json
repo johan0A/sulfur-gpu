@@ -737,8 +737,7 @@
       "group": "SfQueue",
       "return": { "base": "SfCommandBuffer", "ptr": [{}] },
       "params": [
-        { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" }
+        { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" }
       ],
       "doc": ""
     },
@@ -748,7 +747,6 @@
       "return": { "base": "void" },
       "params": [
         { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "command_buffer_count", "type": { "base": "size_t" }, "doc": "" },
         { "name": "command_buffers", "type": { "base": "SfCommandBuffer", "ptr": [{}, { "const": true, "len": "command_buffer_count" }] }, "doc": "" }
       ],
@@ -760,7 +758,6 @@
       "return": { "base": "void" },
       "params": [
         { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "command_buffer_count", "type": { "base": "size_t" }, "doc": "" },
         { "name": "command_buffers", "type": { "base": "SfCommandBuffer", "ptr": [{}, { "const": true, "len": "command_buffer_count" }] }, "doc": "" },
         { "name": "signal_semaphore", "type": { "base": "SfSemaphore", "ptr": [{}] }, "doc": "" },
@@ -783,8 +780,7 @@
       "group": "SfSemaphore",
       "return": { "base": "void" },
       "params": [
-        { "name": "semaphore", "type": { "base": "SfSemaphore", "ptr": [{}] }, "doc": "" },
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" }
+        { "name": "semaphore", "type": { "base": "SfSemaphore", "ptr": [{}] }, "doc": "" }
       ],
       "doc": ""
     },
@@ -794,7 +790,6 @@
       "return": { "base": "void" },
       "params": [
         { "name": "semaphore", "type": { "base": "SfSemaphore", "ptr": [{}] }, "doc": "" },
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "value", "type": { "base": "uint64_t" }, "doc": "" }
       ],
       "doc": ""
@@ -804,7 +799,6 @@
       "group": "SfSwapchain",
       "return": { "base": "SfSwapchain", "ptr": [{}] },
       "params": [
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
         { "name": "surface", "type": { "base": "SfSurface", "ptr": [{}] }, "doc": "" },
         { "name": "desc", "type": { "base": "SfSwapchainDesc" }, "doc": "" }
@@ -816,8 +810,7 @@
       "group": "SfSwapchain",
       "return": { "base": "void" },
       "params": [
-        { "name": "swapchain", "type": { "base": "SfSwapchain", "ptr": [{}] }, "doc": "" },
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" }
+        { "name": "swapchain", "type": { "base": "SfSwapchain", "ptr": [{}] }, "doc": "" }
       ],
       "doc": ""
     },
@@ -827,7 +820,6 @@
       "return": { "base": "SfTexture", "ptr": [{}] },
       "params": [
         { "name": "swapchain", "type": { "base": "SfSwapchain", "ptr": [{}] }, "doc": "" },
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
         { "name": "width", "type": { "base": "uint32_t" }, "doc": "" },
         { "name": "height", "type": { "base": "uint32_t" }, "doc": "" }
@@ -840,7 +832,6 @@
       "return": { "base": "void" },
       "params": [
         { "name": "swapchain", "type": { "base": "SfSwapchain", "ptr": [{}] }, "doc": "" },
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
         { "name": "semaphore", "type": { "base": "SfSemaphore", "ptr": [{}] }, "doc": "" },
         { "name": "semaphore_value", "type": { "base": "uint64_t" }, "doc": "" }
@@ -853,7 +844,6 @@
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "heap_address", "type": { "base": "SfDeviceAddress" }, "doc": "" }
       ],
       "doc": ""
@@ -864,7 +854,6 @@
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "pipeline", "type": { "base": "SfPipeline", "ptr": [{}] }, "doc": "" }
       ],
       "doc": ""
@@ -875,7 +864,6 @@
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
         { "name": "x", "type": { "base": "uint32_t" }, "doc": "" },
         { "name": "y", "type": { "base": "uint32_t" }, "doc": "" },
@@ -889,7 +877,6 @@
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "before", "type": { "base": "SfStage" }, "doc": "" },
         { "name": "after", "type": { "base": "SfStage" }, "doc": "" },
         { "name": "hazard", "type": { "base": "SfHazard" }, "doc": "" }
@@ -902,7 +889,6 @@
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "source", "type": { "base": "SfDeviceAddress" }, "doc": "" },
         { "name": "destination", "type": { "base": "SfDeviceAddress" }, "doc": "" },
         { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" }
@@ -915,7 +901,6 @@
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "source", "type": { "base": "SfDeviceAddress" }, "doc": "" },
         { "name": "destination", "type": { "base": "SfDeviceAddress" }, "doc": "" },
         { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" }
@@ -928,7 +913,6 @@
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "desc", "type": { "base": "SfRenderPassDesc" }, "doc": "" }
       ],
       "doc": ""
@@ -938,8 +922,7 @@
       "group": "SfCommandBuffer",
       "return": { "base": "void" },
       "params": [
-        { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" }
+        { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" }
       ],
       "doc": ""
     },
@@ -949,7 +932,6 @@
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "vertex_data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
         { "name": "pixel_data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
         { "name": "vertex_count", "type": { "base": "uint32_t" }, "doc": "" },
@@ -963,7 +945,6 @@
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "vertex_data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
         { "name": "pixel_data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
         { "name": "index_type", "type": { "base": "SfIndexType" }, "doc": "" },
@@ -978,7 +959,6 @@
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "vertex_data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
         { "name": "pixel_data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
         { "name": "index_type", "type": { "base": "SfIndexType" }, "doc": "" },
@@ -994,7 +974,6 @@
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "vertex_data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
         { "name": "pixel_data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
         { "name": "index_type", "type": { "base": "SfIndexType" }, "doc": "" },
@@ -1029,8 +1008,7 @@
       "group": "SfTexture",
       "return": { "base": "void" },
       "params": [
-        { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" },
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" }
+        { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" }
       ],
       "doc": ""
     },
@@ -1040,7 +1018,6 @@
       "return": { "base": "SfDescriptor" },
       "params": [
         { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" },
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "desc", "type": { "base": "SfTextureViewDesc" }, "doc": "" }
       ],
       "doc": ""
@@ -1051,7 +1028,6 @@
       "return": { "base": "SfDescriptor" },
       "params": [
         { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" },
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "desc", "type": { "base": "SfTextureViewDesc" }, "doc": "" }
       ],
       "doc": ""
@@ -1086,8 +1062,7 @@
       "group": "SfPipeline",
       "return": { "base": "void" },
       "params": [
-        { "name": "pipeline", "type": { "base": "SfPipeline", "ptr": [{}] }, "doc": "" },
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" }
+        { "name": "pipeline", "type": { "base": "SfPipeline", "ptr": [{}] }, "doc": "" }
       ],
       "doc": ""
     }

@@ -47,16 +47,16 @@ pub fn main(init: std.process.Init) !void {
     const surface_usage = gpu.surfaceSupportedUsage(device, surface);
 
     const frame_semaphore: *gpu.Semaphore = gpu.createSemaphore(device, 0);
-    defer gpu.destroySemaphore(frame_semaphore, device);
+    defer gpu.destroySemaphore(frame_semaphore);
     var frame_index: u64 = 1;
 
     std.debug.assert(surface_usage.color_attachment);
-    const swapchain: *gpu.Swapchain = gpu.createSwapchain(device, queue, surface, .{
+    const swapchain: *gpu.Swapchain = gpu.createSwapchain(queue, surface, .{
         .format = swapchain_format,
         .usage = .{ .color_attachment = true },
         .present_mode = .fifo,
     });
-    defer gpu.destroySwapchain(swapchain, device);
+    defer gpu.destroySwapchain(swapchain);
 
     const descriptor_size_and_align = gpu.descriptorSizeAndHeapAlign(device);
     const heap_gpu = gpu.malloc(device, descriptor_size_and_align.size * 65536, descriptor_size_and_align.alignment, .default);
@@ -111,7 +111,7 @@ pub fn main(init: std.process.Init) !void {
     defer gpu.free(device, texture_gpu);
 
     const texture: *gpu.Texture = gpu.createTexture(device, texture_desc, texture_gpu);
-    defer gpu.destroyTexture(texture, device);
+    defer gpu.destroyTexture(texture);
 
     const texture_upload_size = dimensions[0] * dimensions[1] * 4;
     const texture_upload_gpu = gpu.malloc(device, texture_upload_size, 4, .default);
@@ -128,15 +128,15 @@ pub fn main(init: std.process.Init) !void {
         texture_upload_cpu[offset + 3] = 255;
     }
 
-    const upload_cb = gpu.startCommandRecording(queue, device);
+    const upload_cb = gpu.startCommandRecording(queue);
 
-    gpu.copyBufferToTexture(upload_cb, device, texture_upload_gpu, texture_gpu, texture);
+    gpu.copyBufferToTexture(upload_cb, texture_upload_gpu, texture_gpu, texture);
 
-    const texture_descriptor = gpu.textureViewDescriptor(texture, device, .{ .format = .rgba8_unorm });
+    const texture_descriptor = gpu.textureViewDescriptor(texture, .{ .format = .rgba8_unorm });
     gpu.storeDescriptor(&texture_descriptor, device, heap_gpu_cpu, 0);
 
-    gpu.barrier(upload_cb, device, .{ .transfer = true }, .all, .{ .descriptors = true });
-    gpu.submit(queue, device, 1, &.{upload_cb});
+    gpu.barrier(upload_cb, .{ .transfer = true }, .all, .{ .descriptors = true });
+    gpu.submit(queue, 1, &.{upload_cb});
 
     const vert = @embedFile("vert.spv");
     const frag = @embedFile("frag.spv");
@@ -144,7 +144,7 @@ pub fn main(init: std.process.Init) !void {
         .color_target_count = 1,
         .color_targets = &.{.{ .format = swapchain_format }},
     });
-    defer gpu.destroyPipeline(pipeline, device);
+    defer gpu.destroyPipeline(pipeline);
 
     var quit: bool = false;
     while (!quit) {
@@ -157,15 +157,15 @@ pub fn main(init: std.process.Init) !void {
         std.debug.assert(c.SDL_GetWindowSizeInPixels(window, &width, &height));
 
         if (frame_index > FRAMES_IN_FLIGHT)
-            gpu.waitSemaphore(frame_semaphore, device, frame_index - FRAMES_IN_FLIGHT);
+            gpu.waitSemaphore(frame_semaphore, frame_index - FRAMES_IN_FLIGHT);
 
-        const back_buffer = gpu.swapchainAcquireNextTexture(swapchain, device, queue, @intCast(width), @intCast(height));
+        const back_buffer = gpu.swapchainAcquireNextTexture(swapchain, queue, @intCast(width), @intCast(height));
 
-        const cb = gpu.startCommandRecording(queue, device);
+        const cb = gpu.startCommandRecording(queue);
 
-        gpu.setActiveTextureHeap(cb, device, heap_gpu);
+        gpu.setActiveTextureHeap(cb, heap_gpu);
 
-        gpu.beginRenderPass(cb, device, .{
+        gpu.beginRenderPass(cb, .{
             .stencil_attachment = .{},
             .depth_attachment = .{},
             .color_attachment_count = 1,
@@ -177,19 +177,19 @@ pub fn main(init: std.process.Init) !void {
             }},
         });
 
-        gpu.setPipeline(cb, device, pipeline);
+        gpu.setPipeline(cb, pipeline);
 
-        gpu.draw(cb, device, data_gpu, data_gpu, vertex_count, 1);
+        gpu.draw(cb, data_gpu, data_gpu, vertex_count, 1);
 
-        gpu.endRenderPass(cb, device);
+        gpu.endRenderPass(cb);
 
-        gpu.submitAndSignal(queue, device, 1, &.{cb}, frame_semaphore, frame_index);
-        gpu.swapchainPresent(swapchain, device, queue, frame_semaphore, frame_index);
+        gpu.submitAndSignal(queue, 1, &.{cb}, frame_semaphore, frame_index);
+        gpu.swapchainPresent(swapchain, queue, frame_semaphore, frame_index);
 
         frame_index += 1;
     }
 
-    gpu.waitSemaphore(frame_semaphore, device, frame_index - 1);
+    gpu.waitSemaphore(frame_semaphore, frame_index - 1);
     _ = init;
 }
 
