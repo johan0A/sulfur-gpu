@@ -137,5 +137,6 @@ pub const Registry = struct {
 
     pub const Platform = enum {
         win32,
+        xlib,
     };
 };

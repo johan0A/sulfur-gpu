@@ -41,7 +41,7 @@ pub const Instance = struct {
 
         const surface_extensions: []const [*:0]const u8 = switch (target.os.tag) {
             .windows => &.{ vk.extensions.khr_surface.name, vk.extensions.khr_win_32_surface.name },
-            else => &.{vk.extensions.khr_surface.name},
+            else => &.{ vk.extensions.khr_surface.name, vk.extensions.khr_xlib_surface.name },
         };
 
         const vk_surface_supported = for (surface_extensions) |required_ext| {
@@ -139,6 +139,19 @@ pub const Surface = struct {
         const info: vk.Win32SurfaceCreateInfoKHR = .{ .hinstance = @ptrCast(desc.hinstance), .hwnd = @ptrCast(desc.hwnd) };
         const surface = try instance.gpa.create(Surface);
         surface.* = .{ .surface = try instance.instance.createWin32SurfaceKHR(&info, null) };
+        return surface;
+    }
+
+    pub fn sfCreateSurfaceXlib(instance: *Instance, desc: gpu.SurfaceXlibDesc) callconv(gpu.@"callconv") *Surface {
+        return createXlib(instance, desc) catch @panic("TODO");
+    }
+    fn createXlib(instance: *Instance, desc: gpu.SurfaceXlibDesc) !*Surface {
+        const info: vk.XlibSurfaceCreateInfoKHR = .{
+            .dpy = @ptrCast(desc.display),
+            .window = @intCast(desc.window),
+        };
+        const surface = try instance.gpa.create(Surface);
+        surface.* = .{ .surface = try instance.instance.createXlibSurfaceKHR(&info, null) };
         return surface;
     }
 
@@ -2442,6 +2455,7 @@ comptime {
     symbol(gpu.destroyInstance, Instance.sfDestroyInstance, "sfDestroyInstance");
     symbol(gpu.enumerateAdapters, Instance.sfEnumerateAdapters, "sfEnumerateAdapters");
     symbol(gpu.createSurfaceWin32, Surface.sfCreateSurfaceWin32, "sfCreateSurfaceWin32");
+    symbol(gpu.createSurfaceXlib, Surface.sfCreateSurfaceXlib, "sfCreateSurfaceXlib");
     symbol(gpu.destroySurface, Surface.sfDestroySurface, "sfDestroySurface");
     symbol(gpu.surfaceSupportedUsage, Device.sfSurfaceSupportedUsage, "sfSurfaceSupportedUsage");
     symbol(gpu.surfaceFormats, Device.sfSurfaceFormats, "sfSurfaceFormats");

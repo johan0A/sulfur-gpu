@@ -282,6 +282,11 @@ pub const SurfaceWin32Desc = extern struct {
     hwnd: *anyopaque,
 };
 
+pub const SurfaceXlibDesc = extern struct {
+    display: *anyopaque,
+    window: u64,
+};
+
 pub const SwapchainDesc = extern struct {
     format: Format,
     present_mode: PresentMode,
@@ -389,6 +394,9 @@ pub const enumerateAdapters = sfEnumerateAdapters;
 
 extern fn sfCreateSurfaceWin32(instance: *Instance, desc: SurfaceWin32Desc) callconv(@"callconv") *Surface;
 pub const createSurfaceWin32 = sfCreateSurfaceWin32;
+
+extern fn sfCreateSurfaceXlib(instance: *Instance, desc: SurfaceXlibDesc) callconv(@"callconv") *Surface;
+pub const createSurfaceXlib = sfCreateSurfaceXlib;
 
 extern fn sfDestroySurface(surface: *Surface, instance: *Instance) callconv(@"callconv") void;
 pub const destroySurface = sfDestroySurface;

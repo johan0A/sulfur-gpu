@@ -92,6 +92,15 @@
       ],
       "doc": ""
     },
+    {
+      "name": "SfSurfaceXlibDesc",
+      "platform": "xlib",
+      "fields": [
+        { "name": "display", "type": { "base": "void", "ptr": [{}] }, "doc": "" },
+        { "name": "window", "type": { "base": "u64" }, "doc": "" }
+      ],
+      "doc": ""
+    },
 
     {
       "name": "SfSwapchainDesc",
@@ -579,6 +588,17 @@
       "params": [
         { "name": "instance", "type": { "base": "SfInstance", "ptr": [{}] }, "doc": "" },
         { "name": "desc", "type": { "base": "SfSurfaceWin32Desc" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfCreateSurfaceXlib",
+      "group": "SfSurface",
+      "platform": "xlib",
+      "return": { "base": "SfSurface", "ptr": [{}] },
+      "params": [
+        { "name": "instance", "type": { "base": "SfInstance", "ptr": [{}] }, "doc": "" },
+        { "name": "desc", "type": { "base": "SfSurfaceXlibDesc" }, "doc": "" }
       ],
       "doc": ""
     },
