@@ -24,7 +24,6 @@ pub fn main(init: std.process.Init) !void {
         .windows => blk: {
             const hwnd = c.SDL_GetPointerProperty(props, c.SDL_PROP_WINDOW_WIN32_HWND_POINTER, null) orelse @panic("TODO");
             const hinstance = c.SDL_GetPointerProperty(props, c.SDL_PROP_WINDOW_WIN32_INSTANCE_POINTER, null) orelse @panic("TODO");
-
             const surface_desc: gpu.SurfaceWin32Desc = .{ .hinstance = hinstance, .hwnd = hwnd };
             break :blk gpu.createSurfaceWin32(instance, surface_desc);
         },

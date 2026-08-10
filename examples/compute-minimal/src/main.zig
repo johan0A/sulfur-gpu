@@ -63,7 +63,7 @@ pub fn main(init: std.process.Init) !void {
     );
 
     gpu.barrier(cb, device, .{ .compute = true }, .{ .transfer = true }, .{});
-    gpu.copyTextureToBuffer(cb, device, readback_gpu, texture_gpu, texture);
+    gpu.copyTextureToBuffer(cb, device, texture_gpu, readback_gpu, texture);
 
     const done: *gpu.Semaphore = gpu.createSemaphore(device, 0);
     defer gpu.destroySemaphore(done, device);

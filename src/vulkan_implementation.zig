@@ -1372,21 +1372,21 @@ pub const CommandBuffer = struct {
     pub fn sfCopyTextureToBuffer(
         command_buffer: *CommandBuffer,
         d: *Device,
-        dest: gpu.DeviceAddress,
-        src: gpu.DeviceAddress,
+        source: gpu.DeviceAddress,
+        destination: gpu.DeviceAddress,
         texture: *Texture,
     ) callconv(gpu.@"callconv") void {
-        copyTextureToBuffer(command_buffer, d, dest, src, texture);
+        copyTextureToBuffer(command_buffer, d, source, destination, texture);
     }
     fn copyTextureToBuffer(
         command_buffer: *CommandBuffer,
         d: *Device,
-        dest: gpu.DeviceAddress,
-        src: gpu.DeviceAddress,
+        source: gpu.DeviceAddress,
+        destination: gpu.DeviceAddress,
         texture: *Texture,
     ) void {
-        _ = src;
-        const entry, const offset = d.heap.addrToEntryAndOffset(dest);
+        _ = source;
+        const entry, const offset = d.heap.addrToEntryAndOffset(destination);
         const region: vk.BufferImageCopy2 = .{
             .buffer_offset = offset,
             .buffer_row_length = 0,
@@ -1417,24 +1417,21 @@ pub const CommandBuffer = struct {
     pub fn sfCopyBufferToTexture(
         command_buffer: *CommandBuffer,
         d: *Device,
-        size: usize,
-        dest: gpu.DeviceAddress,
-        src: gpu.DeviceAddress,
+        source: gpu.DeviceAddress,
+        destination: gpu.DeviceAddress,
         texture: *Texture,
     ) callconv(gpu.@"callconv") void {
-        copyBufferToTexture(command_buffer, d, size, dest, src, texture);
+        copyBufferToTexture(command_buffer, d, source, destination, texture);
     }
     fn copyBufferToTexture(
         command_buffer: *CommandBuffer,
         d: *Device,
-        size: usize,
-        dest: gpu.DeviceAddress,
-        src: gpu.DeviceAddress,
+        source: gpu.DeviceAddress,
+        destination: gpu.DeviceAddress,
         texture: *Texture,
     ) void {
-        _ = size; // TODO
-        _ = src;
-        const entry, const offset = d.heap.addrToEntryAndOffset(dest);
+        _ = destination;
+        const entry, const offset = d.heap.addrToEntryAndOffset(source);
         const region: vk.BufferImageCopy2 = .{
             .buffer_offset = offset,
             .buffer_row_length = 0,

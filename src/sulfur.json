@@ -903,8 +903,8 @@
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
-        { "name": "destination", "type": { "base": "SfDeviceAddress" }, "doc": "" },
         { "name": "source", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "destination", "type": { "base": "SfDeviceAddress" }, "doc": "" },
         { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" }
       ],
       "doc": "256 bytes is a typical optimal alignment for destination"
@@ -916,9 +916,8 @@
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
-        { "name": "size", "type": { "base": "size_t" }, "doc": "" },
-        { "name": "destination", "type": { "base": "SfDeviceAddress" }, "doc": "" },
         { "name": "source", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "destination", "type": { "base": "SfDeviceAddress" }, "doc": "" },
         { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" }
       ],
       "doc": ""

@@ -477,10 +477,10 @@ extern fn sfBarrier(command_buffer: *CommandBuffer, device: *Device, before: Sta
 pub const barrier = sfBarrier;
 
 /// 256 bytes is a typical optimal alignment for destination
-extern fn sfCopyTextureToBuffer(command_buffer: *CommandBuffer, device: *Device, destination: DeviceAddress, source: DeviceAddress, texture: *Texture) callconv(@"callconv") void;
+extern fn sfCopyTextureToBuffer(command_buffer: *CommandBuffer, device: *Device, source: DeviceAddress, destination: DeviceAddress, texture: *Texture) callconv(@"callconv") void;
 pub const copyTextureToBuffer = sfCopyTextureToBuffer;
 
-extern fn sfCopyBufferToTexture(command_buffer: *CommandBuffer, device: *Device, size: usize, destination: DeviceAddress, source: DeviceAddress, texture: *Texture) callconv(@"callconv") void;
+extern fn sfCopyBufferToTexture(command_buffer: *CommandBuffer, device: *Device, source: DeviceAddress, destination: DeviceAddress, texture: *Texture) callconv(@"callconv") void;
 pub const copyBufferToTexture = sfCopyBufferToTexture;
 
 extern fn sfBeginRenderPass(command_buffer: *CommandBuffer, device: *Device, desc: RenderPassDesc) callconv(@"callconv") void;
