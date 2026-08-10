@@ -41,7 +41,7 @@ pub const Instance = struct {
 
         const surface_extensions: []const [*:0]const u8 = switch (target.os.tag) {
             .windows => &.{ vk.extensions.khr_surface.name, vk.extensions.khr_win_32_surface.name },
-            else => &.{},
+            else => &.{vk.extensions.khr_surface.name},
         };
 
         const vk_surface_supported = for (surface_extensions) |required_ext| {
@@ -85,7 +85,7 @@ pub const Instance = struct {
         const handle: vk.InstanceProxy = .init(instance_handle, instance_dispatch);
 
         const debug_messenger_info: vk.DebugUtilsMessengerCreateInfoEXT = .{
-            .message_severity = .{ .verbose_bit_ext = true, .warning_bit_ext = true, .error_bit_ext = true },
+            .message_severity = .{ .warning_bit_ext = true, .error_bit_ext = true },
             .message_type = .{ .general_bit_ext = true, .validation_bit_ext = true, .performance_bit_ext = true },
             .pfn_user_callback = debugCallback,
         };
@@ -279,18 +279,23 @@ pub const Device = struct {
         defer arena_impl.deinit();
         const arena = arena_impl.allocator();
 
-        const device_handle = try createLogicalDevice(arena, adapter.asPhysicalDevice(), instance.instance.wrapper, instance.vk_surface_supported);
+        const device_handle = try createLogicalDevice(
+            arena,
+            adapter.asPhysicalDevice(),
+            instance.instance.wrapper,
+            instance.vk_surface_supported,
+        );
         const device_dispatch = try instance.gpa.create(vk.DeviceWrapper);
         device_dispatch.* = .load(device_handle, instance.instance.wrapper.dispatch.vkGetDeviceProcAddr.?);
         const handle: vk.DeviceProxy = .init(device_handle, device_dispatch);
 
-        var binding: vk.DescriptorSetLayoutBinding = .{
+        var bindings = [_]vk.DescriptorSetLayoutBinding{.{
             .binding = 0,
             .descriptor_type = .mutable_ext,
-            .descriptor_count = undefined,
+            .descriptor_count = 0,
             .stage_flags = .{ .vertex_bit = true, .fragment_bit = true, .compute_bit = true },
             .p_immutable_samplers = null,
-        };
+        }};
         const allowed_types: []const vk.DescriptorType = &.{ .storage_image, .sampled_image };
         const mutable_type_list: vk.MutableDescriptorTypeListEXT = .{
             .descriptor_type_count = allowed_types.len,
@@ -313,12 +318,12 @@ pub const Device = struct {
             .p_next = &binding_flags_info,
             .flags = .{ .descriptor_buffer_bit_ext = true },
             .binding_count = 1,
-            .p_bindings = &.{binding},
+            .p_bindings = &bindings,
         };
         var variable_support: vk.DescriptorSetVariableDescriptorCountLayoutSupport = .{ .max_variable_descriptor_count = 0 };
         var layout_support: vk.DescriptorSetLayoutSupport = .{ .p_next = &variable_support, .supported = .false };
         handle.getDescriptorSetLayoutSupport(&layout_info, &layout_support);
-        binding.descriptor_count = variable_support.max_variable_descriptor_count;
+        bindings[0].descriptor_count = variable_support.max_variable_descriptor_count;
         const descriptor_set_layout = try handle.createDescriptorSetLayout(&layout_info, null);
 
         const queue_family_indices = try findQueueFamilies(arena, adapter.asPhysicalDevice(), instance.instance.wrapper);
@@ -2399,7 +2404,9 @@ fn debugCallback(
     } else {
         std.log.info("Validation: {s}", .{message});
     }
-    std.debug.dumpCurrentStackTrace(.{});
+    if (message_severity.error_bit_ext or message_severity.warning_bit_ext) {
+        std.debug.dumpCurrentStackTrace(.{});
+    }
     return .false;
 }
 

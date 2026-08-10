@@ -58,7 +58,7 @@ fn openPosix(names: []const [*:0]const u8) !VulkanLoader {
         };
         return .{
             .proc = @ptrCast(symbol),
-            .handle = .{ .posix = library },
+            .handle = library,
         };
     }
     return error.VulkanLoaderNotFound;
@@ -67,7 +67,7 @@ fn openPosix(names: []const [*:0]const u8) !VulkanLoader {
 pub fn close(loader: VulkanLoader) void {
     switch (builtin.os.tag) {
         .windows => _ = FreeLibrary(loader.handle),
-        .linux, .macos => std.c.dlclose(loader.handle),
+        .linux, .macos => _ = std.c.dlclose(loader.handle),
         else => @compileError("unsupported"),
     }
 }

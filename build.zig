@@ -11,6 +11,10 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/vulkan_implementation.zig"),
             .optimize = optimize,
             .target = target,
+            .link_libc = switch (target.result.os.tag) {
+                .windows => false,
+                else => true,
+            },
         }),
     });
     b.installArtifact(lib);
