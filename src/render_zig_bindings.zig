@@ -14,13 +14,19 @@ pub fn main(init: std.process.Init) !void {
     const input = try std.Io.Dir.readFileAlloc(cwd, io, args[1], arena, .unlimited);
     const registry = try parse_registry.parse(arena, input);
 
+    var writer_impl = std.Io.Writer.Allocating.init(arena);
+
+    try renderBinding(&writer_impl.writer, registry);
+    try writer_impl.writer.flush();
+
+    const source = try writer_impl.toOwnedSliceSentinel(0);
+    const ast = try std.zig.Ast.parse(arena, source, .zig);
+
     const file = try cwd.createFile(io, args[2], .{});
     var buf: [1024]u8 = undefined;
     var file_writer = file.writer(io, &buf);
-    const w = &file_writer.interface;
-
-    try renderBinding(w, registry);
-    try w.flush();
+    try ast.render(arena, &file_writer.interface, .{});
+    try file_writer.flush();
 }
 
 fn renderBinding(w: *Writer, registry: Registry) Error!void {
