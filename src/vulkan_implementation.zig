@@ -131,36 +131,37 @@ pub const Instance = struct {
 
 pub const Surface = struct {
     surface: vk.SurfaceKHR,
+    d: *Device,
 
-    pub fn sfCreateSurfaceWin32(instance: *Instance, desc: gpu.SurfaceWin32Desc) callconv(gpu.@"callconv") *Surface {
-        return createWin32(instance, desc) catch @panic("TODO");
+    pub fn sfCreateSurfaceWin32(d: *Device, desc: gpu.SurfaceWin32Desc) callconv(gpu.@"callconv") *Surface {
+        return createWin32(d, desc) catch @panic("TODO");
     }
-    fn createWin32(instance: *Instance, desc: gpu.SurfaceWin32Desc) !*Surface {
+    fn createWin32(d: *Device, desc: gpu.SurfaceWin32Desc) !*Surface {
         const info: vk.Win32SurfaceCreateInfoKHR = .{ .hinstance = @ptrCast(desc.hinstance), .hwnd = @ptrCast(desc.hwnd) };
-        const surface = try instance.gpa.create(Surface);
-        surface.* = .{ .surface = try instance.instance.createWin32SurfaceKHR(&info, null) };
+        const surface = try d.gpa.create(Surface);
+        surface.* = .{ .surface = try d.instance.createWin32SurfaceKHR(&info, null), .d = d };
         return surface;
     }
 
-    pub fn sfCreateSurfaceXlib(instance: *Instance, desc: gpu.SurfaceXlibDesc) callconv(gpu.@"callconv") *Surface {
-        return createXlib(instance, desc) catch @panic("TODO");
+    pub fn sfCreateSurfaceXlib(device: *Device, desc: gpu.SurfaceXlibDesc) callconv(gpu.@"callconv") *Surface {
+        return createXlib(device, desc) catch @panic("TODO");
     }
-    fn createXlib(instance: *Instance, desc: gpu.SurfaceXlibDesc) !*Surface {
+    fn createXlib(d: *Device, desc: gpu.SurfaceXlibDesc) !*Surface {
         const info: vk.XlibSurfaceCreateInfoKHR = .{
             .dpy = @ptrCast(desc.display),
             .window = @intCast(desc.window),
         };
-        const surface = try instance.gpa.create(Surface);
-        surface.* = .{ .surface = try instance.instance.createXlibSurfaceKHR(&info, null) };
+        const surface = try d.gpa.create(Surface);
+        surface.* = .{ .surface = try d.instance.createXlibSurfaceKHR(&info, null), .d = d };
         return surface;
     }
 
-    pub fn sfDestroySurface(surface: *Surface, instance: *Instance) callconv(gpu.@"callconv") void {
-        destroy(surface, instance);
+    pub fn sfDestroySurface(surface: *Surface) callconv(gpu.@"callconv") void {
+        destroy(surface);
     }
-    fn destroy(surface: *Surface, instance: *Instance) void {
-        instance.instance.destroySurfaceKHR(surface.surface, null);
-        instance.gpa.destroy(surface);
+    fn destroy(surface: *Surface) void {
+        surface.d.instance.destroySurfaceKHR(surface.surface, null);
+        surface.d.gpa.destroy(surface);
     }
 };
 

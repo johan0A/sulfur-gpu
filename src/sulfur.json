@@ -586,7 +586,7 @@
       "platform": "win32",
       "return": { "base": "SfSurface", "ptr": [{}] },
       "params": [
-        { "name": "instance", "type": { "base": "SfInstance", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "desc", "type": { "base": "SfSurfaceWin32Desc" }, "doc": "" }
       ],
       "doc": ""
@@ -597,7 +597,7 @@
       "platform": "xlib",
       "return": { "base": "SfSurface", "ptr": [{}] },
       "params": [
-        { "name": "instance", "type": { "base": "SfInstance", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "desc", "type": { "base": "SfSurfaceXlibDesc" }, "doc": "" }
       ],
       "doc": ""
@@ -607,8 +607,7 @@
       "group": "SfSurface",
       "return": { "base": "void" },
       "params": [
-        { "name": "surface", "type": { "base": "SfSurface", "ptr": [{}] }, "doc": "" },
-        { "name": "instance", "type": { "base": "SfInstance", "ptr": [{}] }, "doc": "" }
+        { "name": "surface", "type": { "base": "SfSurface", "ptr": [{}] }, "doc": "" }
       ],
       "doc": ""
     },

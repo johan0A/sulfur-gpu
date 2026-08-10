@@ -392,13 +392,13 @@ pub const destroyInstance = sfDestroyInstance;
 extern fn sfEnumerateAdapters(instance: *Instance, adapters_capacity: usize, adapters: ?[*]*Adapter, adapter_count: *usize) callconv(@"callconv") void;
 pub const enumerateAdapters = sfEnumerateAdapters;
 
-extern fn sfCreateSurfaceWin32(instance: *Instance, desc: SurfaceWin32Desc) callconv(@"callconv") *Surface;
+extern fn sfCreateSurfaceWin32(device: *Device, desc: SurfaceWin32Desc) callconv(@"callconv") *Surface;
 pub const createSurfaceWin32 = sfCreateSurfaceWin32;
 
-extern fn sfCreateSurfaceXlib(instance: *Instance, desc: SurfaceXlibDesc) callconv(@"callconv") *Surface;
+extern fn sfCreateSurfaceXlib(device: *Device, desc: SurfaceXlibDesc) callconv(@"callconv") *Surface;
 pub const createSurfaceXlib = sfCreateSurfaceXlib;
 
-extern fn sfDestroySurface(surface: *Surface, instance: *Instance) callconv(@"callconv") void;
+extern fn sfDestroySurface(surface: *Surface) callconv(@"callconv") void;
 pub const destroySurface = sfDestroySurface;
 
 extern fn sfSurfaceSupportedUsage(device: *Device, surface: *Surface) callconv(@"callconv") TextureUsage;

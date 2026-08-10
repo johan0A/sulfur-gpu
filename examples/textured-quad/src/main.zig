@@ -25,17 +25,17 @@ pub fn main(init: std.process.Init) !void {
             const hwnd = c.SDL_GetPointerProperty(props, c.SDL_PROP_WINDOW_WIN32_HWND_POINTER, null) orelse @panic("TODO");
             const hinstance = c.SDL_GetPointerProperty(props, c.SDL_PROP_WINDOW_WIN32_INSTANCE_POINTER, null) orelse @panic("TODO");
             const surface_desc: gpu.SurfaceWin32Desc = .{ .hinstance = hinstance, .hwnd = hwnd };
-            break :blk gpu.createSurfaceWin32(instance, surface_desc);
+            break :blk gpu.createSurfaceWin32(device, surface_desc);
         },
         else => blk: {
             const display = c.SDL_GetPointerProperty(props, c.SDL_PROP_WINDOW_X11_DISPLAY_POINTER, null) orelse @panic("TODO");
             const x11_window = c.SDL_GetNumberProperty(props, c.SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0);
             if (x11_window == 0) @panic("TODO");
             const surface_desc: gpu.SurfaceXlibDesc = .{ .display = display, .window = @intCast(x11_window) };
-            break :blk gpu.createSurfaceXlib(instance, surface_desc);
+            break :blk gpu.createSurfaceXlib(device, surface_desc);
         },
     };
-    defer gpu.destroySurface(surface, instance);
+    defer gpu.destroySurface(surface);
 
     var surface_formats_buf: [256]gpu.Format = undefined;
     var surface_formats: []gpu.Format = surface_formats_buf[0..0];
