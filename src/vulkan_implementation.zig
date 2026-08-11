@@ -11,10 +11,16 @@ const target = @import("builtin").target;
 pub const Instance = struct {
     instance: vk.InstanceProxy,
     loader: VulkanLoader,
-    vk_surface_supported: bool,
+    surface_support: SurfaceSupport,
     debug_messenger: vk.DebugUtilsMessengerEXT,
     sf_gpa: gpu.Allocator,
     gpa: std.mem.Allocator,
+
+    const SurfaceSupport = packed struct {
+        surface: bool = false,
+        xlib: bool = false,
+        win32: bool = false,
+    };
 
     pub fn sfCreateInstance(
         host_allocator: ?*gpu.Allocator,
@@ -37,18 +43,33 @@ pub const Instance = struct {
 
         const base_dispatch: vk.BaseWrapper = .load(loader.proc);
 
+        var extensions: std.ArrayList([*:0]const u8) = .empty;
+        try extensions.append(arena, vk.extensions.ext_debug_utils.name.ptr);
+
+        var surface_support: SurfaceSupport = .{};
+
         const available_extensions = try base_dispatch.enumerateInstanceExtensionPropertiesAlloc(null, arena);
+        for (available_extensions) |available_extension| {
+            const available_ext_name = std.mem.sliceTo(&available_extension.extension_name, 0);
 
-        const surface_extensions: []const [*:0]const u8 = switch (target.os.tag) {
-            .windows => &.{ vk.extensions.khr_surface.name, vk.extensions.khr_win_32_surface.name },
-            else => &.{ vk.extensions.khr_surface.name, vk.extensions.khr_xlib_surface.name },
-        };
+            const surface = vk.extensions.khr_surface.name;
+            if (std.mem.eql(u8, available_ext_name, surface)) {
+                surface_support.surface = true;
+                try extensions.append(arena, surface);
+            }
 
-        const vk_surface_supported = for (surface_extensions) |required_ext| {
-            for (available_extensions) |available_ext| {
-                if (std.mem.eql(u8, std.mem.span(required_ext), std.mem.sliceTo(&available_ext.extension_name, 0))) break;
-            } else break false;
-        } else true;
+            const win32 = vk.extensions.khr_win_32_surface.name;
+            if (std.mem.eql(u8, available_ext_name, win32)) {
+                surface_support.win32 = true;
+                try extensions.append(arena, win32);
+            }
+
+            const xlib = vk.extensions.khr_xlib_surface.name;
+            if (std.mem.eql(u8, available_ext_name, xlib)) {
+                surface_support.xlib = true;
+                try extensions.append(arena, xlib);
+            }
+        }
 
         const validation_layer = "VK_LAYER_KHRONOS_validation";
         var enable_validation_layers = build_options.validation_layers;
@@ -62,10 +83,6 @@ pub const Instance = struct {
                 enable_validation_layers = false;
             }
         }
-
-        var extensions: std.ArrayList([*:0]const u8) = .empty;
-        try extensions.appendSlice(arena, surface_extensions);
-        try extensions.append(arena, vk.extensions.ext_debug_utils.name.ptr);
 
         const create_info: vk.InstanceCreateInfo = .{
             .p_application_info = &.{
@@ -95,7 +112,7 @@ pub const Instance = struct {
         instance.* = .{
             .instance = handle,
             .loader = loader,
-            .vk_surface_supported = vk_surface_supported,
+            .surface_support = surface_support,
             .debug_messenger = debug_messenger,
             .sf_gpa = if (host_allocator) |ha| ha.* else undefined,
             .gpa = if (host_allocator) |ha| .{
@@ -297,7 +314,7 @@ pub const Device = struct {
             arena,
             adapter.asPhysicalDevice(),
             instance.instance.wrapper,
-            instance.vk_surface_supported,
+            instance.surface_support.surface,
         );
         const device_dispatch = try instance.gpa.create(vk.DeviceWrapper);
         device_dispatch.* = .load(device_handle, instance.instance.wrapper.dispatch.vkGetDeviceProcAddr.?);
@@ -536,7 +553,7 @@ pub const Device = struct {
         arena: std.mem.Allocator,
         physical_device: vk.PhysicalDevice,
         instance_dispatch: *const vk.InstanceWrapper,
-        presentation_enabled: bool,
+        surface_support: bool,
     ) !vk.Device {
         var queue_family_count: u32 = undefined;
         instance_dispatch.getPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, null);
@@ -591,7 +608,7 @@ pub const Device = struct {
             vk.extensions.ext_mutable_descriptor_type.name,
             // vk.extensions.khr_unified_image_layouts.name, TODO
         });
-        if (presentation_enabled) required_device_extensions.appendAssumeCapacity(
+        if (surface_support) required_device_extensions.appendAssumeCapacity(
             vk.extensions.khr_swapchain.name,
         );
 
