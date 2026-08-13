@@ -11,6 +11,10 @@ pub const Registry = struct {
     type_prefix: []u8,
     enum_prefix: []u8,
 
+    proc_addr: []u8,
+    get_slot: []u8,
+    create_instance: []u8,
+
     constants: []Constant,
     typedefs: []TypeDef,
     opaques: []Opaque,
@@ -121,11 +125,17 @@ pub const Registry = struct {
     pub const Function = struct {
         name: []u8,
         platform: ?Platform = null,
-        group: []u8,
+        group: ?[]u8 = null,
+        dispatch: Dispatch,
         enumerate: bool = false,
         @"return": Type,
         params: []Param,
         doc: []u8,
+
+        const Dispatch = enum {
+            proc,
+            table,
+        };
     };
 
     pub const Param = struct {

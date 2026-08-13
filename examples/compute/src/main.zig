@@ -1,10 +1,12 @@
+extern fn sfProcAddr(name: [*:0]const u8) callconv(gpu.@"callconv") *const anyopaque;
+
 pub fn main(init: std.process.Init) !void {
     var width: c_int = 512;
     var height: c_int = 512;
 
     const window = c.SDL_CreateWindow("title", width, height, c.SDL_WINDOW_VULKAN | c.SDL_WINDOW_RESIZABLE) orelse @panic("");
 
-    const instance: *gpu.Instance = gpu.createInstance(null);
+    const instance: *gpu.Instance = gpu.createInstance(null, sfProcAddr);
     defer gpu.destroyInstance(instance);
 
     var adapters_buf: [64]*gpu.Adapter = undefined;
@@ -90,7 +92,7 @@ pub fn main(init: std.process.Init) !void {
 
         const descriptor = gpu.textureStorageDescriptor(back_buffer, .{});
         const output_texture: u32 = @intCast(frame_index % FRAMES_IN_FLIGHT);
-        gpu.storeDescriptor(&descriptor, device, heap, output_texture);
+        gpu.storeDescriptor(device, &descriptor, heap, output_texture);
 
         var time: f64 = @floatFromInt(start.untilNow(init.io, .real).toMicroseconds());
         time /= 1e6;
@@ -111,7 +113,6 @@ pub fn main(init: std.process.Init) !void {
         );
 
         gpu.submitAndSignal(queue, 1, &.{cb}, frame_semaphore, frame_index);
-
         gpu.swapchainPresent(swapchain, queue, frame_semaphore, frame_index);
 
         frame_index += 1;

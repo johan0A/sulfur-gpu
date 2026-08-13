@@ -8,7 +8,7 @@ pub fn build(b: *std.Build) void {
     const lib = b.addLibrary(.{
         .name = "sulfur",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/vulkan_implementation.zig"),
+            .root_source_file = b.path("src/loader.zig"),
             .optimize = optimize,
             .target = target,
             .link_libc = switch (target.result.os.tag) {

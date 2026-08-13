@@ -264,6 +264,7 @@ pub const ColorWriteMask = packed struct(u32) {
 pub const AllocFn = *const fn (user_data: *anyopaque, length: usize, alignment: usize) callconv(@"callconv") ?[*]u8;
 pub const RemapFn = *const fn (user_data: *anyopaque, pointer: [*]u8, length: usize, alignment: usize, new_length: usize) callconv(@"callconv") ?[*]u8;
 pub const FreeFn = *const fn (user_data: *anyopaque, pointer: [*]u8, length: usize, alignment: usize) callconv(@"callconv") void;
+pub const GetProcAddr = *const fn (name: [*:0]const u8) callconv(@"callconv") ?*const anyopaque;
 
 pub const Allocator = extern struct {
     user_data: *anyopaque,
@@ -383,144 +384,353 @@ pub const GraphicsPipelineDesc = extern struct {
     blend_state: ?*const BlendDesc = null,
 };
 
-extern fn sfCreateInstance(allocator: ?*Allocator) callconv(@"callconv") *Instance;
-pub const createInstance = sfCreateInstance;
+const internal = struct {
+    inline fn table(handle: *const anyopaque) [*]const *const anyopaque {
+        return @as(*const [*]const *const anyopaque, @ptrCast(@alignCast(handle))).*;
+    }
 
-extern fn sfDestroyInstance(instance: *Instance) callconv(@"callconv") void;
-pub const destroyInstance = sfDestroyInstance;
+    var create_instance: ?*const fn (allocator: ?*Allocator) callconv(@"callconv") *Instance = null;
+    var get_slot: ?*const fn (instance: *Instance, name: [*:0]const u8) callconv(@"callconv") usize = null;
+    var enumerate_adapters: ?*const fn (instance: *Instance, adapters_capacity: usize, adapters: ?[*]*Adapter, adapter_count: *usize) callconv(@"callconv") void = null;
+    var create_device: ?*const fn (instance: *Instance, adapter: *Adapter) callconv(@"callconv") *Device = null;
+    var destroy_device: ?*const fn (device: *Device) callconv(@"callconv") void = null;
 
-extern fn sfEnumerateAdapters(instance: *Instance, adapters_capacity: usize, adapters: ?[*]*Adapter, adapter_count: *usize) callconv(@"callconv") void;
-pub const enumerateAdapters = sfEnumerateAdapters;
+    var slots: struct {
+        destroy_instance: usize = 0,
+        create_surface_win32: usize = 0,
+        create_surface_xlib: usize = 0,
+        destroy_surface: usize = 0,
+        surface_supported_usage: usize = 0,
+        surface_formats: usize = 0,
+        surface_present_modes: usize = 0,
+        device_to_host_pointer: usize = 0,
+        malloc: usize = 0,
+        free: usize = 0,
+        descriptor_size_and_heap_align: usize = 0,
+        store_descriptor: usize = 0,
+        create_queue: usize = 0,
+        start_command_recording: usize = 0,
+        submit: usize = 0,
+        submit_and_signal: usize = 0,
+        create_semaphore: usize = 0,
+        destroy_semaphore: usize = 0,
+        wait_semaphore: usize = 0,
+        create_swapchain: usize = 0,
+        destroy_swapchain: usize = 0,
+        swapchain_acquire_next_texture: usize = 0,
+        swapchain_present: usize = 0,
+        set_active_texture_heap: usize = 0,
+        set_pipeline: usize = 0,
+        dispatch: usize = 0,
+        barrier: usize = 0,
+        copy_texture_to_buffer: usize = 0,
+        copy_buffer_to_texture: usize = 0,
+        begin_render_pass: usize = 0,
+        end_render_pass: usize = 0,
+        draw: usize = 0,
+        draw_indexed: usize = 0,
+        draw_indexed_instanced: usize = 0,
+        draw_indexed_instanced_indirect: usize = 0,
+        texture_size_and_align: usize = 0,
+        create_texture: usize = 0,
+        destroy_texture: usize = 0,
+        texture_storage_descriptor: usize = 0,
+        texture_view_descriptor: usize = 0,
+        create_compute_pipeline: usize = 0,
+        create_graphics_pipeline: usize = 0,
+        destroy_pipeline: usize = 0,
+    } = .{};
 
-extern fn sfCreateSurfaceWin32(device: *Device, desc: SurfaceWin32Desc) callconv(@"callconv") *Surface;
-pub const createSurfaceWin32 = sfCreateSurfaceWin32;
+    fn loadGlobals(getProcAddr: GetProcAddr) void {
+        create_instance = @ptrCast(getProcAddr("sfCreateInstance"));
+        get_slot = @ptrCast(getProcAddr("sfGetSlot"));
+        enumerate_adapters = @ptrCast(getProcAddr("sfEnumerateAdapters"));
+        create_device = @ptrCast(getProcAddr("sfCreateDevice"));
+        destroy_device = @ptrCast(getProcAddr("sfDestroyDevice"));
+    }
 
-extern fn sfCreateSurfaceXlib(device: *Device, desc: SurfaceXlibDesc) callconv(@"callconv") *Surface;
-pub const createSurfaceXlib = sfCreateSurfaceXlib;
+    fn loadSlots(instance: *Instance) void {
+        slots.destroy_instance = get_slot.?(instance, "sfDestroyInstance");
+        slots.create_surface_win32 = get_slot.?(instance, "sfCreateSurfaceWin32");
+        slots.create_surface_xlib = get_slot.?(instance, "sfCreateSurfaceXlib");
+        slots.destroy_surface = get_slot.?(instance, "sfDestroySurface");
+        slots.surface_supported_usage = get_slot.?(instance, "sfSurfaceSupportedUsage");
+        slots.surface_formats = get_slot.?(instance, "sfSurfaceFormats");
+        slots.surface_present_modes = get_slot.?(instance, "sfSurfacePresentModes");
+        slots.device_to_host_pointer = get_slot.?(instance, "sfDeviceToHostPointer");
+        slots.malloc = get_slot.?(instance, "sfMalloc");
+        slots.free = get_slot.?(instance, "sfFree");
+        slots.descriptor_size_and_heap_align = get_slot.?(instance, "sfDescriptorSizeAndHeapAlign");
+        slots.store_descriptor = get_slot.?(instance, "sfStoreDescriptor");
+        slots.create_queue = get_slot.?(instance, "sfCreateQueue");
+        slots.start_command_recording = get_slot.?(instance, "sfStartCommandRecording");
+        slots.submit = get_slot.?(instance, "sfSubmit");
+        slots.submit_and_signal = get_slot.?(instance, "sfSubmitAndSignal");
+        slots.create_semaphore = get_slot.?(instance, "sfCreateSemaphore");
+        slots.destroy_semaphore = get_slot.?(instance, "sfDestroySemaphore");
+        slots.wait_semaphore = get_slot.?(instance, "sfWaitSemaphore");
+        slots.create_swapchain = get_slot.?(instance, "sfCreateSwapchain");
+        slots.destroy_swapchain = get_slot.?(instance, "sfDestroySwapchain");
+        slots.swapchain_acquire_next_texture = get_slot.?(instance, "sfSwapchainAcquireNextTexture");
+        slots.swapchain_present = get_slot.?(instance, "sfSwapchainPresent");
+        slots.set_active_texture_heap = get_slot.?(instance, "sfSetActiveTextureHeap");
+        slots.set_pipeline = get_slot.?(instance, "sfSetPipeline");
+        slots.dispatch = get_slot.?(instance, "sfDispatch");
+        slots.barrier = get_slot.?(instance, "sfBarrier");
+        slots.copy_texture_to_buffer = get_slot.?(instance, "sfCopyTextureToBuffer");
+        slots.copy_buffer_to_texture = get_slot.?(instance, "sfCopyBufferToTexture");
+        slots.begin_render_pass = get_slot.?(instance, "sfBeginRenderPass");
+        slots.end_render_pass = get_slot.?(instance, "sfEndRenderPass");
+        slots.draw = get_slot.?(instance, "sfDraw");
+        slots.draw_indexed = get_slot.?(instance, "sfDrawIndexed");
+        slots.draw_indexed_instanced = get_slot.?(instance, "sfDrawIndexedInstanced");
+        slots.draw_indexed_instanced_indirect = get_slot.?(instance, "sfDrawIndexedInstancedIndirect");
+        slots.texture_size_and_align = get_slot.?(instance, "sfTextureSizeAndAlign");
+        slots.create_texture = get_slot.?(instance, "sfCreateTexture");
+        slots.destroy_texture = get_slot.?(instance, "sfDestroyTexture");
+        slots.texture_storage_descriptor = get_slot.?(instance, "sfTextureStorageDescriptor");
+        slots.texture_view_descriptor = get_slot.?(instance, "sfTextureViewDescriptor");
+        slots.create_compute_pipeline = get_slot.?(instance, "sfCreateComputePipeline");
+        slots.create_graphics_pipeline = get_slot.?(instance, "sfCreateGraphicsPipeline");
+        slots.destroy_pipeline = get_slot.?(instance, "sfDestroyPipeline");
+    }
+};
 
-extern fn sfDestroySurface(surface: *Surface) callconv(@"callconv") void;
-pub const destroySurface = sfDestroySurface;
+pub fn createInstance(allocator: ?*Allocator, getProcAddr: GetProcAddr) *Instance {
+    internal.loadGlobals(getProcAddr);
+    const f = internal.create_instance.?;
+    const instance = f(allocator);
+    internal.loadSlots(instance);
+    return instance;
+}
 
-extern fn sfSurfaceSupportedUsage(device: *Device, surface: *Surface) callconv(@"callconv") TextureUsage;
-pub const surfaceSupportedUsage = sfSurfaceSupportedUsage;
+pub fn destroyInstance(instance: *Instance) void {
+    const f: *const fn (instance: *Instance) callconv(@"callconv") void = @ptrCast(internal.table(instance)[internal.slots.destroy_instance]);
+    return f(instance);
+}
 
-extern fn sfSurfaceFormats(device: *Device, surface: *Surface, formats_capacity: usize, formats: ?[*]Format, format_count: *usize) callconv(@"callconv") void;
-pub const surfaceFormats = sfSurfaceFormats;
+pub fn enumerateAdapters(instance: *Instance, adapters_capacity: usize, adapters: ?[*]*Adapter, adapter_count: *usize) void {
+    const f = internal.enumerate_adapters.?;
+    return f(instance, adapters_capacity, adapters, adapter_count);
+}
 
-extern fn sfSurfacePresentModes(device: *Device, surface: *Surface, present_modes_capacity: usize, present_modes: ?[*]PresentMode, present_mode_count: *usize) callconv(@"callconv") void;
-pub const surfacePresentModes = sfSurfacePresentModes;
+pub fn createDevice(instance: *Instance, adapter: *Adapter) *Device {
+    const f = internal.create_device.?;
+    return f(instance, adapter);
+}
 
-extern fn sfCreateDevice(instance: *Instance, adapter: *Adapter) callconv(@"callconv") *Device;
-pub const createDevice = sfCreateDevice;
+pub fn destroyDevice(device: *Device) void {
+    const f = internal.destroy_device.?;
+    return f(device);
+}
 
-extern fn sfDestroyDevice(device: *Device) callconv(@"callconv") void;
-pub const destroyDevice = sfDestroyDevice;
+pub fn createSurfaceWin32(device: *Device, desc: SurfaceWin32Desc) *Surface {
+    const f: *const fn (device: *Device, desc: SurfaceWin32Desc) callconv(@"callconv") *Surface = @ptrCast(internal.table(device)[internal.slots.create_surface_win32]);
+    return f(device, desc);
+}
 
-extern fn sfDeviceToHostPointer(device: *Device, address: DeviceAddress) callconv(@"callconv") *anyopaque;
-pub const deviceToHostPointer = sfDeviceToHostPointer;
+pub fn createSurfaceXlib(device: *Device, desc: SurfaceXlibDesc) *Surface {
+    const f: *const fn (device: *Device, desc: SurfaceXlibDesc) callconv(@"callconv") *Surface = @ptrCast(internal.table(device)[internal.slots.create_surface_xlib]);
+    return f(device, desc);
+}
 
-extern fn sfMalloc(device: *Device, size: usize, alignment: usize, memory: Memory) callconv(@"callconv") DeviceAddress;
-pub const malloc = sfMalloc;
+pub fn destroySurface(surface: *Surface) void {
+    const f: *const fn (surface: *Surface) callconv(@"callconv") void = @ptrCast(internal.table(surface)[internal.slots.destroy_surface]);
+    return f(surface);
+}
 
-extern fn sfFree(device: *Device, address: DeviceAddress) callconv(@"callconv") void;
-pub const free = sfFree;
+pub fn surfaceSupportedUsage(device: *Device, surface: *Surface) TextureUsage {
+    const f: *const fn (device: *Device, surface: *Surface) callconv(@"callconv") TextureUsage = @ptrCast(internal.table(device)[internal.slots.surface_supported_usage]);
+    return f(device, surface);
+}
 
-extern fn sfDescriptorSizeAndHeapAlign(device: *Device) callconv(@"callconv") SizeAndAlign;
-pub const descriptorSizeAndHeapAlign = sfDescriptorSizeAndHeapAlign;
+pub fn surfaceFormats(device: *Device, surface: *Surface, formats_capacity: usize, formats: ?[*]Format, format_count: *usize) void {
+    const f: *const fn (device: *Device, surface: *Surface, formats_capacity: usize, formats: ?[*]Format, format_count: *usize) callconv(@"callconv") void = @ptrCast(internal.table(device)[internal.slots.surface_formats]);
+    return f(device, surface, formats_capacity, formats, format_count);
+}
 
-extern fn sfStoreDescriptor(descriptor: *const Descriptor, device: *Device, heap: [*]u8, index: usize) callconv(@"callconv") void;
-pub const storeDescriptor = sfStoreDescriptor;
+pub fn surfacePresentModes(device: *Device, surface: *Surface, present_modes_capacity: usize, present_modes: ?[*]PresentMode, present_mode_count: *usize) void {
+    const f: *const fn (device: *Device, surface: *Surface, present_modes_capacity: usize, present_modes: ?[*]PresentMode, present_mode_count: *usize) callconv(@"callconv") void = @ptrCast(internal.table(device)[internal.slots.surface_present_modes]);
+    return f(device, surface, present_modes_capacity, present_modes, present_mode_count);
+}
 
-extern fn sfCreateQueue(device: *Device, queue_type: QueueType) callconv(@"callconv") *Queue;
-pub const createQueue = sfCreateQueue;
+pub fn deviceToHostPointer(device: *Device, address: DeviceAddress) *anyopaque {
+    const f: *const fn (device: *Device, address: DeviceAddress) callconv(@"callconv") *anyopaque = @ptrCast(internal.table(device)[internal.slots.device_to_host_pointer]);
+    return f(device, address);
+}
 
-extern fn sfStartCommandRecording(queue: *Queue) callconv(@"callconv") *CommandBuffer;
-pub const startCommandRecording = sfStartCommandRecording;
+pub fn malloc(device: *Device, size: usize, alignment: usize, memory: Memory) DeviceAddress {
+    const f: *const fn (device: *Device, size: usize, alignment: usize, memory: Memory) callconv(@"callconv") DeviceAddress = @ptrCast(internal.table(device)[internal.slots.malloc]);
+    return f(device, size, alignment, memory);
+}
 
-extern fn sfSubmit(queue: *Queue, command_buffer_count: usize, command_buffers: [*]const *CommandBuffer) callconv(@"callconv") void;
-pub const submit = sfSubmit;
+pub fn free(device: *Device, address: DeviceAddress) void {
+    const f: *const fn (device: *Device, address: DeviceAddress) callconv(@"callconv") void = @ptrCast(internal.table(device)[internal.slots.free]);
+    return f(device, address);
+}
 
-extern fn sfSubmitAndSignal(queue: *Queue, command_buffer_count: usize, command_buffers: [*]const *CommandBuffer, signal_semaphore: *Semaphore, signal_value: u64) callconv(@"callconv") void;
-pub const submitAndSignal = sfSubmitAndSignal;
+pub fn descriptorSizeAndHeapAlign(device: *Device) SizeAndAlign {
+    const f: *const fn (device: *Device) callconv(@"callconv") SizeAndAlign = @ptrCast(internal.table(device)[internal.slots.descriptor_size_and_heap_align]);
+    return f(device);
+}
 
-extern fn sfCreateSemaphore(device: *Device, initial_value: u64) callconv(@"callconv") *Semaphore;
-pub const createSemaphore = sfCreateSemaphore;
+pub fn storeDescriptor(device: *Device, descriptor: *const Descriptor, heap: [*]u8, index: usize) void {
+    const f: *const fn (device: *Device, descriptor: *const Descriptor, heap: [*]u8, index: usize) callconv(@"callconv") void = @ptrCast(internal.table(device)[internal.slots.store_descriptor]);
+    return f(device, descriptor, heap, index);
+}
 
-extern fn sfDestroySemaphore(semaphore: *Semaphore) callconv(@"callconv") void;
-pub const destroySemaphore = sfDestroySemaphore;
+pub fn createQueue(device: *Device, queue_type: QueueType) *Queue {
+    const f: *const fn (device: *Device, queue_type: QueueType) callconv(@"callconv") *Queue = @ptrCast(internal.table(device)[internal.slots.create_queue]);
+    return f(device, queue_type);
+}
 
-extern fn sfWaitSemaphore(semaphore: *Semaphore, value: u64) callconv(@"callconv") void;
-pub const waitSemaphore = sfWaitSemaphore;
+pub fn startCommandRecording(queue: *Queue) *CommandBuffer {
+    const f: *const fn (queue: *Queue) callconv(@"callconv") *CommandBuffer = @ptrCast(internal.table(queue)[internal.slots.start_command_recording]);
+    return f(queue);
+}
 
-extern fn sfCreateSwapchain(queue: *Queue, surface: *Surface, desc: SwapchainDesc) callconv(@"callconv") *Swapchain;
-pub const createSwapchain = sfCreateSwapchain;
+pub fn submit(queue: *Queue, command_buffer_count: usize, command_buffers: [*]const *CommandBuffer) void {
+    const f: *const fn (queue: *Queue, command_buffer_count: usize, command_buffers: [*]const *CommandBuffer) callconv(@"callconv") void = @ptrCast(internal.table(queue)[internal.slots.submit]);
+    return f(queue, command_buffer_count, command_buffers);
+}
 
-extern fn sfDestroySwapchain(swapchain: *Swapchain) callconv(@"callconv") void;
-pub const destroySwapchain = sfDestroySwapchain;
+pub fn submitAndSignal(queue: *Queue, command_buffer_count: usize, command_buffers: [*]const *CommandBuffer, signal_semaphore: *Semaphore, signal_value: u64) void {
+    const f: *const fn (queue: *Queue, command_buffer_count: usize, command_buffers: [*]const *CommandBuffer, signal_semaphore: *Semaphore, signal_value: u64) callconv(@"callconv") void = @ptrCast(internal.table(queue)[internal.slots.submit_and_signal]);
+    return f(queue, command_buffer_count, command_buffers, signal_semaphore, signal_value);
+}
 
-extern fn sfSwapchainAcquireNextTexture(swapchain: *Swapchain, queue: *Queue, width: u32, height: u32) callconv(@"callconv") *Texture;
-pub const swapchainAcquireNextTexture = sfSwapchainAcquireNextTexture;
+pub fn createSemaphore(device: *Device, initial_value: u64) *Semaphore {
+    const f: *const fn (device: *Device, initial_value: u64) callconv(@"callconv") *Semaphore = @ptrCast(internal.table(device)[internal.slots.create_semaphore]);
+    return f(device, initial_value);
+}
 
-extern fn sfSwapchainPresent(swapchain: *Swapchain, queue: *Queue, semaphore: *Semaphore, semaphore_value: u64) callconv(@"callconv") void;
-pub const swapchainPresent = sfSwapchainPresent;
+pub fn destroySemaphore(semaphore: *Semaphore) void {
+    const f: *const fn (semaphore: *Semaphore) callconv(@"callconv") void = @ptrCast(internal.table(semaphore)[internal.slots.destroy_semaphore]);
+    return f(semaphore);
+}
 
-extern fn sfSetActiveTextureHeap(command_buffer: *CommandBuffer, heap_address: DeviceAddress) callconv(@"callconv") void;
-pub const setActiveTextureHeap = sfSetActiveTextureHeap;
+pub fn waitSemaphore(semaphore: *Semaphore, value: u64) void {
+    const f: *const fn (semaphore: *Semaphore, value: u64) callconv(@"callconv") void = @ptrCast(internal.table(semaphore)[internal.slots.wait_semaphore]);
+    return f(semaphore, value);
+}
 
-extern fn sfSetPipeline(command_buffer: *CommandBuffer, pipeline: *Pipeline) callconv(@"callconv") void;
-pub const setPipeline = sfSetPipeline;
+pub fn createSwapchain(queue: *Queue, surface: *Surface, desc: SwapchainDesc) *Swapchain {
+    const f: *const fn (queue: *Queue, surface: *Surface, desc: SwapchainDesc) callconv(@"callconv") *Swapchain = @ptrCast(internal.table(queue)[internal.slots.create_swapchain]);
+    return f(queue, surface, desc);
+}
 
-extern fn sfDispatch(command_buffer: *CommandBuffer, data: DeviceAddress, x: u32, y: u32, z: u32) callconv(@"callconv") void;
-pub const dispatch = sfDispatch;
+pub fn destroySwapchain(swapchain: *Swapchain) void {
+    const f: *const fn (swapchain: *Swapchain) callconv(@"callconv") void = @ptrCast(internal.table(swapchain)[internal.slots.destroy_swapchain]);
+    return f(swapchain);
+}
 
-extern fn sfBarrier(command_buffer: *CommandBuffer, before: Stage, after: Stage, hazard: Hazard) callconv(@"callconv") void;
-pub const barrier = sfBarrier;
+pub fn swapchainAcquireNextTexture(swapchain: *Swapchain, queue: *Queue, width: u32, height: u32) *Texture {
+    const f: *const fn (swapchain: *Swapchain, queue: *Queue, width: u32, height: u32) callconv(@"callconv") *Texture = @ptrCast(internal.table(swapchain)[internal.slots.swapchain_acquire_next_texture]);
+    return f(swapchain, queue, width, height);
+}
+
+pub fn swapchainPresent(swapchain: *Swapchain, queue: *Queue, semaphore: *Semaphore, semaphore_value: u64) void {
+    const f: *const fn (swapchain: *Swapchain, queue: *Queue, semaphore: *Semaphore, semaphore_value: u64) callconv(@"callconv") void = @ptrCast(internal.table(swapchain)[internal.slots.swapchain_present]);
+    return f(swapchain, queue, semaphore, semaphore_value);
+}
+
+pub fn setActiveTextureHeap(command_buffer: *CommandBuffer, heap_address: DeviceAddress) void {
+    const f: *const fn (command_buffer: *CommandBuffer, heap_address: DeviceAddress) callconv(@"callconv") void = @ptrCast(internal.table(command_buffer)[internal.slots.set_active_texture_heap]);
+    return f(command_buffer, heap_address);
+}
+
+pub fn setPipeline(command_buffer: *CommandBuffer, pipeline: *Pipeline) void {
+    const f: *const fn (command_buffer: *CommandBuffer, pipeline: *Pipeline) callconv(@"callconv") void = @ptrCast(internal.table(command_buffer)[internal.slots.set_pipeline]);
+    return f(command_buffer, pipeline);
+}
+
+pub fn dispatch(command_buffer: *CommandBuffer, data: DeviceAddress, x: u32, y: u32, z: u32) void {
+    const f: *const fn (command_buffer: *CommandBuffer, data: DeviceAddress, x: u32, y: u32, z: u32) callconv(@"callconv") void = @ptrCast(internal.table(command_buffer)[internal.slots.dispatch]);
+    return f(command_buffer, data, x, y, z);
+}
+
+pub fn barrier(command_buffer: *CommandBuffer, before: Stage, after: Stage, hazard: Hazard) void {
+    const f: *const fn (command_buffer: *CommandBuffer, before: Stage, after: Stage, hazard: Hazard) callconv(@"callconv") void = @ptrCast(internal.table(command_buffer)[internal.slots.barrier]);
+    return f(command_buffer, before, after, hazard);
+}
 
 /// 256 bytes is a typical optimal alignment for destination
-extern fn sfCopyTextureToBuffer(command_buffer: *CommandBuffer, source: DeviceAddress, destination: DeviceAddress, texture: *Texture) callconv(@"callconv") void;
-pub const copyTextureToBuffer = sfCopyTextureToBuffer;
+pub fn copyTextureToBuffer(command_buffer: *CommandBuffer, source: DeviceAddress, destination: DeviceAddress, texture: *Texture) void {
+    const f: *const fn (command_buffer: *CommandBuffer, source: DeviceAddress, destination: DeviceAddress, texture: *Texture) callconv(@"callconv") void = @ptrCast(internal.table(command_buffer)[internal.slots.copy_texture_to_buffer]);
+    return f(command_buffer, source, destination, texture);
+}
 
-extern fn sfCopyBufferToTexture(command_buffer: *CommandBuffer, source: DeviceAddress, destination: DeviceAddress, texture: *Texture) callconv(@"callconv") void;
-pub const copyBufferToTexture = sfCopyBufferToTexture;
+pub fn copyBufferToTexture(command_buffer: *CommandBuffer, source: DeviceAddress, destination: DeviceAddress, texture: *Texture) void {
+    const f: *const fn (command_buffer: *CommandBuffer, source: DeviceAddress, destination: DeviceAddress, texture: *Texture) callconv(@"callconv") void = @ptrCast(internal.table(command_buffer)[internal.slots.copy_buffer_to_texture]);
+    return f(command_buffer, source, destination, texture);
+}
 
-extern fn sfBeginRenderPass(command_buffer: *CommandBuffer, desc: RenderPassDesc) callconv(@"callconv") void;
-pub const beginRenderPass = sfBeginRenderPass;
+pub fn beginRenderPass(command_buffer: *CommandBuffer, desc: RenderPassDesc) void {
+    const f: *const fn (command_buffer: *CommandBuffer, desc: RenderPassDesc) callconv(@"callconv") void = @ptrCast(internal.table(command_buffer)[internal.slots.begin_render_pass]);
+    return f(command_buffer, desc);
+}
 
-extern fn sfEndRenderPass(command_buffer: *CommandBuffer) callconv(@"callconv") void;
-pub const endRenderPass = sfEndRenderPass;
+pub fn endRenderPass(command_buffer: *CommandBuffer) void {
+    const f: *const fn (command_buffer: *CommandBuffer) callconv(@"callconv") void = @ptrCast(internal.table(command_buffer)[internal.slots.end_render_pass]);
+    return f(command_buffer);
+}
 
-extern fn sfDraw(command_buffer: *CommandBuffer, vertex_data: DeviceAddress, pixel_data: DeviceAddress, vertex_count: u32, instance_count: u32) callconv(@"callconv") void;
-pub const draw = sfDraw;
+pub fn draw(command_buffer: *CommandBuffer, vertex_data: DeviceAddress, pixel_data: DeviceAddress, vertex_count: u32, instance_count: u32) void {
+    const f: *const fn (command_buffer: *CommandBuffer, vertex_data: DeviceAddress, pixel_data: DeviceAddress, vertex_count: u32, instance_count: u32) callconv(@"callconv") void = @ptrCast(internal.table(command_buffer)[internal.slots.draw]);
+    return f(command_buffer, vertex_data, pixel_data, vertex_count, instance_count);
+}
 
-extern fn sfDrawIndexed(command_buffer: *CommandBuffer, vertex_data: DeviceAddress, pixel_data: DeviceAddress, index_type: IndexType, indices: DeviceAddress, index_count: u32) callconv(@"callconv") void;
-pub const drawIndexed = sfDrawIndexed;
+pub fn drawIndexed(command_buffer: *CommandBuffer, vertex_data: DeviceAddress, pixel_data: DeviceAddress, index_type: IndexType, indices: DeviceAddress, index_count: u32) void {
+    const f: *const fn (command_buffer: *CommandBuffer, vertex_data: DeviceAddress, pixel_data: DeviceAddress, index_type: IndexType, indices: DeviceAddress, index_count: u32) callconv(@"callconv") void = @ptrCast(internal.table(command_buffer)[internal.slots.draw_indexed]);
+    return f(command_buffer, vertex_data, pixel_data, index_type, indices, index_count);
+}
 
-extern fn sfDrawIndexedInstanced(command_buffer: *CommandBuffer, vertex_data: DeviceAddress, pixel_data: DeviceAddress, index_type: IndexType, indices: DeviceAddress, index_count: u32, instance_count: u32) callconv(@"callconv") void;
-pub const drawIndexedInstanced = sfDrawIndexedInstanced;
+pub fn drawIndexedInstanced(command_buffer: *CommandBuffer, vertex_data: DeviceAddress, pixel_data: DeviceAddress, index_type: IndexType, indices: DeviceAddress, index_count: u32, instance_count: u32) void {
+    const f: *const fn (command_buffer: *CommandBuffer, vertex_data: DeviceAddress, pixel_data: DeviceAddress, index_type: IndexType, indices: DeviceAddress, index_count: u32, instance_count: u32) callconv(@"callconv") void = @ptrCast(internal.table(command_buffer)[internal.slots.draw_indexed_instanced]);
+    return f(command_buffer, vertex_data, pixel_data, index_type, indices, index_count, instance_count);
+}
 
-extern fn sfDrawIndexedInstancedIndirect(command_buffer: *CommandBuffer, vertex_data: DeviceAddress, pixel_data: DeviceAddress, index_type: IndexType, indices: DeviceAddress, arguments: DeviceAddress) callconv(@"callconv") void;
-pub const drawIndexedInstancedIndirect = sfDrawIndexedInstancedIndirect;
+pub fn drawIndexedInstancedIndirect(command_buffer: *CommandBuffer, vertex_data: DeviceAddress, pixel_data: DeviceAddress, index_type: IndexType, indices: DeviceAddress, arguments: DeviceAddress) void {
+    const f: *const fn (command_buffer: *CommandBuffer, vertex_data: DeviceAddress, pixel_data: DeviceAddress, index_type: IndexType, indices: DeviceAddress, arguments: DeviceAddress) callconv(@"callconv") void = @ptrCast(internal.table(command_buffer)[internal.slots.draw_indexed_instanced_indirect]);
+    return f(command_buffer, vertex_data, pixel_data, index_type, indices, arguments);
+}
 
-extern fn sfTextureSizeAndAlign(device: *Device, desc: TextureDesc) callconv(@"callconv") SizeAndAlign;
-pub const textureSizeAndAlign = sfTextureSizeAndAlign;
+pub fn textureSizeAndAlign(device: *Device, desc: TextureDesc) SizeAndAlign {
+    const f: *const fn (device: *Device, desc: TextureDesc) callconv(@"callconv") SizeAndAlign = @ptrCast(internal.table(device)[internal.slots.texture_size_and_align]);
+    return f(device, desc);
+}
 
-extern fn sfCreateTexture(device: *Device, desc: TextureDesc, data: DeviceAddress) callconv(@"callconv") *Texture;
-pub const createTexture = sfCreateTexture;
+pub fn createTexture(device: *Device, desc: TextureDesc, data: DeviceAddress) *Texture {
+    const f: *const fn (device: *Device, desc: TextureDesc, data: DeviceAddress) callconv(@"callconv") *Texture = @ptrCast(internal.table(device)[internal.slots.create_texture]);
+    return f(device, desc, data);
+}
 
-extern fn sfDestroyTexture(texture: *Texture) callconv(@"callconv") void;
-pub const destroyTexture = sfDestroyTexture;
+pub fn destroyTexture(texture: *Texture) void {
+    const f: *const fn (texture: *Texture) callconv(@"callconv") void = @ptrCast(internal.table(texture)[internal.slots.destroy_texture]);
+    return f(texture);
+}
 
-extern fn sfTextureStorageDescriptor(texture: *Texture, desc: TextureViewDesc) callconv(@"callconv") Descriptor;
-pub const textureStorageDescriptor = sfTextureStorageDescriptor;
+pub fn textureStorageDescriptor(texture: *Texture, desc: TextureViewDesc) Descriptor {
+    const f: *const fn (texture: *Texture, desc: TextureViewDesc) callconv(@"callconv") Descriptor = @ptrCast(internal.table(texture)[internal.slots.texture_storage_descriptor]);
+    return f(texture, desc);
+}
 
-extern fn sfTextureViewDescriptor(texture: *Texture, desc: TextureViewDesc) callconv(@"callconv") Descriptor;
-pub const textureViewDescriptor = sfTextureViewDescriptor;
+pub fn textureViewDescriptor(texture: *Texture, desc: TextureViewDesc) Descriptor {
+    const f: *const fn (texture: *Texture, desc: TextureViewDesc) callconv(@"callconv") Descriptor = @ptrCast(internal.table(texture)[internal.slots.texture_view_descriptor]);
+    return f(texture, desc);
+}
 
-extern fn sfCreateComputePipeline(device: *Device, ir_size: usize, ir: [*]const u8) callconv(@"callconv") *Pipeline;
-pub const createComputePipeline = sfCreateComputePipeline;
+pub fn createComputePipeline(device: *Device, ir_size: usize, ir: [*]const u8) *Pipeline {
+    const f: *const fn (device: *Device, ir_size: usize, ir: [*]const u8) callconv(@"callconv") *Pipeline = @ptrCast(internal.table(device)[internal.slots.create_compute_pipeline]);
+    return f(device, ir_size, ir);
+}
 
-extern fn sfCreateGraphicsPipeline(device: *Device, vertex_ir_size: usize, vertex_ir: [*]const u8, pixel_ir_size: usize, pixel_ir: [*]const u8, desc: GraphicsPipelineDesc) callconv(@"callconv") *Pipeline;
-pub const createGraphicsPipeline = sfCreateGraphicsPipeline;
+pub fn createGraphicsPipeline(device: *Device, vertex_ir_size: usize, vertex_ir: [*]const u8, pixel_ir_size: usize, pixel_ir: [*]const u8, desc: GraphicsPipelineDesc) *Pipeline {
+    const f: *const fn (device: *Device, vertex_ir_size: usize, vertex_ir: [*]const u8, pixel_ir_size: usize, pixel_ir: [*]const u8, desc: GraphicsPipelineDesc) callconv(@"callconv") *Pipeline = @ptrCast(internal.table(device)[internal.slots.create_graphics_pipeline]);
+    return f(device, vertex_ir_size, vertex_ir, pixel_ir_size, pixel_ir, desc);
+}
 
-extern fn sfDestroyPipeline(pipeline: *Pipeline) callconv(@"callconv") void;
-pub const destroyPipeline = sfDestroyPipeline;
+pub fn destroyPipeline(pipeline: *Pipeline) void {
+    const f: *const fn (pipeline: *Pipeline) callconv(@"callconv") void = @ptrCast(internal.table(pipeline)[internal.slots.destroy_pipeline]);
+    return f(pipeline);
+}

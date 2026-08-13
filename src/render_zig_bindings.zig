@@ -136,10 +136,8 @@ fn renderBinding(w: *Writer, registry: Registry) Error!void {
         try renderDoc(w, function_pointer.doc);
         try w.writeAll("pub const ");
         try renderTypeName(w, registry, function_pointer.name);
-        try w.writeAll(" = *const fn (");
-        try renderParams(w, registry, function_pointer.params);
-        try w.writeAll(") callconv(@\"callconv\") ");
-        try renderType(w, registry, function_pointer.@"return");
+        try w.writeAll(" = ");
+        try renderFnType(w, registry, function_pointer.params, function_pointer.@"return");
         try w.writeAll(";\n");
     }
     try w.writeAll("\n");
@@ -163,17 +161,103 @@ fn renderBinding(w: *Writer, registry: Registry) Error!void {
         try w.writeAll("};\n\n");
     }
 
-    for (registry.functions) |function| {
-        try renderDoc(w, function.doc);
-        try w.print("extern fn {s}(", .{function.name});
-        try renderParams(w, registry, function.params);
-        try w.writeAll(") callconv(@\"callconv\") ");
-        try renderType(w, registry, function.@"return");
-        try w.writeAll(";\n");
+    try w.writeAll(
+        \\const internal = struct {
+        \\inline fn table(handle: *const anyopaque) [*]const *const anyopaque {
+        \\    return @as(*const [*]const *const anyopaque, @ptrCast(@alignCast(handle))).*;
+        \\}
+        \\
+        \\
+    );
 
-        try w.writeAll("pub const ");
+    for (registry.functions) |function| {
+        if (function.dispatch != .proc) continue;
+        try w.writeAll("var ");
+        try renderSnakeName(w, registry, function.name);
+        try w.writeAll(": ?");
+        try renderFnType(w, registry, function.params, function.@"return");
+        try w.writeAll(" = null;\n");
+    }
+    try w.writeAll("\n");
+
+    try w.writeAll("var slots: struct {\n");
+    for (registry.functions) |function| {
+        if (function.dispatch != .table) continue;
+        try renderSnakeName(w, registry, function.name);
+        try w.writeAll(": usize = 0,\n");
+    }
+    try w.writeAll("} = .{};\n\n");
+
+    try w.writeAll("fn loadGlobals(getProcAddr: ");
+    try renderTypeName(w, registry, registry.proc_addr);
+    try w.writeAll(") void {\n");
+    for (registry.functions) |function| {
+        if (function.dispatch != .proc) continue;
+        try renderSnakeName(w, registry, function.name);
+        try w.print(" = @ptrCast(getProcAddr(\"{s}\"));\n", .{function.name});
+    }
+    try w.writeAll("}\n\n");
+
+    try w.writeAll("fn loadSlots(instance: *Instance) void {\n");
+    for (registry.functions) |function| {
+        if (function.dispatch != .table) continue;
+        try w.writeAll("slots.");
+        try renderSnakeName(w, registry, function.name);
+        try w.writeAll(" = ");
+        try renderSnakeName(w, registry, registry.get_slot);
+        try w.print(".?(instance, \"{s}\");\n", .{function.name});
+    }
+    try w.writeAll("}\n};\n\n");
+
+    for (registry.functions) |function| {
+        if (std.mem.eql(u8, function.name, registry.get_slot)) continue;
+        try renderDoc(w, function.doc);
+
+        const is_create_instance = std.mem.eql(u8, function.name, registry.create_instance);
+
+        try w.writeAll("pub fn ");
         try renderFnName(w, registry, function.name);
-        try w.print(" = {s};\n\n", .{function.name});
+        try w.writeByte('(');
+        try renderParams(w, registry, function.params);
+        if (is_create_instance) {
+            if (function.params.len != 0) try w.writeAll(", ");
+            try w.writeAll("getProcAddr: ");
+            try renderTypeName(w, registry, registry.proc_addr);
+        }
+        try w.writeAll(") ");
+        try renderType(w, registry, function.@"return");
+        try w.writeAll(" {\n");
+
+        if (is_create_instance) try w.writeAll("internal.loadGlobals(getProcAddr);\n");
+
+        switch (function.dispatch) {
+            .proc => {
+                try w.writeAll("const f = internal.");
+                try renderSnakeName(w, registry, function.name);
+                try w.writeAll(".?;\n");
+            },
+            .table => {
+                try w.writeAll("const f: ");
+                try renderFnType(w, registry, function.params, function.@"return");
+                try w.writeAll(" = @ptrCast(internal.table(");
+                try renderId(w, function.params[0].name);
+                try w.writeAll(")[internal.slots.");
+                try renderSnakeName(w, registry, function.name);
+                try w.writeAll("]);\n");
+            },
+        }
+
+        if (is_create_instance) {
+            try w.writeAll("const instance = f(");
+            try renderArgs(w, function.params);
+            try w.writeAll(");\ninternal.loadSlots(instance);\nreturn instance;\n");
+        } else {
+            try w.writeAll("return f(");
+            try renderArgs(w, function.params);
+            try w.writeAll(");\n");
+        }
+
+        try w.writeAll("}\n\n");
     }
 }
 
@@ -354,4 +438,24 @@ fn bitWidth(backing_type: []const u8) u16 {
     if (std.mem.eql(u8, backing_type, "uint16_t")) return 16;
     if (std.mem.eql(u8, backing_type, "uint64_t")) return 64;
     return 32;
+}
+
+fn renderFnType(w: *Writer, registry: Registry, params: []const Registry.Param, @"return": Registry.Type) Error!void {
+    try w.writeAll("*const fn (");
+    try renderParams(w, registry, params);
+    try w.writeAll(") callconv(@\"callconv\") ");
+    try renderType(w, registry, @"return");
+}
+
+fn renderArgs(w: *Writer, params: []const Registry.Param) Error!void {
+    for (params, 0..) |param, i| {
+        if (i != 0) try w.writeAll(", ");
+        try renderId(w, param.name);
+    }
+}
+
+fn renderSnakeName(w: *Writer, registry: Registry, name: []const u8) Error!void {
+    var buf: [256]u8 = undefined;
+    const screaming = screamingCase(stripPrefix(name, registry.fn_prefix), &buf);
+    try renderLowerIdent(w, screaming);
 }

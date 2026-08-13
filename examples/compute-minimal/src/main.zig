@@ -1,5 +1,7 @@
+extern fn sfProcAddr(name: [*:0]const u8) callconv(gpu.@"callconv") *const anyopaque;
+
 pub fn main(init: std.process.Init) !void {
-    const instance: *gpu.Instance = gpu.createInstance(null);
+    const instance: *gpu.Instance = gpu.createInstance(null, &sfProcAddr);
     defer gpu.destroyInstance(instance);
 
     var adapters_buff: [64]*gpu.Adapter = undefined;
@@ -34,7 +36,7 @@ pub fn main(init: std.process.Init) !void {
     const heap: [*]u8 = @ptrCast(@alignCast(gpu.deviceToHostPointer(device, heap_gpu)));
 
     const descriptor = gpu.textureStorageDescriptor(texture, .{});
-    gpu.storeDescriptor(&descriptor, device, heap, 0);
+    gpu.storeDescriptor(device, &descriptor, heap, 0);
 
     const data_gpu = gpu.malloc(device, @sizeOf(Data), @alignOf(Data), .default);
     defer gpu.free(device, data_gpu);

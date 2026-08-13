@@ -5,6 +5,10 @@
   "type_prefix": "Sf",
   "enum_prefix": "SF_",
 
+  "create_instance": "sfCreateInstance",
+  "proc_addr": "SfGetProcAddr",
+  "get_slot": "sfGetSlot",
+
   "constants": [
     { "name": "SF_DESCRIPTOR_MAX_SIZE", "type": "size_t", "value": "64", "doc": "" },
     { "name": "SF_ALL_MIPS", "type": "uint32_t", "value": "0xFFFFFFFF", "doc": "" },
@@ -59,6 +63,14 @@
         { "name": "pointer", "type": { "base": "uint8_t", "ptr": [{ "len": "length" }] }, "doc": "" },
         { "name": "length", "type": { "base": "size_t" }, "doc": "" },
         { "name": "alignment", "type": { "base": "size_t" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfGetProcAddr",
+      "return": { "base": "void", "ptr": [{ "const": true, "optional": true }] },
+      "params": [
+        { "name": "name", "type": { "base": "uint8_t", "ptr": [{ "const": true, "len": "null_terminated" }] }, "doc": "" }
       ],
       "doc": ""
     }
@@ -552,6 +564,7 @@
     {
       "name": "sfCreateInstance",
       "group": "SfInstance",
+      "dispatch": "proc",
       "return": { "base": "SfInstance", "ptr": [{}] },
       "params": [
         { "name": "allocator", "type": { "base": "SfAllocator", "ptr": [{ "optional": true }] }, "doc": "" }
@@ -561,6 +574,7 @@
     {
       "name": "sfDestroyInstance",
       "group": "SfInstance",
+      "dispatch": "table",
       "return": { "base": "void" },
       "params": [
         { "name": "instance", "type": { "base": "SfInstance", "ptr": [{}] }, "doc": "" }
@@ -568,8 +582,19 @@
       "doc": ""
     },
     {
+      "name": "sfGetSlot",
+      "dispatch": "proc",
+      "return": { "base": "size_t" },
+      "params": [
+        { "name": "instance", "type": { "base": "SfInstance", "ptr": [{}] }, "doc": "" },
+        { "name": "name", "type": { "base": "uint8_t", "ptr": [{ "const": true, "len": "null_terminated" }] }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
       "name": "sfEnumerateAdapters",
       "group": "SfInstance",
+      "dispatch": "proc",
       "enumerate": true,
       "return": { "base": "void" },
       "params": [
@@ -581,8 +606,30 @@
       "doc": ""
     },
     {
+      "name": "sfCreateDevice",
+      "group": "SfDevice",
+      "dispatch": "proc",
+      "return": { "base": "SfDevice", "ptr": [{}] },
+      "params": [
+        { "name": "instance", "type": { "base": "SfInstance", "ptr": [{}] }, "doc": "" },
+        { "name": "adapter", "type": { "base": "SfAdapter", "ptr": [{}] }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfDestroyDevice",
+      "group": "SfDevice",
+      "dispatch": "proc",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
       "name": "sfCreateSurfaceWin32",
       "group": "SfSurface",
+      "dispatch": "table",
       "platform": "win32",
       "return": { "base": "SfSurface", "ptr": [{}] },
       "params": [
@@ -594,6 +641,7 @@
     {
       "name": "sfCreateSurfaceXlib",
       "group": "SfSurface",
+      "dispatch": "table",
       "platform": "xlib",
       "return": { "base": "SfSurface", "ptr": [{}] },
       "params": [
@@ -605,6 +653,7 @@
     {
       "name": "sfDestroySurface",
       "group": "SfSurface",
+      "dispatch": "table",
       "return": { "base": "void" },
       "params": [
         { "name": "surface", "type": { "base": "SfSurface", "ptr": [{}] }, "doc": "" }
@@ -614,6 +663,7 @@
     {
       "name": "sfSurfaceSupportedUsage",
       "group": "SfSurface",
+      "dispatch": "table",
       "return": { "base": "SfTextureUsage" },
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
@@ -624,6 +674,7 @@
     {
       "name": "sfSurfaceFormats",
       "group": "SfSurface",
+      "dispatch": "table",
       "enumerate": true,
       "return": { "base": "void" },
       "params": [
@@ -638,6 +689,7 @@
     {
       "name": "sfSurfacePresentModes",
       "group": "SfSurface",
+      "dispatch": "table",
       "enumerate": true,
       "return": { "base": "void" },
       "params": [
@@ -650,27 +702,9 @@
       "doc": ""
     },
     {
-      "name": "sfCreateDevice",
-      "group": "SfDevice",
-      "return": { "base": "SfDevice", "ptr": [{}] },
-      "params": [
-        { "name": "instance", "type": { "base": "SfInstance", "ptr": [{}] }, "doc": "" },
-        { "name": "adapter", "type": { "base": "SfAdapter", "ptr": [{}] }, "doc": "" }
-      ],
-      "doc": ""
-    },
-    {
-      "name": "sfDestroyDevice",
-      "group": "SfDevice",
-      "return": { "base": "void" },
-      "params": [
-        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" }
-      ],
-      "doc": ""
-    },
-    {
       "name": "sfDeviceToHostPointer",
       "group": "SfDevice",
+      "dispatch": "table",
       "return": { "base": "void", "ptr": [{}] },
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
@@ -681,6 +715,7 @@
     {
       "name": "sfMalloc",
       "group": "SfDevice",
+      "dispatch": "table",
       "return": { "base": "SfDeviceAddress" },
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
@@ -693,6 +728,7 @@
     {
       "name": "sfFree",
       "group": "SfDevice",
+      "dispatch": "table",
       "return": { "base": "void" },
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
@@ -703,6 +739,7 @@
     {
       "name": "sfDescriptorSizeAndHeapAlign",
       "group": "SfDescriptor",
+      "dispatch": "table",
       "return": { "base": "SfSizeAndAlign" },
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" }
@@ -712,10 +749,11 @@
     {
       "name": "sfStoreDescriptor",
       "group": "SfDescriptor",
+      "dispatch": "table",
       "return": { "base": "void" },
       "params": [
-        { "name": "descriptor", "type": { "base": "SfDescriptor", "ptr": [{ "const": true }] }, "doc": "" },
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "descriptor", "type": { "base": "SfDescriptor", "ptr": [{ "const": true }] }, "doc": "" },
         { "name": "heap", "type": { "base": "uint8_t", "ptr": [{ "len": "none" }] }, "doc": "" },
         { "name": "index", "type": { "base": "size_t" }, "doc": "" }
       ],
@@ -724,6 +762,7 @@
     {
       "name": "sfCreateQueue",
       "group": "SfQueue",
+      "dispatch": "table",
       "return": { "base": "SfQueue", "ptr": [{}] },
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
@@ -734,6 +773,7 @@
     {
       "name": "sfStartCommandRecording",
       "group": "SfQueue",
+      "dispatch": "table",
       "return": { "base": "SfCommandBuffer", "ptr": [{}] },
       "params": [
         { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" }
@@ -743,6 +783,7 @@
     {
       "name": "sfSubmit",
       "group": "SfQueue",
+      "dispatch": "table",
       "return": { "base": "void" },
       "params": [
         { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
@@ -754,6 +795,7 @@
     {
       "name": "sfSubmitAndSignal",
       "group": "SfQueue",
+      "dispatch": "table",
       "return": { "base": "void" },
       "params": [
         { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
@@ -767,6 +809,7 @@
     {
       "name": "sfCreateSemaphore",
       "group": "SfSemaphore",
+      "dispatch": "table",
       "return": { "base": "SfSemaphore", "ptr": [{}] },
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
@@ -777,6 +820,7 @@
     {
       "name": "sfDestroySemaphore",
       "group": "SfSemaphore",
+      "dispatch": "table",
       "return": { "base": "void" },
       "params": [
         { "name": "semaphore", "type": { "base": "SfSemaphore", "ptr": [{}] }, "doc": "" }
@@ -786,6 +830,7 @@
     {
       "name": "sfWaitSemaphore",
       "group": "SfSemaphore",
+      "dispatch": "table",
       "return": { "base": "void" },
       "params": [
         { "name": "semaphore", "type": { "base": "SfSemaphore", "ptr": [{}] }, "doc": "" },
@@ -796,6 +841,7 @@
     {
       "name": "sfCreateSwapchain",
       "group": "SfSwapchain",
+      "dispatch": "table",
       "return": { "base": "SfSwapchain", "ptr": [{}] },
       "params": [
         { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
@@ -807,6 +853,7 @@
     {
       "name": "sfDestroySwapchain",
       "group": "SfSwapchain",
+      "dispatch": "table",
       "return": { "base": "void" },
       "params": [
         { "name": "swapchain", "type": { "base": "SfSwapchain", "ptr": [{}] }, "doc": "" }
@@ -816,6 +863,7 @@
     {
       "name": "sfSwapchainAcquireNextTexture",
       "group": "SfSwapchain",
+      "dispatch": "table",
       "return": { "base": "SfTexture", "ptr": [{}] },
       "params": [
         { "name": "swapchain", "type": { "base": "SfSwapchain", "ptr": [{}] }, "doc": "" },
@@ -828,6 +876,7 @@
     {
       "name": "sfSwapchainPresent",
       "group": "SfSwapchain",
+      "dispatch": "table",
       "return": { "base": "void" },
       "params": [
         { "name": "swapchain", "type": { "base": "SfSwapchain", "ptr": [{}] }, "doc": "" },
@@ -840,6 +889,7 @@
     {
       "name": "sfSetActiveTextureHeap",
       "group": "SfCommandBuffer",
+      "dispatch": "table",
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
@@ -850,6 +900,7 @@
     {
       "name": "sfSetPipeline",
       "group": "SfCommandBuffer",
+      "dispatch": "table",
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
@@ -860,6 +911,7 @@
     {
       "name": "sfDispatch",
       "group": "SfCommandBuffer",
+      "dispatch": "table",
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
@@ -873,6 +925,7 @@
     {
       "name": "sfBarrier",
       "group": "SfCommandBuffer",
+      "dispatch": "table",
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
@@ -885,6 +938,7 @@
     {
       "name": "sfCopyTextureToBuffer",
       "group": "SfCommandBuffer",
+      "dispatch": "table",
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
@@ -897,6 +951,7 @@
     {
       "name": "sfCopyBufferToTexture",
       "group": "SfCommandBuffer",
+      "dispatch": "table",
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
@@ -909,6 +964,7 @@
     {
       "name": "sfBeginRenderPass",
       "group": "SfCommandBuffer",
+      "dispatch": "table",
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
@@ -919,6 +975,7 @@
     {
       "name": "sfEndRenderPass",
       "group": "SfCommandBuffer",
+      "dispatch": "table",
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" }
@@ -928,6 +985,7 @@
     {
       "name": "sfDraw",
       "group": "SfCommandBuffer",
+      "dispatch": "table",
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
@@ -941,6 +999,7 @@
     {
       "name": "sfDrawIndexed",
       "group": "SfCommandBuffer",
+      "dispatch": "table",
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
@@ -955,6 +1014,7 @@
     {
       "name": "sfDrawIndexedInstanced",
       "group": "SfCommandBuffer",
+      "dispatch": "table",
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
@@ -970,6 +1030,7 @@
     {
       "name": "sfDrawIndexedInstancedIndirect",
       "group": "SfCommandBuffer",
+      "dispatch": "table",
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
@@ -984,6 +1045,7 @@
     {
       "name": "sfTextureSizeAndAlign",
       "group": "SfTexture",
+      "dispatch": "table",
       "return": { "base": "SfSizeAndAlign" },
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
@@ -994,6 +1056,7 @@
     {
       "name": "sfCreateTexture",
       "group": "SfTexture",
+      "dispatch": "table",
       "return": { "base": "SfTexture", "ptr": [{}] },
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
@@ -1005,6 +1068,7 @@
     {
       "name": "sfDestroyTexture",
       "group": "SfTexture",
+      "dispatch": "table",
       "return": { "base": "void" },
       "params": [
         { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" }
@@ -1014,6 +1078,7 @@
     {
       "name": "sfTextureStorageDescriptor",
       "group": "SfTexture",
+      "dispatch": "table",
       "return": { "base": "SfDescriptor" },
       "params": [
         { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" },
@@ -1024,6 +1089,7 @@
     {
       "name": "sfTextureViewDescriptor",
       "group": "SfTexture",
+      "dispatch": "table",
       "return": { "base": "SfDescriptor" },
       "params": [
         { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" },
@@ -1034,6 +1100,7 @@
     {
       "name": "sfCreateComputePipeline",
       "group": "SfPipeline",
+      "dispatch": "table",
       "return": { "base": "SfPipeline", "ptr": [{}] },
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
@@ -1045,6 +1112,7 @@
     {
       "name": "sfCreateGraphicsPipeline",
       "group": "SfPipeline",
+      "dispatch": "table",
       "return": { "base": "SfPipeline", "ptr": [{}] },
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
@@ -1059,6 +1127,7 @@
     {
       "name": "sfDestroyPipeline",
       "group": "SfPipeline",
+      "dispatch": "table",
       "return": { "base": "void" },
       "params": [
         { "name": "pipeline", "type": { "base": "SfPipeline", "ptr": [{}] }, "doc": "" }
