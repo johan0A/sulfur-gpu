@@ -109,7 +109,7 @@
       "platform": "xlib",
       "fields": [
         { "name": "display", "type": { "base": "void", "ptr": [{}] }, "doc": "" },
-        { "name": "window", "type": { "base": "u64" }, "doc": "" }
+        { "name": "window", "type": { "base": "uint64_t" }, "doc": "" }
       ],
       "doc": ""
     },
@@ -149,7 +149,7 @@
         { "name": "texture", "type": { "base": "SfTexture", "ptr": [{ "const": true }] }, "doc": "" },
         { "name": "load_op", "type": { "base": "SfLoadOp" }, "default": "SF_LOAD_OP_LOAD", "doc": "" },
         { "name": "store_op", "type": { "base": "SfStoreOp" }, "default": "SF_STORE_OP_STORE", "doc": "" },
-        { "name": "clear_color", "type": { "base": "float", "array": 4 }, "default": "{0.0, 0.0, 0.0, 0.0}", "doc": "" }
+        { "name": "clear_color", "type": { "base": "float", "array": 4 }, "default": "0.0", "doc": "" }
       ],
       "doc": ""
     },

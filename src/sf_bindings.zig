@@ -312,12 +312,7 @@ pub const ColorAttachment = extern struct {
     texture: *const Texture,
     load_op: LoadOp = .load,
     store_op: StoreOp = .store,
-    clear_color: [4]f32 = .{
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-    },
+    clear_color: [4]f32 = @splat(0.0),
 };
 
 pub const RenderPassDesc = extern struct {

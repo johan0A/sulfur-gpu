@@ -57,8 +57,8 @@ pub fn build(b: *std.Build) void {
                 .target = b.graph.host,
             }),
         });
-
         const generate = b.addRunArtifact(generate_sf_bindings_exe);
+        generate.addArg("--bindings");
         generate.addFileArg(b.path("src/sulfur.json"));
         const bindings = generate.addOutputFileArg("sf_bindings.zig");
 
