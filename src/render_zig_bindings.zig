@@ -4,6 +4,7 @@ const Registry = @import("registry.zig").Registry;
 const Command = enum {
     bindings,
     driver_symbol_map,
+    loader_symbol_map,
 };
 
 pub fn main(init: std.process.Init) !void {
@@ -24,7 +25,8 @@ pub fn main(init: std.process.Init) !void {
     var writer_impl: std.Io.Writer.Allocating = .init(arena);
     switch (command) {
         .bindings => try renderBinding(&writer_impl.writer, registry),
-        .driver_symbol_map => try renderSymbolMap(&writer_impl.writer, registry),
+        .driver_symbol_map => try renderSymbolMap(arena, &writer_impl.writer, registry, .driver),
+        .loader_symbol_map => try renderSymbolMap(arena, &writer_impl.writer, registry, .loader),
     }
     try writer_impl.writer.flush();
 
@@ -38,7 +40,14 @@ pub fn main(init: std.process.Init) !void {
     try file_writer.flush();
 }
 
-fn renderSymbolMap(w: *std.Io.Writer, registry: Registry) !void {
+const SymbolMapTarget = enum { driver, loader };
+
+fn renderSymbolMap(
+    arena: std.mem.Allocator,
+    w: *std.Io.Writer,
+    registry: Registry,
+    target: SymbolMapTarget,
+) !void {
     try w.print(
         \\// Generated file, do not edit.
         \\// version: {s}
@@ -49,16 +58,49 @@ fn renderSymbolMap(w: *std.Io.Writer, registry: Registry) !void {
         \\
     , .{registry.version});
 
+    const dispatch: Registry.Function.Dispatch = switch (target) {
+        .driver => .table,
+        .loader => .symbol,
+    };
+
+    var handles: std.ArrayList(Registry.Opaque) = .empty;
+    try handles.appendSlice(arena, registry.opaques);
+
+    var handle_index: usize = 0;
+    outer: while (handle_index < handles.items.len) {
+        const handle = handles.items[handle_index];
+        for (registry.functions) |function| {
+            if (function.dispatch != dispatch) continue;
+            for (function.params) |param| {
+                if (param.type.base == .@"opaque") {
+                    const name = registry.opaques[@intFromEnum(param.type.base.@"opaque")].name;
+                    if (std.mem.eql(u8, name, handle.name)) {
+                        handle_index += 1;
+                        continue :outer;
+                    }
+                }
+            }
+            if (function.return_type.base == .@"opaque") {
+                const name = registry.opaques[@intFromEnum(function.return_type.base.@"opaque")].name;
+                if (std.mem.eql(u8, name, handle.name)) {
+                    handle_index += 1;
+                    continue :outer;
+                }
+            }
+        }
+        _ = handles.orderedRemove(handle_index);
+    }
+
     try w.writeAll("const HandleTypes = struct {");
-    for (registry.opaques) |@"opaque"| {
-        try renderTypeName(w, registry, @"opaque".name);
+    for (handles.items) |handle| {
+        try renderTypeName(w, registry, handle.name);
         try w.writeAll(": type,");
     }
     try w.writeAll("};\n\n");
 
     try w.writeAll("fn Functions(handle_types: HandleTypes) type { return struct {");
     for (registry.functions) |function| {
-        if (function.dispatch != .table) continue;
+        if (function.dispatch != dispatch) continue;
         try renderFnName(w, registry, function.name);
         try w.writeAll(": *const fn (");
         for (function.params, 0..) |param, i| {
@@ -83,7 +125,7 @@ fn renderSymbolMap(w: *std.Io.Writer, registry: Registry) !void {
         \\    return .initComptime(@as([]const struct { []const u8, *const anyopaque }, &.{
     );
     for (registry.functions) |function| {
-        if (function.dispatch != .table) continue;
+        if (function.dispatch != dispatch) continue;
         try w.writeAll(".{ \"");
         try w.writeAll(function.name);
         try w.writeAll("\", @ptrCast(functions.");

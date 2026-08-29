@@ -67,9 +67,15 @@ pub fn build(b: *std.Build) void {
         generate_driver_symbol_map.addFileArg(b.path("src/sulfur.json"));
         const driver_symbol_map = generate_driver_symbol_map.addOutputFileArg("driver_symbol_map.zig");
 
+        const generate_loader_symbol_map = b.addRunArtifact(generate_sf_bindings_exe);
+        generate_loader_symbol_map.addArg("--loader_symbol_map");
+        generate_loader_symbol_map.addFileArg(b.path("src/sulfur.json"));
+        const loader_symbol_map = generate_loader_symbol_map.addOutputFileArg("loader_symbol_map.zig");
+
         const update_source_files = b.addUpdateSourceFiles();
         update_source_files.addCopyFileToSource(bindings, "src/sf_bindings.zig");
         update_source_files.addCopyFileToSource(driver_symbol_map, "src/driver_symbol_map.zig");
+        update_source_files.addCopyFileToSource(loader_symbol_map, "src/loader_symbol_map.zig");
         generate_sf_bindings.dependOn(&update_source_files.step);
     }
 

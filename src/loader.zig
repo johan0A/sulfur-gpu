@@ -1,17 +1,22 @@
 const std = @import("std");
 const gpu = @import("sf_bindings.zig");
 const impl = @import("vulkan_implementation.zig");
+const symbol_map = @import("loader_symbol_map.zig");
 
 pub export fn sfSymbol(name: [*:0]u8) callconv(gpu.@"callconv") *const anyopaque {
-    const map: std.StaticStringMap(*const anyopaque) = .initComptime(@as([]const struct { []const u8, *const anyopaque }, &.{
-        .{ "sfCreateInstance", @ptrCast(&createInstance) },
-        .{ "sfDestroyInstance", @ptrCast(&destroyInstance) },
-        .{ "sfGetSlot", @ptrCast(&getSlot) },
-        .{ "sfEnumerateAdapters", @ptrCast(&enumerateAdapters) },
-        .{ "sfCreateDevice", @ptrCast(&createDevice) },
-        .{ "sfDestroyDevice", @ptrCast(&destroyDevice) },
-    }));
-    return map.get(std.mem.span(name)) orelse undefined;
+    const map = symbol_map.map(.{
+        .Instance = impl.Header(impl.Instance),
+        .Adapter = impl.Adapter,
+        .Device = impl.Header(impl.Device),
+    }, .{
+        .createInstance = createInstance,
+        .destroyInstance = destroyInstance,
+        .getSlot = getSlot,
+        .enumerateAdapters = enumerateAdapters,
+        .createDevice = createDevice,
+        .destroyDevice = destroyDevice,
+    });
+    return map.get(std.mem.span(name)).?;
 }
 
 var slot_index: usize = 0;
@@ -27,7 +32,7 @@ fn destroyInstance(instance: *impl.Header(impl.Instance)) callconv(gpu.@"callcon
     impl.Instance.sfDestroyInstance(instance);
 }
 
-fn getSlot(instance: *impl.Header(impl.Instance), name: [*:0]u8) callconv(gpu.@"callconv") usize {
+fn getSlot(instance: *impl.Header(impl.Instance), name: [*:0]const u8) callconv(gpu.@"callconv") usize {
     _ = instance;
     slot_index += 1;
     table[slot_index] = impl.sfSymbol(name);

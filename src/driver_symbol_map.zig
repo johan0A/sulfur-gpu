@@ -5,9 +5,7 @@ const std = @import("std");
 const sf = @import("sf_bindings.zig");
 
 const HandleTypes = struct {
-    Instance: type,
     Surface: type,
-    Adapter: type,
     Device: type,
     Queue: type,
     Semaphore: type,

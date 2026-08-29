@@ -2458,11 +2458,9 @@ fn debugCallback(
     return .false;
 }
 
-pub fn sfSymbol(name: [*:0]u8) callconv(gpu.@"callconv") *const anyopaque {
+pub fn sfSymbol(name: [*:0]const u8) callconv(gpu.@"callconv") *const anyopaque {
     const map = symbol_map.map(.{
-        .Instance = Header(Instance),
         .Surface = Header(Surface),
-        .Adapter = Header(Adapter),
         .Device = Header(Device),
         .Queue = Header(Queue),
         .Semaphore = Header(Semaphore),
