@@ -5,9 +5,10 @@
   "type_prefix": "Sf",
   "enum_prefix": "SF_",
 
-  "create_instance": "sfCreateInstance",
-  "proc_addr": "SfGetProcAddr",
+  "symbol": "SfSymbol",
+  
   "get_slot": "sfGetSlot",
+  "create_instance": "sfCreateInstance",
 
   "constants": [
     { "name": "SF_DESCRIPTOR_MAX_SIZE", "type": "size_t", "value": "64", "doc": "" },
@@ -67,7 +68,7 @@
       "doc": ""
     },
     {
-      "name": "SfGetProcAddr",
+      "name": "SfSymbol",
       "return": { "base": "void", "ptr": [{ "const": true, "optional": true }] },
       "params": [
         { "name": "name", "type": { "base": "uint8_t", "ptr": [{ "const": true, "len": "null_terminated" }] }, "doc": "" }
@@ -564,7 +565,7 @@
     {
       "name": "sfCreateInstance",
       "group": "SfInstance",
-      "dispatch": "proc",
+      "dispatch": "symbol",
       "return": { "base": "SfInstance", "ptr": [{}] },
       "params": [
         { "name": "allocator", "type": { "base": "SfAllocator", "ptr": [{ "optional": true }] }, "doc": "" }
@@ -574,7 +575,7 @@
     {
       "name": "sfDestroyInstance",
       "group": "SfInstance",
-      "dispatch": "table",
+      "dispatch": "symbol",
       "return": { "base": "void" },
       "params": [
         { "name": "instance", "type": { "base": "SfInstance", "ptr": [{}] }, "doc": "" }
@@ -583,7 +584,7 @@
     },
     {
       "name": "sfGetSlot",
-      "dispatch": "proc",
+      "dispatch": "symbol",
       "return": { "base": "size_t" },
       "params": [
         { "name": "instance", "type": { "base": "SfInstance", "ptr": [{}] }, "doc": "" },
@@ -594,7 +595,7 @@
     {
       "name": "sfEnumerateAdapters",
       "group": "SfInstance",
-      "dispatch": "proc",
+      "dispatch": "symbol",
       "enumerate": true,
       "return": { "base": "void" },
       "params": [
@@ -608,7 +609,7 @@
     {
       "name": "sfCreateDevice",
       "group": "SfDevice",
-      "dispatch": "proc",
+      "dispatch": "symbol",
       "return": { "base": "SfDevice", "ptr": [{}] },
       "params": [
         { "name": "instance", "type": { "base": "SfInstance", "ptr": [{}] }, "doc": "" },
@@ -619,7 +620,7 @@
     {
       "name": "sfDestroyDevice",
       "group": "SfDevice",
-      "dispatch": "proc",
+      "dispatch": "symbol",
       "return": { "base": "void" },
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" }

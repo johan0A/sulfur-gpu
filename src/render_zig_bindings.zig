@@ -3,7 +3,7 @@ const Registry = @import("registry.zig").Registry;
 
 const Command = enum {
     bindings,
-    driver_proc_addr_map,
+    driver_symbol_map,
 };
 
 pub fn main(init: std.process.Init) !void {
@@ -21,25 +21,76 @@ pub fn main(init: std.process.Init) !void {
     const input = try std.Io.Dir.readFileAlloc(cwd, io, registry_sub_path, arena, .unlimited);
     const registry = try Registry.parse(arena, input);
 
+    var writer_impl: std.Io.Writer.Allocating = .init(arena);
     switch (command) {
-        .bindings => {
-            var writer_impl: std.Io.Writer.Allocating = .init(arena);
-            try renderBinding(&writer_impl.writer, registry);
-            try writer_impl.writer.flush();
-
-            const source = try writer_impl.toOwnedSliceSentinel(0);
-            const ast = try std.zig.Ast.parse(arena, source, .zig);
-
-            const file = try cwd.createFile(io, output_sub_path, .{});
-            var buf: [1024]u8 = undefined;
-            var file_writer = file.writer(io, &buf);
-            try ast.render(arena, &file_writer.interface, .{});
-            try file_writer.flush();
-        },
-        .driver_proc_addr_map => {
-            @panic("TODO");
-        },
+        .bindings => try renderBinding(&writer_impl.writer, registry),
+        .driver_symbol_map => try renderSymbolMap(&writer_impl.writer, registry),
     }
+    try writer_impl.writer.flush();
+
+    const file = try cwd.createFile(io, output_sub_path, .{});
+    var buf: [1024]u8 = undefined;
+    var file_writer = file.writer(io, &buf);
+
+    const source = try writer_impl.toOwnedSliceSentinel(0);
+    const ast: std.zig.Ast = try .parse(arena, source, .zig);
+    try ast.render(arena, &file_writer.interface, .{});
+    try file_writer.flush();
+}
+
+fn renderSymbolMap(w: *std.Io.Writer, registry: Registry) !void {
+    try w.print(
+        \\// Generated file, do not edit.
+        \\// version: {s}
+        \\
+        \\const std = @import("std");
+        \\const sf = @import("sf_bindings.zig");
+        \\
+        \\
+    , .{registry.version});
+
+    try w.writeAll("const HandleTypes = struct {");
+    for (registry.opaques) |@"opaque"| {
+        try renderTypeName(w, registry, @"opaque".name);
+        try w.writeAll(": type,");
+    }
+    try w.writeAll("};\n\n");
+
+    try w.writeAll("fn Functions(handle_types: HandleTypes) type { return struct {");
+    for (registry.functions) |function| {
+        if (function.dispatch != .table) continue;
+        try renderFnName(w, registry, function.name);
+        try w.writeAll(": *const fn (");
+        for (function.params, 0..) |param, i| {
+            if (i != 0) try w.writeAll(", ");
+            try renderId(w, param.name);
+            try w.writeAll(": ");
+            const prefix = if (param.type.base != .@"opaque") "sf." else "handle_types.";
+            try renderTypePrefix(w, registry, param.type, prefix);
+        }
+        try w.writeAll(") callconv(sf.@\"callconv\") ");
+        const prefix = if (function.return_type.base != .@"opaque") "sf." else "handle_types.";
+        try renderTypePrefix(w, registry, function.return_type, prefix);
+        try w.writeAll(",");
+    }
+    try w.writeAll("};}\n\n");
+
+    try w.writeAll(
+        \\pub fn map(
+        \\    comptime handle_types: HandleTypes,
+        \\    comptime functions: Functions(handle_types),
+        \\) std.StaticStringMap(*const anyopaque) {
+        \\    return .initComptime(@as([]const struct { []const u8, *const anyopaque }, &.{
+    );
+    for (registry.functions) |function| {
+        if (function.dispatch != .table) continue;
+        try w.writeAll(".{ \"");
+        try w.writeAll(function.name);
+        try w.writeAll("\", @ptrCast(functions.");
+        try renderFnName(w, registry, function.name);
+        try w.writeAll(") },");
+    }
+    try w.writeAll("}));}\n");
 }
 
 fn renderBinding(w: *std.Io.Writer, registry: Registry) !void {
@@ -170,7 +221,7 @@ fn renderBinding(w: *std.Io.Writer, registry: Registry) !void {
     );
 
     for (registry.functions) |function| {
-        if (function.dispatch != .proc) continue;
+        if (function.dispatch != .symbol) continue;
         try w.writeAll("var ");
         try renderSnakeName(w, registry, function.name);
         try w.writeAll(": ?");
@@ -187,13 +238,13 @@ fn renderBinding(w: *std.Io.Writer, registry: Registry) !void {
     }
     try w.writeAll("} = .{};\n\n");
 
-    try w.writeAll("fn loadGlobals(getProcAddr: ");
-    try renderTypeName(w, registry, registry.declName(registry.proc_addr));
+    try w.writeAll("fn loadGlobals(getSymbol: ");
+    try renderTypeName(w, registry, registry.declName(registry.symbol));
     try w.writeAll(") void {\n");
     for (registry.functions) |function| {
-        if (function.dispatch != .proc) continue;
+        if (function.dispatch != .symbol) continue;
         try renderSnakeName(w, registry, function.name);
-        try w.print(" = @ptrCast(getProcAddr(\"{s}\"));\n", .{function.name});
+        try w.print(" = @ptrCast(getSymbol(\"{s}\"));\n", .{function.name});
     }
     try w.writeAll("}\n\n");
 
@@ -220,17 +271,17 @@ fn renderBinding(w: *std.Io.Writer, registry: Registry) !void {
         try renderParams(w, registry, function.params);
         if (is_create_instance) {
             if (function.params.len != 0) try w.writeAll(", ");
-            try w.writeAll("getProcAddr: ");
-            try renderTypeName(w, registry, registry.declName(registry.proc_addr));
+            try w.writeAll("getSymbol: ");
+            try renderTypeName(w, registry, registry.declName(registry.symbol));
         }
         try w.writeAll(") ");
         try renderType(w, registry, function.return_type);
         try w.writeAll(" {\n");
 
-        if (is_create_instance) try w.writeAll("internal.loadGlobals(getProcAddr);\n");
+        if (is_create_instance) try w.writeAll("internal.loadGlobals(getSymbol);\n");
 
         switch (function.dispatch) {
-            .proc => {
+            .symbol => {
                 try w.writeAll("const f = internal.");
                 try renderSnakeName(w, registry, function.name);
                 try w.writeAll(".?;\n");
@@ -284,6 +335,10 @@ fn renderArgs(w: *std.Io.Writer, params: []const Registry.Param) !void {
 }
 
 fn renderType(w: *std.Io.Writer, registry: Registry, @"type": Registry.Type) !void {
+    try renderTypePrefix(w, registry, @"type", "");
+}
+
+fn renderTypePrefix(w: *std.Io.Writer, registry: Registry, @"type": Registry.Type, prefix: []const u8) !void {
     if (@"type".array) |array| switch (array) {
         .int => |n| try w.print("[{d}]", .{n}),
         .constant => |c| {
@@ -305,6 +360,8 @@ fn renderType(w: *std.Io.Writer, registry: Registry, @"type": Registry.Type) !vo
         });
         if (ptr.@"const") try w.writeAll("const ");
     }
+
+    if (@"type".base != .builtin) try w.writeAll(prefix);
 
     if (@"type".ptrs.len != 0 and @"type".base == .builtin and @"type".base.builtin == .void) {
         try w.writeAll("anyopaque");

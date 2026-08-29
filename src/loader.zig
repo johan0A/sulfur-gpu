@@ -2,9 +2,10 @@ const std = @import("std");
 const gpu = @import("sf_bindings.zig");
 const impl = @import("vulkan_implementation.zig");
 
-pub export fn sfProcAddr(name: [*:0]u8) callconv(gpu.@"callconv") *const anyopaque {
+pub export fn sfSymbol(name: [*:0]u8) callconv(gpu.@"callconv") *const anyopaque {
     const map: std.StaticStringMap(*const anyopaque) = .initComptime(@as([]const struct { []const u8, *const anyopaque }, &.{
         .{ "sfCreateInstance", @ptrCast(&createInstance) },
+        .{ "sfDestroyInstance", @ptrCast(&destroyInstance) },
         .{ "sfGetSlot", @ptrCast(&getSlot) },
         .{ "sfEnumerateAdapters", @ptrCast(&enumerateAdapters) },
         .{ "sfCreateDevice", @ptrCast(&createDevice) },
@@ -22,10 +23,14 @@ fn createInstance(allocator: ?*gpu.Allocator) callconv(gpu.@"callconv") *impl.He
     return instance;
 }
 
+fn destroyInstance(instance: *impl.Header(impl.Instance)) callconv(gpu.@"callconv") void {
+    impl.Instance.sfDestroyInstance(instance);
+}
+
 fn getSlot(instance: *impl.Header(impl.Instance), name: [*:0]u8) callconv(gpu.@"callconv") usize {
     _ = instance;
     slot_index += 1;
-    table[slot_index] = impl.sfProcAddr(name);
+    table[slot_index] = impl.sfSymbol(name);
     return slot_index;
 }
 

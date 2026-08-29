@@ -57,13 +57,19 @@ pub fn build(b: *std.Build) void {
                 .target = b.graph.host,
             }),
         });
-        const generate = b.addRunArtifact(generate_sf_bindings_exe);
-        generate.addArg("--bindings");
-        generate.addFileArg(b.path("src/sulfur.json"));
-        const bindings = generate.addOutputFileArg("sf_bindings.zig");
+        const generate_bindings = b.addRunArtifact(generate_sf_bindings_exe);
+        generate_bindings.addArg("--bindings");
+        generate_bindings.addFileArg(b.path("src/sulfur.json"));
+        const bindings = generate_bindings.addOutputFileArg("sf_bindings.zig");
+
+        const generate_driver_symbol_map = b.addRunArtifact(generate_sf_bindings_exe);
+        generate_driver_symbol_map.addArg("--driver_symbol_map");
+        generate_driver_symbol_map.addFileArg(b.path("src/sulfur.json"));
+        const driver_symbol_map = generate_driver_symbol_map.addOutputFileArg("driver_symbol_map.zig");
 
         const update_source_files = b.addUpdateSourceFiles();
         update_source_files.addCopyFileToSource(bindings, "src/sf_bindings.zig");
+        update_source_files.addCopyFileToSource(driver_symbol_map, "src/driver_symbol_map.zig");
         generate_sf_bindings.dependOn(&update_source_files.step);
     }
 

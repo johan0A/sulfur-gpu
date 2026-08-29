@@ -264,7 +264,7 @@ pub const ColorWriteMask = packed struct(u32) {
 pub const AllocFn = *const fn (user_data: *anyopaque, length: usize, alignment: usize) callconv(@"callconv") ?[*]u8;
 pub const RemapFn = *const fn (user_data: *anyopaque, pointer: [*]u8, length: usize, alignment: usize, new_length: usize) callconv(@"callconv") ?[*]u8;
 pub const FreeFn = *const fn (user_data: *anyopaque, pointer: [*]u8, length: usize, alignment: usize) callconv(@"callconv") void;
-pub const GetProcAddr = *const fn (name: [*:0]const u8) callconv(@"callconv") ?*const anyopaque;
+pub const Symbol = *const fn (name: [*:0]const u8) callconv(@"callconv") ?*const anyopaque;
 
 pub const Allocator = extern struct {
     user_data: *anyopaque,
@@ -385,13 +385,13 @@ const internal = struct {
     }
 
     var create_instance: ?*const fn (allocator: ?*Allocator) callconv(@"callconv") *Instance = null;
+    var destroy_instance: ?*const fn (instance: *Instance) callconv(@"callconv") void = null;
     var get_slot: ?*const fn (instance: *Instance, name: [*:0]const u8) callconv(@"callconv") usize = null;
     var enumerate_adapters: ?*const fn (instance: *Instance, adapters_capacity: usize, adapters: ?[*]*Adapter, adapter_count: *usize) callconv(@"callconv") void = null;
     var create_device: ?*const fn (instance: *Instance, adapter: *Adapter) callconv(@"callconv") *Device = null;
     var destroy_device: ?*const fn (device: *Device) callconv(@"callconv") void = null;
 
     var slots: struct {
-        destroy_instance: usize = 0,
         create_surface_win32: usize = 0,
         create_surface_xlib: usize = 0,
         destroy_surface: usize = 0,
@@ -436,16 +436,16 @@ const internal = struct {
         destroy_pipeline: usize = 0,
     } = .{};
 
-    fn loadGlobals(getProcAddr: GetProcAddr) void {
-        create_instance = @ptrCast(getProcAddr("sfCreateInstance"));
-        get_slot = @ptrCast(getProcAddr("sfGetSlot"));
-        enumerate_adapters = @ptrCast(getProcAddr("sfEnumerateAdapters"));
-        create_device = @ptrCast(getProcAddr("sfCreateDevice"));
-        destroy_device = @ptrCast(getProcAddr("sfDestroyDevice"));
+    fn loadGlobals(getSymbol: Symbol) void {
+        create_instance = @ptrCast(getSymbol("sfCreateInstance"));
+        destroy_instance = @ptrCast(getSymbol("sfDestroyInstance"));
+        get_slot = @ptrCast(getSymbol("sfGetSlot"));
+        enumerate_adapters = @ptrCast(getSymbol("sfEnumerateAdapters"));
+        create_device = @ptrCast(getSymbol("sfCreateDevice"));
+        destroy_device = @ptrCast(getSymbol("sfDestroyDevice"));
     }
 
     fn loadSlots(instance: *Instance) void {
-        slots.destroy_instance = get_slot.?(instance, "sfDestroyInstance");
         slots.create_surface_win32 = get_slot.?(instance, "sfCreateSurfaceWin32");
         slots.create_surface_xlib = get_slot.?(instance, "sfCreateSurfaceXlib");
         slots.destroy_surface = get_slot.?(instance, "sfDestroySurface");
@@ -491,8 +491,8 @@ const internal = struct {
     }
 };
 
-pub fn createInstance(allocator: ?*Allocator, getProcAddr: GetProcAddr) *Instance {
-    internal.loadGlobals(getProcAddr);
+pub fn createInstance(allocator: ?*Allocator, getSymbol: Symbol) *Instance {
+    internal.loadGlobals(getSymbol);
     const f = internal.create_instance.?;
     const instance = f(allocator);
     internal.loadSlots(instance);
@@ -500,7 +500,7 @@ pub fn createInstance(allocator: ?*Allocator, getProcAddr: GetProcAddr) *Instanc
 }
 
 pub fn destroyInstance(instance: *Instance) void {
-    const f: *const fn (instance: *Instance) callconv(@"callconv") void = @ptrCast(internal.table(instance)[internal.slots.destroy_instance]);
+    const f = internal.destroy_instance.?;
     return f(instance);
 }
 

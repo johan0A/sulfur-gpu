@@ -7,7 +7,7 @@ pub const JsonRegistry = struct {
     type_prefix: []u8,
     enum_prefix: []u8,
 
-    proc_addr: []u8,
+    symbol: []u8,
     get_slot: []u8,
     create_instance: []u8,
 
@@ -128,10 +128,7 @@ pub const JsonRegistry = struct {
         params: []Param,
         doc: []u8,
 
-        const Dispatch = enum {
-            proc,
-            table,
-        };
+        const Dispatch = Registry.Function.Dispatch;
     };
 
     pub const Param = struct {
@@ -158,7 +155,7 @@ pub const Registry = struct {
     type_prefix: []const u8,
     enum_prefix: []const u8,
 
-    proc_addr: TypeBase,
+    symbol: TypeBase,
     get_slot: Function.Index,
     create_instance: Function.Index,
 
@@ -333,7 +330,10 @@ pub const Registry = struct {
         params: []const Param,
         doc: []const u8,
 
-        pub const Dispatch = enum { proc, table };
+        pub const Dispatch = enum {
+            symbol,
+            table,
+        };
     };
 
     pub const Param = struct {
@@ -481,10 +481,7 @@ fn convert(arena: std.mem.Allocator, json: JsonRegistry) !Registry {
     const functions = try arena.alloc(Registry.Function, json.functions.len);
     for (json.functions, functions) |json_function, *out| out.* = .{
         .name = json_function.name,
-        .dispatch = switch (json_function.dispatch) {
-            .proc => .proc,
-            .table => .table,
-        },
+        .dispatch = json_function.dispatch,
         .enumerate = json_function.enumerate,
         .return_type = try convertType(arena, &decl_by_name, &constant_by_name, json_function.@"return", &.{}),
         .params = try convertParams(arena, &decl_by_name, &constant_by_name, json_function.params),
@@ -496,7 +493,7 @@ fn convert(arena: std.mem.Allocator, json: JsonRegistry) !Registry {
         .fn_prefix = json.fn_prefix,
         .type_prefix = json.type_prefix,
         .enum_prefix = json.enum_prefix,
-        .proc_addr = decl_by_name.get(json.proc_addr) orelse return error.UnknownFunction,
+        .symbol = decl_by_name.get(json.symbol) orelse return error.UnknownFunction,
         .get_slot = function_by_name.get(json.get_slot) orelse return error.UnknownFunction,
         .create_instance = function_by_name.get(json.create_instance) orelse return error.UnknownFunction,
         .constants = constants,

@@ -6,6 +6,7 @@ const to_vk = @import("bridge.zig").to_vk;
 const sfir = @import("sfir.zig");
 const vk = @import("vulkan");
 const VulkanLoader = @import("VulkanLoader.zig");
+const symbol_map = @import("driver_symbol_map.zig");
 const target = @import("builtin").target;
 
 pub fn Header(T: type) type {
@@ -2457,86 +2458,66 @@ fn debugCallback(
     return .false;
 }
 
-fn checkFunctionSignature(comptime ImplFn: type, comptime InterfaceFn: type) bool {
-    if (ImplFn == InterfaceFn) return true;
-    const a = @typeInfo(ImplFn);
-    const b = @typeInfo(InterfaceFn);
-    if (std.meta.activeTag(a) != std.meta.activeTag(b)) return false;
-    return switch (b) {
-        .@"fn" => |bf| blk: {
-            const af = a.@"fn";
-            if (af.params.len != bf.params.len) break :blk false;
-            if (!std.meta.eql(af.calling_convention, gpu.@"callconv")) break :blk false;
-            for (af.params, bf.params) |pa, pb| if (!checkFunctionSignature(pa.type.?, pb.type.?)) break :blk false;
-            break :blk checkFunctionSignature(af.return_type.?, bf.return_type.?);
-        },
-        .pointer => |bp| bp.size == a.pointer.size and
-            bp.is_const == a.pointer.is_const and
-            ((@typeInfo(bp.child) == .@"opaque" and
-                (a.pointer.child == Adapter or
-                    (@hasField(a.pointer.child, "table") and @hasField(a.pointer.child, "bytes")))) or
-                checkFunctionSignature(a.pointer.child, bp.child)),
-        .optional => |bo| checkFunctionSignature(a.optional.child, bo.child),
-        else => false,
-    };
-}
-
-fn procAddrPair(name: []const u8, interface_func: anytype, function: anytype) struct { []const u8, *const anyopaque } {
-    if (!checkFunctionSignature(@TypeOf(function), @TypeOf(interface_func))) @compileError("type mismatch");
-    return .{ name, @ptrCast(&function) };
-}
-
-pub fn sfProcAddr(name: [*:0]u8) callconv(gpu.@"callconv") *const anyopaque {
-    @setEvalBranchQuota(10000);
-    const map: std.StaticStringMap(*const anyopaque) =
-        .initComptime(@as([]const struct { []const u8, *const anyopaque }, &.{
-            .{ "sfCreateInstance", @ptrCast(&Instance.sfCreateInstance) },
-            procAddrPair("sfDestroyInstance", gpu.destroyInstance, Instance.sfDestroyInstance),
-            procAddrPair("sfEnumerateAdapters", gpu.enumerateAdapters, Instance.sfEnumerateAdapters),
-            procAddrPair("sfCreateSurfaceWin32", gpu.createSurfaceWin32, Surface.sfCreateSurfaceWin32),
-            procAddrPair("sfCreateSurfaceXlib", gpu.createSurfaceXlib, Surface.sfCreateSurfaceXlib),
-            procAddrPair("sfDestroySurface", gpu.destroySurface, Surface.sfDestroySurface),
-            procAddrPair("sfSurfaceSupportedUsage", gpu.surfaceSupportedUsage, Device.sfSurfaceSupportedUsage),
-            procAddrPair("sfSurfaceFormats", gpu.surfaceFormats, Device.sfSurfaceFormats),
-            procAddrPair("sfSurfacePresentModes", gpu.surfacePresentModes, Device.sfSurfacePresentModes),
-            procAddrPair("sfCreateDevice", gpu.createDevice, Device.sfCreateDevice),
-            procAddrPair("sfDestroyDevice", gpu.destroyDevice, Device.sfDestroyDevice),
-            procAddrPair("sfDeviceToHostPointer", gpu.deviceToHostPointer, Device.sfDeviceToHostPointer),
-            procAddrPair("sfMalloc", gpu.malloc, heap.sfMalloc),
-            procAddrPair("sfFree", gpu.free, heap.sfFree),
-            procAddrPair("sfDescriptorSizeAndHeapAlign", gpu.descriptorSizeAndHeapAlign, Texture.Descriptor.sfDescriptorSizeAndHeapAlign),
-            procAddrPair("sfStoreDescriptor", gpu.storeDescriptor, Texture.Descriptor.sfStoreDescriptor),
-            procAddrPair("sfCreateQueue", gpu.createQueue, Queue.sfCreateQueue),
-            procAddrPair("sfStartCommandRecording", gpu.startCommandRecording, Queue.sfStartCommandRecording),
-            procAddrPair("sfSubmit", gpu.submit, Queue.sfSubmit),
-            procAddrPair("sfSubmitAndSignal", gpu.submitAndSignal, Queue.sfSubmitAndSignal),
-            procAddrPair("sfCreateSemaphore", gpu.createSemaphore, Semaphore.sfCreateSemaphore),
-            procAddrPair("sfDestroySemaphore", gpu.destroySemaphore, Semaphore.sfDestroySemaphore),
-            procAddrPair("sfWaitSemaphore", gpu.waitSemaphore, Semaphore.sfWaitSemaphore),
-            procAddrPair("sfCreateSwapchain", gpu.createSwapchain, Swapchain.sfCreateSwapchain),
-            procAddrPair("sfDestroySwapchain", gpu.destroySwapchain, Swapchain.sfDestroySwapchain),
-            procAddrPair("sfSwapchainAcquireNextTexture", gpu.swapchainAcquireNextTexture, Swapchain.sfSwapchainAcquireNextTexture),
-            procAddrPair("sfSwapchainPresent", gpu.swapchainPresent, Swapchain.sfSwapchainPresent),
-            procAddrPair("sfSetActiveTextureHeap", gpu.setActiveTextureHeap, CommandBuffer.sfSetActiveTextureHeap),
-            procAddrPair("sfSetPipeline", gpu.setPipeline, CommandBuffer.sfSetPipeline),
-            procAddrPair("sfDispatch", gpu.dispatch, CommandBuffer.sfDispatch),
-            procAddrPair("sfBarrier", gpu.barrier, CommandBuffer.sfBarrier),
-            procAddrPair("sfCopyTextureToBuffer", gpu.copyTextureToBuffer, CommandBuffer.sfCopyTextureToBuffer),
-            procAddrPair("sfCopyBufferToTexture", gpu.copyBufferToTexture, CommandBuffer.sfCopyBufferToTexture),
-            procAddrPair("sfBeginRenderPass", gpu.beginRenderPass, CommandBuffer.sfBeginRenderPass),
-            procAddrPair("sfEndRenderPass", gpu.endRenderPass, CommandBuffer.sfEndRenderPass),
-            procAddrPair("sfDraw", gpu.draw, CommandBuffer.sfDraw),
-            procAddrPair("sfDrawIndexed", gpu.drawIndexed, CommandBuffer.sfDrawIndexed),
-            procAddrPair("sfDrawIndexedInstanced", gpu.drawIndexedInstanced, CommandBuffer.sfDrawIndexedInstanced),
-            procAddrPair("sfDrawIndexedInstancedIndirect", gpu.drawIndexedInstancedIndirect, CommandBuffer.sfDrawIndexedInstancedIndirect),
-            procAddrPair("sfTextureSizeAndAlign", gpu.textureSizeAndAlign, Texture.sfTextureSizeAndAlign),
-            procAddrPair("sfCreateTexture", gpu.createTexture, Texture.sfCreateTexture),
-            procAddrPair("sfDestroyTexture", gpu.destroyTexture, Texture.sfDestroyTexture),
-            procAddrPair("sfTextureStorageDescriptor", gpu.textureStorageDescriptor, Texture.sfTextureStorageDescriptor),
-            procAddrPair("sfTextureViewDescriptor", gpu.textureViewDescriptor, Texture.sfTextureViewDescriptor),
-            procAddrPair("sfCreateComputePipeline", gpu.createComputePipeline, Pipeline.sfCreateComputePipeline),
-            procAddrPair("sfCreateGraphicsPipeline", gpu.createGraphicsPipeline, Pipeline.sfCreateGraphicsPipeline),
-            procAddrPair("sfDestroyPipeline", gpu.destroyPipeline, Pipeline.sfDestroyPipeline),
-        }));
-    return map.get(std.mem.span(name)) orelse undefined;
+pub fn sfSymbol(name: [*:0]u8) callconv(gpu.@"callconv") *const anyopaque {
+    const map = symbol_map.map(.{
+        .Instance = Header(Instance),
+        .Surface = Header(Surface),
+        .Adapter = Header(Adapter),
+        .Device = Header(Device),
+        .Queue = Header(Queue),
+        .Semaphore = Header(Semaphore),
+        .Swapchain = Header(Swapchain),
+        .CommandBuffer = Header(CommandBuffer),
+        .Texture = Header(Texture),
+        .Pipeline = Header(Pipeline),
+    }, .{
+        // .createInstance = Instance.sfCreateInstance,
+        // .destroyInstance = Instance.sfDestroyInstance,
+        // .enumerateAdapters = Instance.sfEnumerateAdapters,
+        // .createDevice = Device.sfCreateDevice,
+        // .destroyDevice = Device.sfDestroyDevice,
+        .createSurfaceWin32 = Surface.sfCreateSurfaceWin32,
+        .createSurfaceXlib = Surface.sfCreateSurfaceXlib,
+        .destroySurface = Surface.sfDestroySurface,
+        .surfaceSupportedUsage = Device.sfSurfaceSupportedUsage,
+        .surfaceFormats = Device.sfSurfaceFormats,
+        .surfacePresentModes = Device.sfSurfacePresentModes,
+        .deviceToHostPointer = Device.sfDeviceToHostPointer,
+        .malloc = heap.sfMalloc,
+        .free = heap.sfFree,
+        .descriptorSizeAndHeapAlign = Texture.Descriptor.sfDescriptorSizeAndHeapAlign,
+        .storeDescriptor = Texture.Descriptor.sfStoreDescriptor,
+        .createQueue = Queue.sfCreateQueue,
+        .startCommandRecording = Queue.sfStartCommandRecording,
+        .submit = Queue.sfSubmit,
+        .submitAndSignal = Queue.sfSubmitAndSignal,
+        .createSemaphore = Semaphore.sfCreateSemaphore,
+        .destroySemaphore = Semaphore.sfDestroySemaphore,
+        .waitSemaphore = Semaphore.sfWaitSemaphore,
+        .createSwapchain = Swapchain.sfCreateSwapchain,
+        .destroySwapchain = Swapchain.sfDestroySwapchain,
+        .swapchainAcquireNextTexture = Swapchain.sfSwapchainAcquireNextTexture,
+        .swapchainPresent = Swapchain.sfSwapchainPresent,
+        .setActiveTextureHeap = CommandBuffer.sfSetActiveTextureHeap,
+        .setPipeline = CommandBuffer.sfSetPipeline,
+        .dispatch = CommandBuffer.sfDispatch,
+        .barrier = CommandBuffer.sfBarrier,
+        .copyTextureToBuffer = CommandBuffer.sfCopyTextureToBuffer,
+        .copyBufferToTexture = CommandBuffer.sfCopyBufferToTexture,
+        .beginRenderPass = CommandBuffer.sfBeginRenderPass,
+        .endRenderPass = CommandBuffer.sfEndRenderPass,
+        .draw = CommandBuffer.sfDraw,
+        .drawIndexed = CommandBuffer.sfDrawIndexed,
+        .drawIndexedInstanced = CommandBuffer.sfDrawIndexedInstanced,
+        .drawIndexedInstancedIndirect = CommandBuffer.sfDrawIndexedInstancedIndirect,
+        .textureSizeAndAlign = Texture.sfTextureSizeAndAlign,
+        .createTexture = Texture.sfCreateTexture,
+        .destroyTexture = Texture.sfDestroyTexture,
+        .textureStorageDescriptor = Texture.sfTextureStorageDescriptor,
+        .textureViewDescriptor = Texture.sfTextureViewDescriptor,
+        .createComputePipeline = Pipeline.sfCreateComputePipeline,
+        .createGraphicsPipeline = Pipeline.sfCreateGraphicsPipeline,
+        .destroyPipeline = Pipeline.sfDestroyPipeline,
+    });
+    return map.get(std.mem.span(name)).?;
 }

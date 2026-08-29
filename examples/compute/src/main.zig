@@ -1,4 +1,4 @@
-extern fn sfProcAddr(name: [*:0]const u8) callconv(gpu.@"callconv") *const anyopaque;
+extern fn sfSymbol(name: [*:0]const u8) callconv(gpu.@"callconv") *const anyopaque;
 
 pub fn main(init: std.process.Init) !void {
     var width: c_int = 512;
@@ -6,7 +6,7 @@ pub fn main(init: std.process.Init) !void {
 
     const window = c.SDL_CreateWindow("title", width, height, c.SDL_WINDOW_VULKAN | c.SDL_WINDOW_RESIZABLE) orelse @panic("");
 
-    const instance: *gpu.Instance = gpu.createInstance(null, sfProcAddr);
+    const instance: *gpu.Instance = gpu.createInstance(null, sfSymbol);
     defer gpu.destroyInstance(instance);
 
     var adapters_buf: [64]*gpu.Adapter = undefined;
