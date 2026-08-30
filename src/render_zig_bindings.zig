@@ -102,7 +102,7 @@ fn renderSymbolMap(
     for (registry.functions) |function| {
         if (function.dispatch != dispatch) continue;
         try renderFnName(w, registry, function.name);
-        try w.writeAll(": *const fn (");
+        try w.writeAll(": fn (");
         for (function.params, 0..) |param, i| {
             if (i != 0) try w.writeAll(", ");
             try renderId(w, param.name);
@@ -110,10 +110,75 @@ fn renderSymbolMap(
             const prefix = if (param.type.base != .@"opaque") "sf." else "handle_types.";
             try renderTypePrefix(w, registry, param.type, prefix);
         }
-        try w.writeAll(") callconv(sf.@\"callconv\") ");
+        try w.writeAll(")");
+        if (function.errors.len != 0) {
+            try w.writeAll("error{");
+            for (function.errors, 0..) |err, i| {
+                if (i != 0) try w.writeAll(", ");
+                try renderErrorName(w, err);
+            }
+            try w.writeAll("}!void");
+        } else {
+            const prefix = if (function.return_type.base != .@"opaque") "sf." else "handle_types.";
+            try renderTypePrefix(w, registry, function.return_type, prefix);
+        }
+        try w.writeAll(",");
+    }
+    try w.writeAll("};}\n\n");
+
+    const sf_errors = registry.enums[@intFromEnum(registry.lookupDecl("SfResult").?.@"enum")];
+
+    try w.writeAll("const Error = error{");
+    for (sf_errors.values) |value| {
+        if (std.mem.eql(u8, value.name, "SF_RESULT_OK")) continue;
+        try renderErrorName(w, value.name);
+        try w.writeAll(",\n");
+    }
+    try w.writeAll("};\n\n");
+
+    try w.writeAll("fn cResult(result: anytype) sf.Result { return if (result) return .ok else |err| switch (@as(Error, err)) {");
+    for (sf_errors.values) |value| {
+        if (std.mem.eql(u8, value.name, "SF_RESULT_OK")) continue;
+        try w.writeAll("error.");
+        try renderErrorName(w, value.name);
+        try w.writeAll(" => .");
+        try renderMemberName(w, registry, sf_errors.name, value.name);
+        try w.writeAll(",\n");
+    }
+    try w.writeAll("};}\n\n");
+
+    try w.writeAll("fn CFunctions(comptime handle_types: HandleTypes, comptime functions: Functions(handle_types)) type { return struct {");
+    for (registry.functions) |function| {
+        if (function.dispatch != dispatch) continue;
+        try w.writeAll("pub fn ");
+        try renderFnName(w, registry, function.name);
+        try w.writeAll("(");
+        for (function.params, 0..) |param, i| {
+            if (i != 0) try w.writeAll(", ");
+            try renderId(w, param.name);
+            try w.writeAll(": ");
+            const prefix = if (param.type.base != .@"opaque") "sf." else "handle_types.";
+            try renderTypePrefix(w, registry, param.type, prefix);
+        }
+        try w.writeAll(") callconv(sf.@\"callconv\")");
         const prefix = if (function.return_type.base != .@"opaque") "sf." else "handle_types.";
         try renderTypePrefix(w, registry, function.return_type, prefix);
-        try w.writeAll(",");
+        try w.writeAll("{");
+
+        const has_errors = function.errors.len != 0;
+        try w.writeAll("return ");
+        if (has_errors) try w.writeAll("cResult(");
+        try w.writeAll("functions.");
+        try renderFnName(w, registry, function.name);
+        try w.writeAll("(");
+        for (function.params, 0..) |param, i| {
+            if (i != 0) try w.writeAll(", ");
+            try renderId(w, param.name);
+        }
+        if (has_errors) try w.writeAll(")");
+        try w.writeAll(");");
+
+        try w.writeAll("}");
     }
     try w.writeAll("};}\n\n");
 
@@ -122,13 +187,14 @@ fn renderSymbolMap(
         \\    comptime handle_types: HandleTypes,
         \\    comptime functions: Functions(handle_types),
         \\) std.StaticStringMap(*const anyopaque) {
+        \\    const c_functions = CFunctions(handle_types, functions);
         \\    return .initComptime(@as([]const struct { []const u8, *const anyopaque }, &.{
     );
     for (registry.functions) |function| {
         if (function.dispatch != dispatch) continue;
         try w.writeAll(".{ \"");
         try w.writeAll(function.name);
-        try w.writeAll("\", @ptrCast(functions.");
+        try w.writeAll("\", @ptrCast(&c_functions.");
         try renderFnName(w, registry, function.name);
         try w.writeAll(") },");
     }
@@ -566,6 +632,19 @@ fn screamingCase(name: []const u8, buf: []u8) []const u8 {
         len += 1;
     }
     return buf[0..len];
+}
+
+fn renderErrorName(w: *std.Io.Writer, name: []const u8) !void {
+    const prefix = "SF_RESULT_";
+    const stripped_name = stripPrefix(name, prefix);
+    for (stripped_name, 0..) |char, i| {
+        if (char == '_') continue;
+        if (i == 0 or stripped_name[i - 1] == '_') {
+            try w.writeByte(char);
+        } else {
+            try w.writeByte(std.ascii.toLower(char));
+        }
+    }
 }
 
 fn backingBitWidth(backing: Registry.Builtin) !u16 {

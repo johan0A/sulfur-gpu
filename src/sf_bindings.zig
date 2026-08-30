@@ -26,6 +26,15 @@ pub const CommandBuffer = opaque {};
 pub const Texture = opaque {};
 pub const Pipeline = opaque {};
 
+pub const Result = enum(u32) {
+    ok = 0,
+    out_of_memory = 1,
+    out_of_device_memory = 2,
+    device_lost = 3,
+    surface_lost = 4,
+    unknown = 5,
+};
+
 pub const Memory = enum(u32) {
     default = 0,
     gpu = 1,
@@ -579,24 +588,24 @@ pub fn createQueue(device: *Device, queue_type: QueueType) *Queue {
     return f(device, queue_type);
 }
 
-pub fn startCommandRecording(queue: *Queue) *CommandBuffer {
-    const f: *const fn (queue: *Queue) callconv(@"callconv") *CommandBuffer = @ptrCast(internal.table(queue)[internal.slots.start_command_recording]);
-    return f(queue);
+pub fn startCommandRecording(queue: *Queue, command_buffer: **CommandBuffer) Result {
+    const f: *const fn (queue: *Queue, command_buffer: **CommandBuffer) callconv(@"callconv") Result = @ptrCast(internal.table(queue)[internal.slots.start_command_recording]);
+    return f(queue, command_buffer);
 }
 
-pub fn submit(queue: *Queue, command_buffer_count: usize, command_buffers: [*]const *CommandBuffer) void {
-    const f: *const fn (queue: *Queue, command_buffer_count: usize, command_buffers: [*]const *CommandBuffer) callconv(@"callconv") void = @ptrCast(internal.table(queue)[internal.slots.submit]);
+pub fn submit(queue: *Queue, command_buffer_count: usize, command_buffers: [*]const *CommandBuffer) Result {
+    const f: *const fn (queue: *Queue, command_buffer_count: usize, command_buffers: [*]const *CommandBuffer) callconv(@"callconv") Result = @ptrCast(internal.table(queue)[internal.slots.submit]);
     return f(queue, command_buffer_count, command_buffers);
 }
 
-pub fn submitAndSignal(queue: *Queue, command_buffer_count: usize, command_buffers: [*]const *CommandBuffer, signal_semaphore: *Semaphore, signal_value: u64) void {
-    const f: *const fn (queue: *Queue, command_buffer_count: usize, command_buffers: [*]const *CommandBuffer, signal_semaphore: *Semaphore, signal_value: u64) callconv(@"callconv") void = @ptrCast(internal.table(queue)[internal.slots.submit_and_signal]);
+pub fn submitAndSignal(queue: *Queue, command_buffer_count: usize, command_buffers: [*]const *CommandBuffer, signal_semaphore: *Semaphore, signal_value: u64) Result {
+    const f: *const fn (queue: *Queue, command_buffer_count: usize, command_buffers: [*]const *CommandBuffer, signal_semaphore: *Semaphore, signal_value: u64) callconv(@"callconv") Result = @ptrCast(internal.table(queue)[internal.slots.submit_and_signal]);
     return f(queue, command_buffer_count, command_buffers, signal_semaphore, signal_value);
 }
 
-pub fn createSemaphore(device: *Device, initial_value: u64) *Semaphore {
-    const f: *const fn (device: *Device, initial_value: u64) callconv(@"callconv") *Semaphore = @ptrCast(internal.table(device)[internal.slots.create_semaphore]);
-    return f(device, initial_value);
+pub fn createSemaphore(device: *Device, initial_value: u64, semaphore: **Semaphore) Result {
+    const f: *const fn (device: *Device, initial_value: u64, semaphore: **Semaphore) callconv(@"callconv") Result = @ptrCast(internal.table(device)[internal.slots.create_semaphore]);
+    return f(device, initial_value, semaphore);
 }
 
 pub fn destroySemaphore(semaphore: *Semaphore) void {
@@ -604,14 +613,14 @@ pub fn destroySemaphore(semaphore: *Semaphore) void {
     return f(semaphore);
 }
 
-pub fn waitSemaphore(semaphore: *Semaphore, value: u64) void {
-    const f: *const fn (semaphore: *Semaphore, value: u64) callconv(@"callconv") void = @ptrCast(internal.table(semaphore)[internal.slots.wait_semaphore]);
+pub fn waitSemaphore(semaphore: *Semaphore, value: u64) Result {
+    const f: *const fn (semaphore: *Semaphore, value: u64) callconv(@"callconv") Result = @ptrCast(internal.table(semaphore)[internal.slots.wait_semaphore]);
     return f(semaphore, value);
 }
 
-pub fn createSwapchain(queue: *Queue, surface: *Surface, desc: SwapchainDesc) *Swapchain {
-    const f: *const fn (queue: *Queue, surface: *Surface, desc: SwapchainDesc) callconv(@"callconv") *Swapchain = @ptrCast(internal.table(queue)[internal.slots.create_swapchain]);
-    return f(queue, surface, desc);
+pub fn createSwapchain(queue: *Queue, surface: *Surface, desc: SwapchainDesc, swapchain: **Swapchain) Result {
+    const f: *const fn (queue: *Queue, surface: *Surface, desc: SwapchainDesc, swapchain: **Swapchain) callconv(@"callconv") Result = @ptrCast(internal.table(queue)[internal.slots.create_swapchain]);
+    return f(queue, surface, desc, swapchain);
 }
 
 pub fn destroySwapchain(swapchain: *Swapchain) void {
@@ -619,13 +628,13 @@ pub fn destroySwapchain(swapchain: *Swapchain) void {
     return f(swapchain);
 }
 
-pub fn swapchainAcquireNextTexture(swapchain: *Swapchain, queue: *Queue, width: u32, height: u32) *Texture {
-    const f: *const fn (swapchain: *Swapchain, queue: *Queue, width: u32, height: u32) callconv(@"callconv") *Texture = @ptrCast(internal.table(swapchain)[internal.slots.swapchain_acquire_next_texture]);
-    return f(swapchain, queue, width, height);
+pub fn swapchainAcquireNextTexture(swapchain: *Swapchain, queue: *Queue, width: u32, height: u32, texture: **Texture) Result {
+    const f: *const fn (swapchain: *Swapchain, queue: *Queue, width: u32, height: u32, texture: **Texture) callconv(@"callconv") Result = @ptrCast(internal.table(swapchain)[internal.slots.swapchain_acquire_next_texture]);
+    return f(swapchain, queue, width, height, texture);
 }
 
-pub fn swapchainPresent(swapchain: *Swapchain, queue: *Queue, semaphore: *Semaphore, semaphore_value: u64) void {
-    const f: *const fn (swapchain: *Swapchain, queue: *Queue, semaphore: *Semaphore, semaphore_value: u64) callconv(@"callconv") void = @ptrCast(internal.table(swapchain)[internal.slots.swapchain_present]);
+pub fn swapchainPresent(swapchain: *Swapchain, queue: *Queue, semaphore: *Semaphore, semaphore_value: u64) Result {
+    const f: *const fn (swapchain: *Swapchain, queue: *Queue, semaphore: *Semaphore, semaphore_value: u64) callconv(@"callconv") Result = @ptrCast(internal.table(swapchain)[internal.slots.swapchain_present]);
     return f(swapchain, queue, semaphore, semaphore_value);
 }
 
@@ -695,9 +704,9 @@ pub fn textureSizeAndAlign(device: *Device, desc: TextureDesc) SizeAndAlign {
     return f(device, desc);
 }
 
-pub fn createTexture(device: *Device, desc: TextureDesc, data: DeviceAddress) *Texture {
-    const f: *const fn (device: *Device, desc: TextureDesc, data: DeviceAddress) callconv(@"callconv") *Texture = @ptrCast(internal.table(device)[internal.slots.create_texture]);
-    return f(device, desc, data);
+pub fn createTexture(device: *Device, desc: TextureDesc, data: DeviceAddress, texture: **Texture) Result {
+    const f: *const fn (device: *Device, desc: TextureDesc, data: DeviceAddress, texture: **Texture) callconv(@"callconv") Result = @ptrCast(internal.table(device)[internal.slots.create_texture]);
+    return f(device, desc, data, texture);
 }
 
 pub fn destroyTexture(texture: *Texture) void {
@@ -705,24 +714,24 @@ pub fn destroyTexture(texture: *Texture) void {
     return f(texture);
 }
 
-pub fn textureStorageDescriptor(texture: *Texture, desc: TextureViewDesc) Descriptor {
-    const f: *const fn (texture: *Texture, desc: TextureViewDesc) callconv(@"callconv") Descriptor = @ptrCast(internal.table(texture)[internal.slots.texture_storage_descriptor]);
-    return f(texture, desc);
+pub fn textureStorageDescriptor(texture: *Texture, desc: TextureViewDesc, descriptor: *Descriptor) Result {
+    const f: *const fn (texture: *Texture, desc: TextureViewDesc, descriptor: *Descriptor) callconv(@"callconv") Result = @ptrCast(internal.table(texture)[internal.slots.texture_storage_descriptor]);
+    return f(texture, desc, descriptor);
 }
 
-pub fn textureViewDescriptor(texture: *Texture, desc: TextureViewDesc) Descriptor {
-    const f: *const fn (texture: *Texture, desc: TextureViewDesc) callconv(@"callconv") Descriptor = @ptrCast(internal.table(texture)[internal.slots.texture_view_descriptor]);
-    return f(texture, desc);
+pub fn textureViewDescriptor(texture: *Texture, desc: TextureViewDesc, descriptor: *Descriptor) Result {
+    const f: *const fn (texture: *Texture, desc: TextureViewDesc, descriptor: *Descriptor) callconv(@"callconv") Result = @ptrCast(internal.table(texture)[internal.slots.texture_view_descriptor]);
+    return f(texture, desc, descriptor);
 }
 
-pub fn createComputePipeline(device: *Device, ir_size: usize, ir: [*]const u8) *Pipeline {
-    const f: *const fn (device: *Device, ir_size: usize, ir: [*]const u8) callconv(@"callconv") *Pipeline = @ptrCast(internal.table(device)[internal.slots.create_compute_pipeline]);
-    return f(device, ir_size, ir);
+pub fn createComputePipeline(device: *Device, ir_size: usize, ir: [*]const u8, pipeline: **Pipeline) Result {
+    const f: *const fn (device: *Device, ir_size: usize, ir: [*]const u8, pipeline: **Pipeline) callconv(@"callconv") Result = @ptrCast(internal.table(device)[internal.slots.create_compute_pipeline]);
+    return f(device, ir_size, ir, pipeline);
 }
 
-pub fn createGraphicsPipeline(device: *Device, vertex_ir_size: usize, vertex_ir: [*]const u8, pixel_ir_size: usize, pixel_ir: [*]const u8, desc: GraphicsPipelineDesc) *Pipeline {
-    const f: *const fn (device: *Device, vertex_ir_size: usize, vertex_ir: [*]const u8, pixel_ir_size: usize, pixel_ir: [*]const u8, desc: GraphicsPipelineDesc) callconv(@"callconv") *Pipeline = @ptrCast(internal.table(device)[internal.slots.create_graphics_pipeline]);
-    return f(device, vertex_ir_size, vertex_ir, pixel_ir_size, pixel_ir, desc);
+pub fn createGraphicsPipeline(device: *Device, vertex_ir_size: usize, vertex_ir: [*]const u8, pixel_ir_size: usize, pixel_ir: [*]const u8, desc: GraphicsPipelineDesc, pipeline: **Pipeline) Result {
+    const f: *const fn (device: *Device, vertex_ir_size: usize, vertex_ir: [*]const u8, pixel_ir_size: usize, pixel_ir: [*]const u8, desc: GraphicsPipelineDesc, pipeline: **Pipeline) callconv(@"callconv") Result = @ptrCast(internal.table(device)[internal.slots.create_graphics_pipeline]);
+    return f(device, vertex_ir_size, vertex_ir, pixel_ir_size, pixel_ir, desc, pipeline);
 }
 
 pub fn destroyPipeline(pipeline: *Pipeline) void {

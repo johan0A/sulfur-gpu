@@ -22,17 +22,17 @@ pub export fn sfSymbol(name: [*:0]u8) callconv(gpu.@"callconv") *const anyopaque
 var slot_index: usize = 0;
 var table: [1024]*const anyopaque = undefined;
 
-fn createInstance(allocator: ?*gpu.Allocator) callconv(gpu.@"callconv") *impl.Header(impl.Instance) {
+fn createInstance(allocator: ?*gpu.Allocator) *impl.Header(impl.Instance) {
     const instance = impl.Instance.sfCreateInstance(allocator);
     instance.table = @ptrCast(&table);
     return instance;
 }
 
-fn destroyInstance(instance: *impl.Header(impl.Instance)) callconv(gpu.@"callconv") void {
+fn destroyInstance(instance: *impl.Header(impl.Instance)) void {
     impl.Instance.sfDestroyInstance(instance);
 }
 
-fn getSlot(instance: *impl.Header(impl.Instance), name: [*:0]const u8) callconv(gpu.@"callconv") usize {
+fn getSlot(instance: *impl.Header(impl.Instance), name: [*:0]const u8) usize {
     _ = instance;
     slot_index += 1;
     table[slot_index] = impl.sfSymbol(name);
@@ -44,14 +44,14 @@ fn enumerateAdapters(
     adapters_capacity: usize,
     adapters: ?[*]*impl.Adapter,
     adapter_count: *usize,
-) callconv(gpu.@"callconv") void {
+) void {
     impl.Instance.sfEnumerateAdapters(instance, adapters_capacity, adapters, adapter_count);
 }
 
-fn createDevice(instance: *impl.Header(impl.Instance), adapter: *impl.Adapter) callconv(gpu.@"callconv") *impl.Header(impl.Device) {
+fn createDevice(instance: *impl.Header(impl.Instance), adapter: *impl.Adapter) *impl.Header(impl.Device) {
     return impl.Device.sfCreateDevice(instance, adapter);
 }
 
-fn destroyDevice(device: *impl.Header(impl.Device)) callconv(gpu.@"callconv") void {
+fn destroyDevice(device: *impl.Header(impl.Device)) void {
     impl.Device.sfDestroyDevice(device);
 }

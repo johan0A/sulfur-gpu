@@ -30,19 +30,11 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "validation_layers", validation_layers);
     lib.root_module.addOptions("options", options);
 
-    const vulkan_loader_module = b.addModule("VulkanLoader", .{
-        .root_source_file = b.path("src/VulkanLoader.zig"),
-        .optimize = optimize,
-        .target = target,
-        .link_libc = true,
-    });
-
     const vulkan_headers_dep = b.dependency("vulkan_headers", .{});
 
     const vulkan = b.dependency("vulkan", .{
         .registry = vulkan_headers_dep.path("registry/vk.xml"),
     });
-    vulkan_loader_module.addImport("vulkan", vulkan.module("vulkan-zig"));
     root_module.addImport("vulkan", vulkan.module("vulkan-zig"));
     lib.root_module.addImport("vulkan", vulkan.module("vulkan-zig"));
 

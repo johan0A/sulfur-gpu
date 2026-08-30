@@ -43,7 +43,7 @@ pub const Instance = struct {
 
     pub fn sfCreateInstance(
         host_allocator: ?*gpu.Allocator,
-    ) callconv(gpu.@"callconv") *Header(Instance) {
+    ) *Header(Instance) {
         return create(host_allocator) catch @panic("TODO");
     }
     fn create(
@@ -143,7 +143,7 @@ pub const Instance = struct {
         return instance;
     }
 
-    pub fn sfDestroyInstance(instance: *Header(Instance)) callconv(gpu.@"callconv") void {
+    pub fn sfDestroyInstance(instance: *Header(Instance)) void {
         instance.body().instance.destroyDebugUtilsMessengerEXT(instance.body().debug_messenger, null);
         instance.body().instance.destroyInstance(null);
         instance.body().loader.close();
@@ -151,7 +151,7 @@ pub const Instance = struct {
         instance.body().gpa.destroy(instance);
     }
 
-    pub fn sfEnumerateAdapters(instance: *Header(Instance), adapters_buffer_size: usize, adapters_buffer: ?[*]*Adapter, adapters_count: *usize) callconv(gpu.@"callconv") void {
+    pub fn sfEnumerateAdapters(instance: *Header(Instance), adapters_buffer_size: usize, adapters_buffer: ?[*]*Adapter, adapters_count: *usize) void {
         enumerateAdapters(instance.body(), if (adapters_buffer) |buf| buf[0..adapters_buffer_size] else null, adapters_count) catch @panic("TODO");
     }
     fn enumerateAdapters(instance: *Instance, adapters_buffer_opt: ?[]*Adapter, adapters_count: *usize) !void {
@@ -170,7 +170,7 @@ pub const Surface = struct {
     surface: vk.SurfaceKHR,
     d: *Device,
 
-    pub fn sfCreateSurfaceWin32(d: *Header(Device), desc: gpu.SurfaceWin32Desc) callconv(gpu.@"callconv") *Header(Surface) {
+    pub fn sfCreateSurfaceWin32(d: *Header(Device), desc: gpu.SurfaceWin32Desc) *Header(Surface) {
         return createWin32(d.body(), desc) catch @panic("TODO");
     }
     fn createWin32(d: *Device, desc: gpu.SurfaceWin32Desc) !*Header(Surface) {
@@ -180,7 +180,7 @@ pub const Surface = struct {
         return surface;
     }
 
-    pub fn sfCreateSurfaceXlib(device: *Header(Device), desc: gpu.SurfaceXlibDesc) callconv(gpu.@"callconv") *Header(Surface) {
+    pub fn sfCreateSurfaceXlib(device: *Header(Device), desc: gpu.SurfaceXlibDesc) *Header(Surface) {
         return createXlib(device.body(), desc) catch @panic("TODO");
     }
     fn createXlib(d: *Device, desc: gpu.SurfaceXlibDesc) !*Header(Surface) {
@@ -190,7 +190,7 @@ pub const Surface = struct {
         return surface;
     }
 
-    pub fn sfDestroySurface(surface: *Header(Surface)) callconv(gpu.@"callconv") void {
+    pub fn sfDestroySurface(surface: *Header(Surface)) void {
         destroy(surface.body());
     }
     fn destroy(surface: *Surface) void {
@@ -322,7 +322,7 @@ pub const Device = struct {
     pub fn sfCreateDevice(
         instance: *Header(Instance),
         adapter: *Adapter,
-    ) callconv(gpu.@"callconv") *Header(Device) {
+    ) *Header(Device) {
         return create(
             instance.body(),
             instance.table,
@@ -459,7 +459,7 @@ pub const Device = struct {
         return device;
     }
 
-    pub fn sfDestroyDevice(d: *Header(Device)) callconv(gpu.@"callconv") void {
+    pub fn sfDestroyDevice(d: *Header(Device)) void {
         return destroy(d.body());
     }
     fn destroy(d: *Device) void {
@@ -481,8 +481,8 @@ pub const Device = struct {
         gpa.destroy(d);
     }
 
-    pub fn sfSurfaceSupportedUsage(d: *Header(Device), surface: *Header(Surface)) callconv(gpu.@"callconv") gpu.TextureUsage {
-        return surfaceUsage(d.body(), surface.body()) catch @panic("TODO");
+    pub fn sfSurfaceSupportedUsage(d: *Header(Device), surface: *Header(Surface)) gpu.TextureUsage {
+        return surfaceUsage(d.body(), surface.body()) catch @panic("TODO"); // TODO: move errors to surface creation
     }
     fn surfaceUsage(d: *Device, surface: *Surface) !gpu.TextureUsage {
         const vk_capabilities = try d.instance.instance.getPhysicalDeviceSurfaceCapabilitiesKHR(d.physical_device, surface.surface);
@@ -495,8 +495,13 @@ pub const Device = struct {
         formats_buffer_size: usize,
         formats_buffer: ?[*]gpu.Format,
         formats_count: *usize,
-    ) callconv(gpu.@"callconv") void {
-        surfaceFormats(d.body(), surface.body(), if (formats_buffer) |buf| buf[0..formats_buffer_size] else null, formats_count) catch @panic("TODO");
+    ) void {
+        surfaceFormats(
+            d.body(),
+            surface.body(),
+            if (formats_buffer) |buf| buf[0..formats_buffer_size] else null,
+            formats_count,
+        ) catch @panic("TODO"); // TODO: move errors to surface creation
     }
     fn surfaceFormats(
         d: *Device,
@@ -533,13 +538,13 @@ pub const Device = struct {
         modes_buffer_size: usize,
         modes_buffer: ?[*]gpu.PresentMode,
         modes_count: *usize,
-    ) callconv(gpu.@"callconv") void {
+    ) void {
         surfacePresentModes(
             d.body(),
             surface.body(),
             if (modes_buffer) |buf| buf[0..modes_buffer_size] else null,
             modes_count,
-        ) catch @panic("TODO");
+        ) catch @panic("TODO"); // TODO: move errors to surface creation
     }
     fn surfacePresentModes(
         d: *Device,
@@ -570,7 +575,7 @@ pub const Device = struct {
         );
     }
 
-    pub fn sfDeviceToHostPointer(d: *Header(Device), ptr: gpu.DeviceAddress) callconv(gpu.@"callconv") *anyopaque {
+    pub fn sfDeviceToHostPointer(d: *Header(Device), ptr: gpu.DeviceAddress) *anyopaque {
         const entry = d.body().heap.addrToEntry(ptr);
         const offset = ptr - entry.device_addr;
         return @ptrFromInt(entry.host_addr.? + offset);
@@ -766,7 +771,7 @@ pub const Queue = struct {
     queue_type: gpu.QueueType,
     d: *Device,
 
-    pub fn sfCreateQueue(d: *Header(Device), queue_type: gpu.QueueType) callconv(gpu.@"callconv") *Header(Queue) {
+    pub fn sfCreateQueue(d: *Header(Device), queue_type: gpu.QueueType) *Header(Queue) {
         return create(d.body(), queue_type);
     }
     fn create(d: *Device, queue_type: gpu.QueueType) *Header(Queue) {
@@ -776,11 +781,15 @@ pub const Queue = struct {
         return queue;
     }
 
-    pub fn sfStartCommandRecording(queue: *Header(Queue)) callconv(gpu.@"callconv") *Header(CommandBuffer) {
+    pub fn sfStartCommandRecording(queue: *Header(Queue), command_buffer: **Header(CommandBuffer)) !void {
         const d = queue.body().d;
-        const cb = d.command_buffers.create(d.gpa) catch @panic("TODO");
-        cb.set(d.table, startCommandRecording(queue.body()) catch @panic("TODO"));
-        return cb;
+        const cb = try d.command_buffers.create(d.gpa);
+        cb.set(d.table, startCommandRecording(queue.body()) catch |err| return switch (err) {
+            error.OutOfHostMemory => error.OutOfMemory,
+            error.OutOfDeviceMemory => |e| e,
+            error.ValidationFailed, error.Unknown => error.Unknown,
+        });
+        command_buffer.* = cb;
     }
     fn startCommandRecording(queue: *const Queue) !CommandBuffer {
         queue.d.reclaimCompletedCommandBuffers();
@@ -797,12 +806,16 @@ pub const Queue = struct {
         queue: *Header(Queue),
         command_buffer_count: usize,
         command_buffers: [*]const *Header(CommandBuffer),
-    ) callconv(gpu.@"callconv") void {
+    ) !void {
         submit(
             queue.body(),
             command_buffers[0..command_buffer_count],
             null,
-        ) catch @panic("TODO");
+        ) catch |err| return switch (err) {
+            error.OutOfMemory, error.OutOfHostMemory => error.OutOfMemory,
+            error.OutOfDeviceMemory, error.DeviceLost => |e| e,
+            error.InvalidVideoStdParametersKHR, error.ValidationFailed, error.Unknown => error.Unknown,
+        };
     }
 
     pub fn sfSubmitAndSignal(
@@ -811,12 +824,16 @@ pub const Queue = struct {
         command_buffers: [*]const *Header(CommandBuffer),
         signal_semaphore: *Header(Semaphore),
         signal_value: u64,
-    ) callconv(gpu.@"callconv") void {
+    ) !void {
         submit(
             queue.body(),
             command_buffers[0..command_buffer_count],
             .{ .semaphore = signal_semaphore.body(), .value = signal_value },
-        ) catch @panic("TODO");
+        ) catch |err| return switch (err) {
+            error.OutOfMemory, error.OutOfHostMemory => error.OutOfMemory,
+            error.OutOfDeviceMemory, error.DeviceLost => |e| e,
+            error.InvalidVideoStdParametersKHR, error.ValidationFailed, error.Unknown => error.Unknown,
+        };
     }
 
     const Signal = struct {
@@ -948,8 +965,12 @@ pub const Semaphore = struct {
     semaphore: vk.Semaphore,
     d: *Device,
 
-    pub fn sfCreateSemaphore(d: *Header(Device), init_value: u64) callconv(gpu.@"callconv") *Header(Semaphore) {
-        return create(d.body(), init_value) catch @panic("TODO");
+    pub fn sfCreateSemaphore(d: *Header(Device), init_value: u64, semaphore: **Header(Semaphore)) !void {
+        semaphore.* = create(d.body(), init_value) catch |err| return switch (err) {
+            error.OutOfMemory, error.OutOfHostMemory => error.OutOfMemory,
+            error.OutOfDeviceMemory => |e| e,
+            error.ValidationFailed, error.Unknown => error.Unknown,
+        };
     }
     fn create(d: *Device, init_value: u64) !*Header(Semaphore) {
         const semaphore = try d.semaphores.create(d.gpa);
@@ -958,7 +979,7 @@ pub const Semaphore = struct {
         return semaphore;
     }
 
-    pub fn sfDestroySemaphore(semaphore: *Header(Semaphore)) callconv(gpu.@"callconv") void {
+    pub fn sfDestroySemaphore(semaphore: *Header(Semaphore)) void {
         destroy(semaphore.body());
         semaphore.body().d.semaphores.destroy(semaphore);
     }
@@ -966,8 +987,12 @@ pub const Semaphore = struct {
         destroyVkDevice(semaphore, semaphore.d.device);
     }
 
-    pub fn sfWaitSemaphore(semaphore: *Header(Semaphore), value: u64) callconv(gpu.@"callconv") void {
-        wait(semaphore.body(), value) catch @panic("TODO");
+    pub fn sfWaitSemaphore(semaphore: *Header(Semaphore), value: u64) !void {
+        wait(semaphore.body(), value) catch |err| return switch (err) {
+            error.OutOfHostMemory => error.OutOfMemory,
+            error.OutOfDeviceMemory, error.DeviceLost => |e| e,
+            error.ValidationFailed, error.Unknown => error.Unknown,
+        };
     }
     fn wait(semaphore: *const Semaphore, value: u64) !void {
         const wait_info: vk.SemaphoreWaitInfo = .{
@@ -1023,8 +1048,14 @@ pub const Swapchain = struct {
         queue: *Header(Queue),
         surface: *Header(Surface),
         options: gpu.SwapchainDesc,
-    ) callconv(gpu.@"callconv") *Header(Swapchain) {
-        return create(queue.body(), surface.body(), options) catch @panic("TODO");
+        swapchain: **Header(Swapchain),
+    ) !void {
+        swapchain.* = create(queue.body(), surface.body(), options) catch |err| return switch (err) {
+            error.OutOfMemory, error.OutOfHostMemory => error.OutOfMemory,
+            error.OutOfDeviceMemory => |e| e,
+            error.ValidationFailed, error.Unknown => error.Unknown,
+            error.SurfaceLostKHR => error.SurfaceLost,
+        };
     }
     fn create(
         queue: *Queue,
@@ -1051,7 +1082,7 @@ pub const Swapchain = struct {
         return swapchain;
     }
 
-    pub fn sfDestroySwapchain(swapchain: *Header(Swapchain)) callconv(gpu.@"callconv") void {
+    pub fn sfDestroySwapchain(swapchain: *Header(Swapchain)) void {
         destroy(swapchain.body());
     }
     fn destroy(swapchain: *Swapchain) void {
@@ -1062,10 +1093,39 @@ pub const Swapchain = struct {
         swapchain.d.gpa.destroy(swapchain);
     }
 
-    pub fn sfSwapchainAcquireNextTexture(swapchain: *Header(Swapchain), queue: *Header(Queue), width: u32, height: u32) callconv(gpu.@"callconv") *Header(Texture) {
-        return acquireNextTexture(swapchain.body(), queue.body(), width, height) catch @panic("TODO");
+    pub fn sfSwapchainAcquireNextTexture(
+        swapchain: *Header(Swapchain),
+        queue: *Header(Queue),
+        width: u32,
+        height: u32,
+        texture: **Header(Texture),
+    ) !void {
+        texture.* = acquireNextTexture(
+            swapchain.body(),
+            queue.body(),
+            width,
+            height,
+        ) catch |err| return switch (err) {
+            error.OutOfMemory, error.OutOfHostMemory => error.OutOfMemory,
+            error.OutOfDeviceMemory, error.DeviceLost => |e| e,
+            error.SurfaceLostKHR, error.SurfaceLost => error.SurfaceLost,
+            error.ValidationFailed, error.Unknown => error.Unknown,
+
+            error.InvalidVideoStdParametersKHR,
+            error.InitializationFailed,
+            error.NativeWindowInUseKHR,
+            error.InvalidOpaqueCaptureAddressKHR,
+            error.CompressionExhaustedEXT,
+            error.FullScreenExclusiveModeLostEXT,
+            => @panic("TODO"),
+        };
     }
-    fn acquireNextTexture(swapchain: *Swapchain, queue: *Queue, width: u32, height: u32) !*Header(Texture) {
+    fn acquireNextTexture(
+        swapchain: *Swapchain,
+        queue: *Queue,
+        width: u32,
+        height: u32,
+    ) !*Header(Texture) {
         var attempts: u32 = 0;
         while (true) : (attempts += 1) {
             if (attempts > 8) return error.SurfaceLost;
@@ -1104,8 +1164,22 @@ pub const Swapchain = struct {
         queue: *Header(Queue),
         semaphore: *Header(Semaphore),
         semaphore_value: u64,
-    ) callconv(gpu.@"callconv") void {
-        present(swapchain.body(), queue.body(), semaphore.body(), semaphore_value) catch @panic("TODO");
+    ) !void {
+        present(
+            swapchain.body(),
+            queue.body(),
+            semaphore.body(),
+            semaphore_value,
+        ) catch |err| return switch (err) {
+            error.OutOfHostMemory => error.OutOfMemory,
+            error.OutOfDeviceMemory, error.DeviceLost => |e| e,
+            error.SurfaceLostKHR => error.SurfaceLost,
+            error.ValidationFailed, error.Unknown => error.Unknown,
+
+            error.FullScreenExclusiveModeLostEXT,
+            error.PresentTimingQueueFullEXT,
+            => @panic("TODO"),
+        };
     }
     fn present(
         swapchain: *Swapchain,
@@ -1297,7 +1371,7 @@ pub const CommandBuffer = struct {
     pub fn sfSetActiveTextureHeap(
         command_buffer: *Header(CommandBuffer),
         heap_ptr: gpu.DeviceAddress,
-    ) callconv(gpu.@"callconv") void {
+    ) void {
         setActiveTextureHeap(command_buffer.body(), heap_ptr);
     }
     fn setActiveTextureHeap(
@@ -1320,7 +1394,7 @@ pub const CommandBuffer = struct {
         }
     }
 
-    pub fn sfSetPipeline(command_buffer: *Header(CommandBuffer), pipeline: *Header(Pipeline)) callconv(gpu.@"callconv") void {
+    pub fn sfSetPipeline(command_buffer: *Header(CommandBuffer), pipeline: *Header(Pipeline)) void {
         return setPipeline(command_buffer.body(), pipeline.body());
     }
     fn setPipeline(command_buffer: *CommandBuffer, pipeline: *Pipeline) void {
@@ -1348,7 +1422,7 @@ pub const CommandBuffer = struct {
         x: u32,
         y: u32,
         z: u32,
-    ) callconv(gpu.@"callconv") void {
+    ) void {
         dispatch(command_buffer.body(), data, x, y, z);
     }
     fn dispatch(
@@ -1380,7 +1454,7 @@ pub const CommandBuffer = struct {
         before: gpu.Stage,
         after: gpu.Stage,
         hazard: gpu.Hazard,
-    ) callconv(gpu.@"callconv") void {
+    ) void {
         barrier(command_buffer.body(), before, after, hazard);
     }
     fn barrier(
@@ -1424,7 +1498,7 @@ pub const CommandBuffer = struct {
         source: gpu.DeviceAddress,
         destination: gpu.DeviceAddress,
         texture: *Header(Texture),
-    ) callconv(gpu.@"callconv") void {
+    ) void {
         copyTextureToBuffer(command_buffer.body(), source, destination, texture.body());
     }
     fn copyTextureToBuffer(
@@ -1467,7 +1541,7 @@ pub const CommandBuffer = struct {
         source: gpu.DeviceAddress,
         destination: gpu.DeviceAddress,
         texture: *Header(Texture),
-    ) callconv(gpu.@"callconv") void {
+    ) void {
         copyBufferToTexture(command_buffer.body(), source, destination, texture.body());
     }
     fn copyBufferToTexture(
@@ -1505,7 +1579,7 @@ pub const CommandBuffer = struct {
         command_buffer.d.device.cmdCopyBufferToImage2(command_buffer.command_buffer, &info);
     }
 
-    pub fn sfBeginRenderPass(cb: *Header(CommandBuffer), desc: gpu.RenderPassDesc) callconv(gpu.@"callconv") void {
+    pub fn sfBeginRenderPass(cb: *Header(CommandBuffer), desc: gpu.RenderPassDesc) void {
         beginRenderPass(cb.body(), desc);
     }
     fn beginRenderPass(cb: *CommandBuffer, desc: gpu.RenderPassDesc) void {
@@ -1609,7 +1683,7 @@ pub const CommandBuffer = struct {
         cb.d.device.cmdSetStencilTestEnable(cb.command_buffer, .false);
     }
 
-    pub fn sfEndRenderPass(cb: *Header(CommandBuffer)) callconv(gpu.@"callconv") void {
+    pub fn sfEndRenderPass(cb: *Header(CommandBuffer)) void {
         endRenderPass(cb.body());
     }
     fn endRenderPass(cb: *CommandBuffer) void {
@@ -1622,7 +1696,7 @@ pub const CommandBuffer = struct {
         pixel_data: gpu.DeviceAddress,
         vertex_count: u32,
         instance_count: u32,
-    ) callconv(gpu.@"callconv") void {
+    ) void {
         pushRootPointers(cb.body(), vertex_data, pixel_data);
         cb.body().d.device.cmdDraw(cb.body().command_buffer, vertex_count, instance_count, 0, 0);
     }
@@ -1634,7 +1708,7 @@ pub const CommandBuffer = struct {
         index_type: gpu.IndexType,
         indices: gpu.DeviceAddress,
         index_count: u32,
-    ) callconv(gpu.@"callconv") void {
+    ) void {
         sfDrawIndexedInstanced(cb, vertex_data, pixel_data, index_type, indices, index_count, 1);
     }
 
@@ -1646,7 +1720,7 @@ pub const CommandBuffer = struct {
         indices: gpu.DeviceAddress,
         index_count: u32,
         instance_count: u32,
-    ) callconv(gpu.@"callconv") void {
+    ) void {
         pushRootPointers(cb.body(), vertex_data, pixel_data);
         bindIndexPointer(cb.body(), index_type, indices);
         cb.body().d.device.cmdDrawIndexed(cb.body().command_buffer, index_count, instance_count, 0, 0, 0);
@@ -1659,7 +1733,7 @@ pub const CommandBuffer = struct {
         index_type: gpu.IndexType,
         indices: gpu.DeviceAddress,
         args: gpu.DeviceAddress,
-    ) callconv(gpu.@"callconv") void {
+    ) void {
         pushRootPointers(cb.body(), vertex_data, pixel_data);
         bindIndexPointer(cb.body(), index_type, indices);
         const entry, const offset = cb.body().d.heap.addrToEntryAndOffset(args);
@@ -1721,7 +1795,7 @@ pub const Texture = struct {
     const Desc = gpu.TextureDesc;
 
     pub const Descriptor = opaque {
-        pub fn sfDescriptorSizeAndHeapAlign(d: *Header(Device)) callconv(gpu.@"callconv") gpu.SizeAndAlign {
+        pub fn sfDescriptorSizeAndHeapAlign(d: *Header(Device)) gpu.SizeAndAlign {
             return sizeAndHeapAlignment(d.body());
         }
         fn sizeAndHeapAlignment(d: *Device) gpu.SizeAndAlign {
@@ -1735,7 +1809,7 @@ pub const Texture = struct {
             };
         }
 
-        pub fn sfStoreDescriptor(d: *Header(Device), descriptor: *const gpu.Descriptor, heap_ptr: [*]u8, index: usize) callconv(gpu.@"callconv") void {
+        pub fn sfStoreDescriptor(d: *Header(Device), descriptor: *const gpu.Descriptor, heap_ptr: [*]u8, index: usize) void {
             const size_align = Descriptor.sfDescriptorSizeAndHeapAlign(d);
             @memcpy(
                 @as([*]u8, @ptrCast(heap_ptr)) + size_align.size * index,
@@ -1744,7 +1818,7 @@ pub const Texture = struct {
         }
     };
 
-    pub fn sfTextureSizeAndAlign(d: *Header(Device), info: Desc) callconv(gpu.@"callconv") gpu.SizeAndAlign {
+    pub fn sfTextureSizeAndAlign(d: *Header(Device), info: Desc) gpu.SizeAndAlign {
         return sizeAndAlignment(d.body(), info);
     }
     fn sizeAndAlignment(d: *Device, info: Desc) gpu.SizeAndAlign {
@@ -1760,8 +1834,16 @@ pub const Texture = struct {
         };
     }
 
-    pub fn sfCreateTexture(d: *Header(Device), info: Desc, texture_data: gpu.DeviceAddress) callconv(gpu.@"callconv") *Header(Texture) {
-        return create(d.body(), info, texture_data) catch @panic("TODO");
+    pub fn sfCreateTexture(d: *Header(Device), info: Desc, texture_data: gpu.DeviceAddress, texture: **Header(Texture)) !void {
+        texture.* = create(d.body(), info, texture_data) catch |err| return switch (err) {
+            error.OutOfMemory, error.OutOfHostMemory => error.OutOfMemory,
+            error.OutOfDeviceMemory => |e| e,
+            error.ValidationFailed, error.Unknown => error.Unknown,
+
+            error.CompressionExhaustedEXT,
+            error.InvalidOpaqueCaptureAddressKHR,
+            => @panic("TODO"),
+        };
     }
     fn create(d: *Device, info: Desc, texture_data: gpu.DeviceAddress) !*Header(Texture) {
         const image = try d.device.createImage(&vkImageInfo(info), null);
@@ -1785,7 +1867,7 @@ pub const Texture = struct {
         return texture;
     }
 
-    pub fn sfDestroyTexture(texture: *Header(Texture)) callconv(gpu.@"callconv") void {
+    pub fn sfDestroyTexture(texture: *Header(Texture)) void {
         destroy(texture.body());
     }
     fn destroy(texture: *Texture) void {
@@ -1803,8 +1885,14 @@ pub const Texture = struct {
         texture.views.deinit(texture.d.gpa);
     }
 
-    pub fn sfTextureStorageDescriptor(texture: *Header(Texture), view_info: gpu.TextureViewDesc) callconv(gpu.@"callconv") gpu.Descriptor {
-        return storageDescriptor(texture.body(), view_info) catch @panic("TODO");
+    pub fn sfTextureStorageDescriptor(texture: *Header(Texture), view_info: gpu.TextureViewDesc, descriptor: *gpu.Descriptor) !void {
+        descriptor.* = storageDescriptor(texture.body(), view_info) catch |err| return switch (err) {
+            error.OutOfMemory, error.OutOfHostMemory => error.OutOfMemory,
+            error.OutOfDeviceMemory => |e| e,
+            error.ValidationFailed, error.Unknown => error.Unknown,
+
+            error.InvalidOpaqueCaptureAddressKHR => @panic("TODO"),
+        };
     }
     fn storageDescriptor(texture: *Texture, view_info: gpu.TextureViewDesc) !gpu.Descriptor {
         const view = texture.views.get(view_info) orelse blk: {
@@ -1827,8 +1915,14 @@ pub const Texture = struct {
         return descriptor;
     }
 
-    pub fn sfTextureViewDescriptor(texture: *Header(Texture), view_info: gpu.TextureViewDesc) callconv(gpu.@"callconv") gpu.Descriptor {
-        return viewDescriptor(texture.body(), view_info) catch @panic("TODO");
+    pub fn sfTextureViewDescriptor(texture: *Header(Texture), view_info: gpu.TextureViewDesc, descriptor: *gpu.Descriptor) !void {
+        descriptor.* = viewDescriptor(texture.body(), view_info) catch |err| return switch (err) {
+            error.OutOfMemory, error.OutOfHostMemory => error.OutOfMemory,
+            error.OutOfDeviceMemory => |e| e,
+            error.ValidationFailed, error.Unknown => error.Unknown,
+
+            error.InvalidOpaqueCaptureAddressKHR => @panic("TODO"),
+        };
     }
     fn viewDescriptor(
         texture: *Texture,
@@ -1900,8 +1994,24 @@ pub const Pipeline = struct {
 
     d: *Device,
 
-    pub fn sfCreateComputePipeline(d: *Header(Device), ir_size: usize, ir: [*]const u8) callconv(gpu.@"callconv") *Header(Pipeline) {
-        return createCompute(d.body(), ir[0..ir_size]) catch @panic("TODO");
+    pub fn sfCreateComputePipeline(
+        d: *Header(Device),
+        ir_size: usize,
+        ir: [*]const u8,
+        pipeline: **Header(Pipeline),
+    ) !void {
+        pipeline.* = createCompute(d.body(), ir[0..ir_size]) catch |err| return switch (err) {
+            error.OutOfHostMemory, error.OutOfMemory => error.OutOfMemory,
+            error.OutOfDeviceMemory => |e| e,
+            error.ValidationFailed, error.Unknown => error.Unknown,
+
+            error.InvalidOpaqueCaptureAddressKHR,
+            error.BadMagic,
+            error.UnsupportedVersion,
+            error.Malformed,
+            error.InvalidShaderNV,
+            => @panic("TODO"),
+        };
     }
     fn createCompute(d: *Device, ir: []const u8) !*Header(Pipeline) {
         const parser = try sfir.parse(ir);
@@ -1965,8 +2075,25 @@ pub const Pipeline = struct {
         pixel_ir_size: usize,
         pixel_ir: [*]const u8,
         desc: gpu.GraphicsPipelineDesc,
-    ) callconv(gpu.@"callconv") *Header(Pipeline) {
-        return createGraphics(d.body(), vertex_ir[0..vertex_ir_size], pixel_ir[0..pixel_ir_size], desc) catch @panic("TODO");
+        pipeline: **Header(Pipeline),
+    ) !void {
+        pipeline.* = createGraphics(
+            d.body(),
+            vertex_ir[0..vertex_ir_size],
+            pixel_ir[0..pixel_ir_size],
+            desc,
+        ) catch |err| return switch (err) {
+            error.OutOfHostMemory, error.OutOfMemory => error.OutOfMemory,
+            error.OutOfDeviceMemory => |e| e,
+            error.ValidationFailed, error.Unknown => error.Unknown,
+
+            error.InvalidOpaqueCaptureAddressKHR,
+            error.BadMagic,
+            error.UnsupportedVersion,
+            error.Malformed,
+            error.InvalidShaderNV,
+            => @panic("TODO"),
+        };
     }
     fn createGraphics(
         d: *Device,
@@ -2166,7 +2293,7 @@ pub const Pipeline = struct {
         return pipeline;
     }
 
-    pub fn sfDestroyPipeline(pipeline: *Header(Pipeline)) callconv(gpu.@"callconv") void {
+    pub fn sfDestroyPipeline(pipeline: *Header(Pipeline)) void {
         destroy(pipeline.body());
     }
     fn destroy(pipeline: *Pipeline) void {
@@ -2243,8 +2370,8 @@ pub const heap = struct {
         bytes: usize,
         alignment: usize,
         memory: gpu.Memory,
-    ) callconv(gpu.@"callconv") gpu.DeviceAddress {
-        return malloc(d.body(), bytes, .fromByteUnits(alignment), memory) catch @panic("TODO");
+    ) gpu.DeviceAddress {
+        return malloc(d.body(), bytes, .fromByteUnits(alignment), memory) catch return 0; // TODO: investigate what can error
     }
     fn malloc(
         d: *Device,
@@ -2371,7 +2498,7 @@ pub const heap = struct {
         return device_addr;
     }
 
-    pub fn sfFree(d: *Header(Device), ptr: gpu.DeviceAddress) callconv(gpu.@"callconv") void {
+    pub fn sfFree(d: *Header(Device), ptr: gpu.DeviceAddress) void {
         free(d.body(), ptr);
     }
     fn free(d: *Device, ptr: gpu.DeviceAddress) void {

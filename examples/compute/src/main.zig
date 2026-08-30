@@ -48,16 +48,18 @@ pub fn main(init: std.process.Init) !void {
 
     const surface_usage = gpu.surfaceSupportedUsage(device, surface);
 
-    const frame_semaphore: *gpu.Semaphore = gpu.createSemaphore(device, 0);
+    var frame_semaphore: *gpu.Semaphore = undefined;
+    _ = gpu.createSemaphore(device, 0, &frame_semaphore);
     defer gpu.destroySemaphore(frame_semaphore);
     var frame_index: u64 = 1;
 
     std.debug.assert(surface_usage.storage);
-    const swapchain: *gpu.Swapchain = gpu.createSwapchain(queue, surface, .{
+    var swapchain: *gpu.Swapchain = undefined;
+    _ = gpu.createSwapchain(queue, surface, .{
         .format = swapchain_format,
         .usage = .{ .storage = true },
         .present_mode = .fifo,
-    });
+    }, &swapchain);
     defer gpu.destroySwapchain(swapchain);
 
     const descriptor_size_and_align = gpu.descriptorSizeAndHeapAlign(device);
@@ -70,7 +72,8 @@ pub fn main(init: std.process.Init) !void {
     const data_cpu: *Data = @ptrCast(@alignCast(gpu.deviceToHostPointer(device, data_gpu)));
 
     const spv = @embedFile("generate_texture.spv");
-    const pipeline: *gpu.Pipeline = gpu.createComputePipeline(device, spv.len, spv);
+    var pipeline: *gpu.Pipeline = undefined;
+    _ = gpu.createComputePipeline(device, spv.len, spv, &pipeline);
     defer gpu.destroyPipeline(pipeline);
 
     const start: std.Io.Timestamp = .now(init.io, .real);
@@ -86,11 +89,13 @@ pub fn main(init: std.process.Init) !void {
         std.debug.assert(c.SDL_GetWindowSizeInPixels(window, &width, &height));
 
         if (frame_index > FRAMES_IN_FLIGHT)
-            gpu.waitSemaphore(frame_semaphore, frame_index - FRAMES_IN_FLIGHT);
+            _ = gpu.waitSemaphore(frame_semaphore, frame_index - FRAMES_IN_FLIGHT);
 
-        const back_buffer = gpu.swapchainAcquireNextTexture(swapchain, queue, @intCast(width), @intCast(height));
+        var back_buffer: *gpu.Texture = undefined;
+        _ = gpu.swapchainAcquireNextTexture(swapchain, queue, @intCast(width), @intCast(height), &back_buffer);
 
-        const descriptor = gpu.textureStorageDescriptor(back_buffer, .{});
+        var descriptor: gpu.Descriptor = undefined;
+        _ = gpu.textureStorageDescriptor(back_buffer, .{}, &descriptor);
         const output_texture: u32 = @intCast(frame_index % FRAMES_IN_FLIGHT);
         gpu.storeDescriptor(device, &descriptor, heap, output_texture);
 
@@ -101,7 +106,8 @@ pub fn main(init: std.process.Init) !void {
             .time = @floatCast(time),
         };
 
-        const cb = gpu.startCommandRecording(queue);
+        var cb: *gpu.CommandBuffer = undefined;
+        _ = gpu.startCommandRecording(queue, &cb);
         gpu.setPipeline(cb, pipeline);
         gpu.setActiveTextureHeap(cb, heap_gpu);
         gpu.dispatch(
@@ -112,13 +118,13 @@ pub fn main(init: std.process.Init) !void {
             1,
         );
 
-        gpu.submitAndSignal(queue, 1, &.{cb}, frame_semaphore, frame_index);
-        gpu.swapchainPresent(swapchain, queue, frame_semaphore, frame_index);
+        _ = gpu.submitAndSignal(queue, 1, &.{cb}, frame_semaphore, frame_index);
+        _ = gpu.swapchainPresent(swapchain, queue, frame_semaphore, frame_index);
 
         frame_index += 1;
     }
 
-    gpu.waitSemaphore(frame_semaphore, frame_index - 1);
+    _ = gpu.waitSemaphore(frame_semaphore, frame_index - 1);
 }
 
 const Data = extern struct {
@@ -131,5 +137,4 @@ const FRAMES_IN_FLIGHT = 2;
 const std = @import("std");
 const target = @import("builtin").target;
 const gpu = @import("sulfur");
-const VulkanLoader = @import("VulkanLoader");
 const c = @import("c");

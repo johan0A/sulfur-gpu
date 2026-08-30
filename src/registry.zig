@@ -125,6 +125,7 @@ pub const JsonRegistry = struct {
         dispatch: Dispatch,
         enumerate: bool = false,
         @"return": Type,
+        errors: [][]u8 = &.{},
         params: []Param,
         doc: []u8,
 
@@ -327,6 +328,7 @@ pub const Registry = struct {
         dispatch: Dispatch,
         enumerate: bool,
         return_type: Type,
+        errors: [][]u8,
         params: []const Param,
         doc: []const u8,
 
@@ -484,6 +486,7 @@ fn convert(arena: std.mem.Allocator, json: JsonRegistry) !Registry {
         .dispatch = json_function.dispatch,
         .enumerate = json_function.enumerate,
         .return_type = try convertType(arena, &decl_by_name, &constant_by_name, json_function.@"return", &.{}),
+        .errors = json_function.errors,
         .params = try convertParams(arena, &decl_by_name, &constant_by_name, json_function.params),
         .doc = json_function.doc,
     };

@@ -246,6 +246,19 @@
 
   "enums": [
     {
+      "name": "SfResult",
+      "backing_type": "uint32_t",
+      "values": [
+        { "name": "SF_RESULT_OK", "value": 0, "doc": "" },
+        { "name": "SF_RESULT_OUT_OF_MEMORY", "value": 1, "doc": "" },
+        { "name": "SF_RESULT_OUT_OF_DEVICE_MEMORY", "value": 2, "doc": "" },
+        { "name": "SF_RESULT_DEVICE_LOST", "value": 3, "doc": "" },
+        { "name": "SF_RESULT_SURFACE_LOST", "value": 4, "doc": "" },
+        { "name": "SF_RESULT_UNKNOWN", "value": 5, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
       "name": "SfMemory",
       "backing_type": "uint32_t",
       "values": [
@@ -775,9 +788,15 @@
       "name": "sfStartCommandRecording",
       "group": "SfQueue",
       "dispatch": "table",
-      "return": { "base": "SfCommandBuffer", "ptr": [{}] },
+      "return": { "base": "SfResult" },
+      "errors": [
+        "SF_RESULT_OUT_OF_MEMORY",
+        "SF_RESULT_OUT_OF_DEVICE_MEMORY",
+        "SF_RESULT_UNKNOWN"
+      ],
       "params": [
-        { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" }
+        { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
+        { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}, {}] }, "doc": "" }
       ],
       "doc": ""
     },
@@ -785,7 +804,13 @@
       "name": "sfSubmit",
       "group": "SfQueue",
       "dispatch": "table",
-      "return": { "base": "void" },
+      "return": { "base": "SfResult" },
+      "errors": [
+        "SF_RESULT_OUT_OF_DEVICE_MEMORY",
+        "SF_RESULT_OUT_OF_MEMORY",
+        "SF_RESULT_DEVICE_LOST",
+        "SF_RESULT_UNKNOWN"
+      ],
       "params": [
         { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
         { "name": "command_buffer_count", "type": { "base": "size_t" }, "doc": "" },
@@ -797,7 +822,13 @@
       "name": "sfSubmitAndSignal",
       "group": "SfQueue",
       "dispatch": "table",
-      "return": { "base": "void" },
+      "return": { "base": "SfResult" },
+      "errors": [
+        "SF_RESULT_OUT_OF_DEVICE_MEMORY",
+        "SF_RESULT_OUT_OF_MEMORY",
+        "SF_RESULT_DEVICE_LOST",
+        "SF_RESULT_UNKNOWN"
+      ],
       "params": [
         { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
         { "name": "command_buffer_count", "type": { "base": "size_t" }, "doc": "" },
@@ -811,10 +842,16 @@
       "name": "sfCreateSemaphore",
       "group": "SfSemaphore",
       "dispatch": "table",
-      "return": { "base": "SfSemaphore", "ptr": [{}] },
+      "return": { "base": "SfResult" },
+      "errors": [
+        "SF_RESULT_OUT_OF_MEMORY",
+        "SF_RESULT_OUT_OF_DEVICE_MEMORY",
+        "SF_RESULT_UNKNOWN"
+      ],
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
-        { "name": "initial_value", "type": { "base": "uint64_t" }, "doc": "" }
+        { "name": "initial_value", "type": { "base": "uint64_t" }, "doc": "" },
+        { "name": "semaphore", "type": { "base": "SfSemaphore", "ptr": [{}, {}] }, "doc": "" }
       ],
       "doc": ""
     },
@@ -832,7 +869,13 @@
       "name": "sfWaitSemaphore",
       "group": "SfSemaphore",
       "dispatch": "table",
-      "return": { "base": "void" },
+      "return": { "base": "SfResult" },
+      "errors": [
+        "SF_RESULT_OUT_OF_DEVICE_MEMORY",
+        "SF_RESULT_OUT_OF_MEMORY",
+        "SF_RESULT_DEVICE_LOST",
+        "SF_RESULT_UNKNOWN"
+      ],
       "params": [
         { "name": "semaphore", "type": { "base": "SfSemaphore", "ptr": [{}] }, "doc": "" },
         { "name": "value", "type": { "base": "uint64_t" }, "doc": "" }
@@ -843,11 +886,18 @@
       "name": "sfCreateSwapchain",
       "group": "SfSwapchain",
       "dispatch": "table",
-      "return": { "base": "SfSwapchain", "ptr": [{}] },
+      "return": { "base": "SfResult" },
+      "errors": [
+        "SF_RESULT_OUT_OF_DEVICE_MEMORY",
+        "SF_RESULT_OUT_OF_MEMORY",
+        "SF_RESULT_SURFACE_LOST",
+        "SF_RESULT_UNKNOWN"
+      ],
       "params": [
         { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
         { "name": "surface", "type": { "base": "SfSurface", "ptr": [{}] }, "doc": "" },
-        { "name": "desc", "type": { "base": "SfSwapchainDesc" }, "doc": "" }
+        { "name": "desc", "type": { "base": "SfSwapchainDesc" }, "doc": "" },
+        { "name": "swapchain", "type": { "base": "SfSwapchain", "ptr": [{}, {}] }, "doc": "" }
       ],
       "doc": ""
     },
@@ -865,12 +915,20 @@
       "name": "sfSwapchainAcquireNextTexture",
       "group": "SfSwapchain",
       "dispatch": "table",
-      "return": { "base": "SfTexture", "ptr": [{}] },
+      "return": { "base": "SfResult" },
+      "errors": [
+        "SF_RESULT_OUT_OF_MEMORY",
+        "SF_RESULT_OUT_OF_DEVICE_MEMORY",
+        "SF_RESULT_DEVICE_LOST",
+        "SF_RESULT_SURFACE_LOST",
+        "SF_RESULT_UNKNOWN"
+      ],
       "params": [
         { "name": "swapchain", "type": { "base": "SfSwapchain", "ptr": [{}] }, "doc": "" },
         { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
         { "name": "width", "type": { "base": "uint32_t" }, "doc": "" },
-        { "name": "height", "type": { "base": "uint32_t" }, "doc": "" }
+        { "name": "height", "type": { "base": "uint32_t" }, "doc": "" },
+        { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}, {}] }, "doc": "" }
       ],
       "doc": ""
     },
@@ -878,7 +936,14 @@
       "name": "sfSwapchainPresent",
       "group": "SfSwapchain",
       "dispatch": "table",
-      "return": { "base": "void" },
+      "return": { "base": "SfResult" },
+      "errors": [
+        "SF_RESULT_OUT_OF_MEMORY",
+        "SF_RESULT_OUT_OF_DEVICE_MEMORY",
+        "SF_RESULT_DEVICE_LOST",
+        "SF_RESULT_SURFACE_LOST",
+        "SF_RESULT_UNKNOWN"
+      ],
       "params": [
         { "name": "swapchain", "type": { "base": "SfSwapchain", "ptr": [{}] }, "doc": "" },
         { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
@@ -1058,11 +1123,17 @@
       "name": "sfCreateTexture",
       "group": "SfTexture",
       "dispatch": "table",
-      "return": { "base": "SfTexture", "ptr": [{}] },
+      "return": { "base": "SfResult" },
+      "errors": [
+        "SF_RESULT_OUT_OF_MEMORY",
+        "SF_RESULT_OUT_OF_DEVICE_MEMORY",
+        "SF_RESULT_UNKNOWN"
+      ],
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "desc", "type": { "base": "SfTextureDesc" }, "doc": "" },
-        { "name": "data", "type": { "base": "SfDeviceAddress" }, "doc": "" }
+        { "name": "data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}, {}] }, "doc": "" }
       ],
       "doc": ""
     },
@@ -1080,10 +1151,16 @@
       "name": "sfTextureStorageDescriptor",
       "group": "SfTexture",
       "dispatch": "table",
-      "return": { "base": "SfDescriptor" },
+      "return": { "base": "SfResult" },
+      "errors": [
+        "SF_RESULT_OUT_OF_MEMORY",
+        "SF_RESULT_OUT_OF_DEVICE_MEMORY",
+        "SF_RESULT_UNKNOWN"
+      ],
       "params": [
         { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" },
-        { "name": "desc", "type": { "base": "SfTextureViewDesc" }, "doc": "" }
+        { "name": "desc", "type": { "base": "SfTextureViewDesc" }, "doc": "" },
+        { "name": "descriptor", "type": { "base": "SfDescriptor", "ptr": [{}] }, "doc": "" }
       ],
       "doc": ""
     },
@@ -1091,10 +1168,16 @@
       "name": "sfTextureViewDescriptor",
       "group": "SfTexture",
       "dispatch": "table",
-      "return": { "base": "SfDescriptor" },
+      "return": { "base": "SfResult" },
+      "errors": [
+        "SF_RESULT_OUT_OF_MEMORY",
+        "SF_RESULT_OUT_OF_DEVICE_MEMORY",
+        "SF_RESULT_UNKNOWN"
+      ],
       "params": [
         { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" },
-        { "name": "desc", "type": { "base": "SfTextureViewDesc" }, "doc": "" }
+        { "name": "desc", "type": { "base": "SfTextureViewDesc" }, "doc": "" },
+        { "name": "descriptor", "type": { "base": "SfDescriptor", "ptr": [{}] }, "doc": "" }
       ],
       "doc": ""
     },
@@ -1102,11 +1185,17 @@
       "name": "sfCreateComputePipeline",
       "group": "SfPipeline",
       "dispatch": "table",
-      "return": { "base": "SfPipeline", "ptr": [{}] },
+      "return": { "base": "SfResult" },
+      "errors": [
+        "SF_RESULT_OUT_OF_MEMORY",
+        "SF_RESULT_OUT_OF_DEVICE_MEMORY",
+        "SF_RESULT_UNKNOWN"
+      ],
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "ir_size", "type": { "base": "size_t" }, "doc": "" },
-        { "name": "ir", "type": { "base": "uint8_t", "ptr": [{ "const": true, "len": "ir_size" }] }, "doc": "" }
+        { "name": "ir", "type": { "base": "uint8_t", "ptr": [{ "const": true, "len": "ir_size" }] }, "doc": "" },
+        { "name": "pipeline", "type": { "base": "SfPipeline", "ptr": [{}, {}] }, "doc": "" }
       ],
       "doc": ""
     },
@@ -1114,14 +1203,20 @@
       "name": "sfCreateGraphicsPipeline",
       "group": "SfPipeline",
       "dispatch": "table",
-      "return": { "base": "SfPipeline", "ptr": [{}] },
+      "return": { "base": "SfResult" },
+      "errors": [
+        "SF_RESULT_OUT_OF_MEMORY",
+        "SF_RESULT_OUT_OF_DEVICE_MEMORY",
+        "SF_RESULT_UNKNOWN"
+      ],
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "vertex_ir_size", "type": { "base": "size_t" }, "doc": "" },
         { "name": "vertex_ir", "type": { "base": "uint8_t", "ptr": [{ "const": true, "len": "vertex_ir_size" }] }, "doc": "" },
         { "name": "pixel_ir_size", "type": { "base": "size_t" }, "doc": "" },
         { "name": "pixel_ir", "type": { "base": "uint8_t", "ptr": [{ "const": true, "len": "pixel_ir_size" }] }, "doc": "" },
-        { "name": "desc", "type": { "base": "SfGraphicsPipelineDesc" }, "doc": "" }
+        { "name": "desc", "type": { "base": "SfGraphicsPipelineDesc" }, "doc": "" },
+        { "name": "pipeline", "type": { "base": "SfPipeline", "ptr": [{}, {}] }, "doc": "" }
       ],
       "doc": ""
     },
