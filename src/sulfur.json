@@ -796,7 +796,7 @@
       ],
       "params": [
         { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
-        { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}, {}] }, "doc": "" }
+        { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}, {}] }, "out": true, "doc": "" }
       ],
       "doc": ""
     },
@@ -851,7 +851,7 @@
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "initial_value", "type": { "base": "uint64_t" }, "doc": "" },
-        { "name": "semaphore", "type": { "base": "SfSemaphore", "ptr": [{}, {}] }, "doc": "" }
+        { "name": "semaphore", "type": { "base": "SfSemaphore", "ptr": [{}, {}] }, "out": true, "doc": "" }
       ],
       "doc": ""
     },
@@ -897,7 +897,7 @@
         { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
         { "name": "surface", "type": { "base": "SfSurface", "ptr": [{}] }, "doc": "" },
         { "name": "desc", "type": { "base": "SfSwapchainDesc" }, "doc": "" },
-        { "name": "swapchain", "type": { "base": "SfSwapchain", "ptr": [{}, {}] }, "doc": "" }
+        { "name": "swapchain", "type": { "base": "SfSwapchain", "ptr": [{}, {}] }, "out": true, "doc": "" }
       ],
       "doc": ""
     },
@@ -928,7 +928,7 @@
         { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
         { "name": "width", "type": { "base": "uint32_t" }, "doc": "" },
         { "name": "height", "type": { "base": "uint32_t" }, "doc": "" },
-        { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}, {}] }, "doc": "" }
+        { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}, {}] }, "out": true, "doc": "" }
       ],
       "doc": ""
     },
@@ -1133,7 +1133,7 @@
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "desc", "type": { "base": "SfTextureDesc" }, "doc": "" },
         { "name": "data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
-        { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}, {}] }, "doc": "" }
+        { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}, {}] }, "out": true, "doc": "" }
       ],
       "doc": ""
     },
@@ -1160,7 +1160,7 @@
       "params": [
         { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" },
         { "name": "desc", "type": { "base": "SfTextureViewDesc" }, "doc": "" },
-        { "name": "descriptor", "type": { "base": "SfDescriptor", "ptr": [{}] }, "doc": "" }
+        { "name": "descriptor", "type": { "base": "SfDescriptor", "ptr": [{}] }, "out": true, "doc": "" }
       ],
       "doc": ""
     },
@@ -1177,7 +1177,7 @@
       "params": [
         { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" },
         { "name": "desc", "type": { "base": "SfTextureViewDesc" }, "doc": "" },
-        { "name": "descriptor", "type": { "base": "SfDescriptor", "ptr": [{}] }, "doc": "" }
+        { "name": "descriptor", "type": { "base": "SfDescriptor", "ptr": [{}] }, "out": true, "doc": "" }
       ],
       "doc": ""
     },
@@ -1195,7 +1195,7 @@
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "ir_size", "type": { "base": "size_t" }, "doc": "" },
         { "name": "ir", "type": { "base": "uint8_t", "ptr": [{ "const": true, "len": "ir_size" }] }, "doc": "" },
-        { "name": "pipeline", "type": { "base": "SfPipeline", "ptr": [{}, {}] }, "doc": "" }
+        { "name": "pipeline", "type": { "base": "SfPipeline", "ptr": [{}, {}] }, "out": true, "doc": "" }
       ],
       "doc": ""
     },
@@ -1216,7 +1216,7 @@
         { "name": "pixel_ir_size", "type": { "base": "size_t" }, "doc": "" },
         { "name": "pixel_ir", "type": { "base": "uint8_t", "ptr": [{ "const": true, "len": "pixel_ir_size" }] }, "doc": "" },
         { "name": "desc", "type": { "base": "SfGraphicsPipelineDesc" }, "doc": "" },
-        { "name": "pipeline", "type": { "base": "SfPipeline", "ptr": [{}, {}] }, "doc": "" }
+        { "name": "pipeline", "type": { "base": "SfPipeline", "ptr": [{}, {}] }, "out": true, "doc": "" }
       ],
       "doc": ""
     },
