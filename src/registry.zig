@@ -1,154 +1,5 @@
 const std = @import("std");
 
-pub const JsonRegistry = struct {
-    version: []u8,
-
-    fn_prefix: []u8,
-    type_prefix: []u8,
-    enum_prefix: []u8,
-
-    symbol: []u8,
-    get_slot: []u8,
-    create_instance: []u8,
-
-    constants: []Constant,
-    typedefs: []TypeDef,
-    opaques: []Opaque,
-    function_pointers: []FunctionPointer,
-    structs: []Struct,
-    enums: []Enum,
-    flags: []Flags,
-
-    functions: []Function,
-
-    pub const Constant = struct {
-        name: []u8,
-        type: []u8,
-        value: []u8,
-        doc: []u8,
-    };
-
-    pub const TypeDef = struct {
-        name: []u8,
-        type: []u8,
-        doc: []u8,
-    };
-
-    pub const Opaque = struct {
-        name: []u8,
-        doc: []u8,
-    };
-
-    pub const FunctionPointer = struct {
-        name: []u8,
-        @"return": Type,
-        params: []Param,
-        doc: []u8,
-    };
-
-    pub const Struct = struct {
-        name: []u8,
-        platform: ?Platform = null,
-        fields: []Field,
-        doc: []u8,
-    };
-
-    pub const Field = struct {
-        name: []u8,
-        type: Type,
-        default: ?[]u8 = null,
-        doc: []u8,
-    };
-
-    pub const Type = struct {
-        base: []u8,
-        ptr: []Ptr = &.{},
-        array: ?Array = null,
-
-        pub const Ptr = struct {
-            optional: bool = false,
-            @"const": bool = false,
-            len: ?[]u8 = null,
-        };
-
-        pub const Array = union(enum) {
-            int: u32,
-            constant: []u8,
-
-            pub fn jsonParse(allocator: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) !Array {
-                switch (try source.peekNextTokenType()) {
-                    .number => return Array{ .int = try std.json.innerParse(u32, allocator, source, options) },
-                    .string => return Array{ .constant = try std.json.innerParse([]u8, allocator, source, options) },
-                    else => return error.UnexpectedToken,
-                }
-            }
-        };
-    };
-
-    pub const Enum = struct {
-        name: []u8,
-        backing_type: []u8,
-        values: []Value,
-        doc: []u8,
-
-        const Value = struct {
-            name: []u8,
-            value: i64,
-            doc: []u8,
-        };
-    };
-
-    pub const Flags = struct {
-        name: []u8,
-        backing_type: []u8,
-        bits: []Bit,
-        combinations: []Combination,
-        doc: []u8,
-
-        const Bit = struct {
-            name: []u8,
-            bit: u16,
-            doc: []u8,
-        };
-
-        const Combination = struct {
-            name: []u8,
-            bits: [][]u8,
-            doc: []u8,
-        };
-    };
-
-    pub const Function = struct {
-        name: []u8,
-        platform: ?Platform = null,
-        group: ?[]u8 = null,
-        dispatch: Dispatch,
-        enumerate: bool = false,
-        @"return": Type,
-        errors: [][]u8 = &.{},
-        params: []Param,
-        doc: []u8,
-
-        const Dispatch = Registry.Function.Dispatch;
-    };
-
-    pub const Param = struct {
-        name: []u8,
-        type: Type,
-        out: bool = false,
-        doc: []u8,
-    };
-
-    pub const Platform = enum {
-        win32,
-        xlib,
-    };
-
-    pub fn parse(arena: std.mem.Allocator, bytes: []const u8) !JsonRegistry {
-        return try std.json.parseFromSliceLeaky(JsonRegistry, arena, bytes, .{});
-    }
-};
-
 pub const Registry = struct {
     version: []const u8,
 
@@ -156,9 +7,8 @@ pub const Registry = struct {
     type_prefix: []const u8,
     enum_prefix: []const u8,
 
-    symbol: TypeBase,
-    get_slot: Function.Index,
-    create_instance: Function.Index,
+    result: Enum.Index,
+    get_symbol_type: Type,
 
     constants: []const Constant,
     typedefs: []const Typedef,
@@ -168,20 +18,6 @@ pub const Registry = struct {
     enums: []const Enum,
     flags: []const Flags,
     functions: []const Function,
-
-    decl_by_name: std.StringArrayHashMapUnmanaged(TypeBase),
-    function_by_name: std.StringArrayHashMapUnmanaged(Function.Index),
-    constant_by_name: std.StringArrayHashMapUnmanaged(Constant.Index),
-
-    pub const TypeBase = union(enum) {
-        typedef: Typedef.Index,
-        @"opaque": Opaque.Index,
-        function_pointer: FunctionPointer.Index,
-        @"struct": Struct.Index,
-        @"enum": Enum.Index,
-        flags: Flags.Index,
-        builtin: Builtin,
-    };
 
     pub const Builtin = enum {
         void,
@@ -200,10 +36,22 @@ pub const Registry = struct {
         double,
     };
 
+    pub const TypeBase = union(enum) {
+        typedef: Typedef.Index,
+        @"opaque": Opaque.Index,
+        function_pointer: FunctionPointer.Index,
+        @"struct": Struct.Index,
+        @"enum": Enum.Index,
+        flags: Flags.Index,
+        builtin: Builtin,
+
+        pub const Tag = std.meta.Tag(TypeBase);
+    };
+
     pub const Type = struct {
         base: TypeBase,
         ptrs: []const Pointer = &.{},
-        array: ?ArrayLen = null,
+        array: ?Array = null,
 
         pub const Pointer = struct {
             optional: bool,
@@ -218,7 +66,7 @@ pub const Registry = struct {
             };
         };
 
-        pub const ArrayLen = union(enum) {
+        pub const Array = union(enum) {
             int: u32,
             constant: Constant.Index,
         };
@@ -228,7 +76,7 @@ pub const Registry = struct {
         pub const Index = enum(u32) { _ };
 
         name: []const u8,
-        type: TypeBase,
+        type: Type,
         value: []const u8,
         doc: []const u8,
     };
@@ -276,7 +124,6 @@ pub const Registry = struct {
         enum_value: EnumValue,
         raw: []const u8,
 
-        /// `registry.enums[ev.enum].values[ev.value]`.
         pub const EnumValue = struct {
             @"enum": Enum.Index,
             value: u32,
@@ -315,7 +162,6 @@ pub const Registry = struct {
 
         pub const Combination = struct {
             name: []const u8,
-            /// Indices into `Flags.bits`
             bits: []const u32,
             doc: []const u8,
         };
@@ -326,15 +172,22 @@ pub const Registry = struct {
 
         name: []const u8,
         dispatch: Dispatch,
+        role: Role,
         enumerate: bool,
         return_type: Type,
-        errors: [][]u8,
+        errors: []const Enum.Value,
         params: []const Param,
         doc: []const u8,
 
         pub const Dispatch = enum {
             symbol,
             table,
+        };
+
+        pub const Role = enum {
+            normal,
+            create_instance,
+            get_slot,
         };
     };
 
@@ -345,268 +198,389 @@ pub const Registry = struct {
         doc: []const u8,
     };
 
-    pub fn declName(r: *const Registry, ref: TypeBase) []const u8 {
-        return switch (ref) {
-            .typedef => |i| r.typedefs[@intFromEnum(i)].name,
-            .@"opaque" => |i| r.opaques[@intFromEnum(i)].name,
-            .function_pointer => |i| r.function_pointers[@intFromEnum(i)].name,
-            .@"struct" => |i| r.structs[@intFromEnum(i)].name,
-            .@"enum" => |i| r.enums[@intFromEnum(i)].name,
-            .flags => |i| r.flags[@intFromEnum(i)].name,
+    pub fn resultEnum(registry: Registry) Enum {
+        return registry.enums[@intFromEnum(registry.result)];
+    }
+
+    pub fn declName(registry: Registry, base: TypeBase) []const u8 {
+        return switch (base) {
+            .typedef => |index| registry.typedefs[@intFromEnum(index)].name,
+            .@"opaque" => |index| registry.opaques[@intFromEnum(index)].name,
+            .function_pointer => |index| registry.function_pointers[@intFromEnum(index)].name,
+            .@"struct" => |index| registry.structs[@intFromEnum(index)].name,
+            .@"enum" => |index| registry.enums[@intFromEnum(index)].name,
+            .flags => |index| registry.flags[@intFromEnum(index)].name,
             .builtin => |builtin| @tagName(builtin),
         };
     }
 
-    pub fn lookupDecl(r: *const Registry, name: []const u8) ?TypeBase {
-        return r.decl_by_name.get(name);
-    }
-
-    pub fn constant(r: *const Registry, i: Constant.Index) *const Constant {
-        return &r.constants[@intFromEnum(i)];
-    }
-
-    pub fn function(r: *const Registry, i: Function.Index) *const Function {
-        return &r.functions[@intFromEnum(i)];
-    }
-
-    pub fn @"enum"(r: *const Registry, i: Enum.Index) *const Enum {
-        return &r.enums[@intFromEnum(i)];
-    }
-
-    pub fn fromJson(arena: std.mem.Allocator, json: JsonRegistry) !Registry {
-        return try convert(arena, json);
-    }
-
     pub fn parse(arena: std.mem.Allocator, bytes: []const u8) !Registry {
-        const json_registry: JsonRegistry = try .parse(arena, bytes);
-        return try fromJson(arena, json_registry);
+        const json = try JsonRegistry.parse(arena, bytes);
+        return convert(arena, json);
+    }
+};
+
+pub const JsonRegistry = struct {
+    version: []const u8,
+
+    fn_prefix: []const u8,
+    type_prefix: []const u8,
+    enum_prefix: []const u8,
+
+    result: []const u8,
+    symbol: []const u8,
+    get_slot: []const u8,
+    create_instance: []const u8,
+
+    constants: []const Constant,
+    typedefs: []const Typedef,
+    opaques: []const Registry.Opaque,
+    function_pointers: []const FunctionPointer,
+    structs: []const Struct,
+    enums: []const Enum,
+    flags: []const Flags,
+    functions: []const Function,
+
+    pub const Constant = struct {
+        name: []const u8,
+        type: []const u8,
+        value: []const u8,
+        doc: []const u8,
+    };
+
+    pub const Typedef = struct {
+        name: []const u8,
+        type: []const u8,
+        doc: []const u8,
+    };
+
+    pub const FunctionPointer = struct {
+        name: []const u8,
+        @"return": Type,
+        params: []const Param,
+        doc: []const u8,
+    };
+
+    pub const Struct = struct {
+        name: []const u8,
+        platform: ?Platform = null,
+        fields: []const Field,
+        doc: []const u8,
+    };
+
+    pub const Field = struct {
+        name: []const u8,
+        type: Type,
+        default: ?[]const u8 = null,
+        doc: []const u8,
+    };
+
+    pub const Type = struct {
+        base: []const u8,
+        ptr: []const Ptr = &.{},
+        array: ?Array = null,
+
+        pub const Ptr = struct {
+            optional: bool = false,
+            @"const": bool = false,
+            len: ?[]const u8 = null,
+        };
+
+        pub const Array = union(enum) {
+            int: u32,
+            constant: []const u8,
+
+            pub fn jsonParse(allocator: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) !Array {
+                switch (try source.peekNextTokenType()) {
+                    .number => return .{ .int = try std.json.innerParse(u32, allocator, source, options) },
+                    .string => return .{ .constant = try std.json.innerParse([]const u8, allocator, source, options) },
+                    else => return error.UnexpectedToken,
+                }
+            }
+        };
+    };
+
+    pub const Enum = struct {
+        name: []const u8,
+        backing_type: Registry.Builtin,
+        values: []const Registry.Enum.Value,
+        doc: []const u8,
+    };
+
+    pub const Flags = struct {
+        name: []const u8,
+        backing_type: Registry.Builtin,
+        bits: []const Registry.Flags.Bit,
+        combinations: []const Combination,
+        doc: []const u8,
+
+        pub const Combination = struct {
+            name: []const u8,
+            bits: []const []const u8,
+            doc: []const u8,
+        };
+    };
+
+    pub const Function = struct {
+        name: []const u8,
+        platform: ?Platform = null,
+        group: ?[]const u8 = null,
+        dispatch: Registry.Function.Dispatch,
+        enumerate: bool = false,
+        @"return": Type,
+        errors: []const []const u8 = &.{},
+        params: []const Param,
+        doc: []const u8,
+    };
+
+    pub const Param = struct {
+        name: []const u8,
+        type: Type,
+        out: bool = false,
+        doc: []const u8,
+    };
+
+    pub const Platform = enum {
+        win32,
+        xlib,
+    };
+
+    pub fn parse(arena: std.mem.Allocator, bytes: []const u8) !JsonRegistry {
+        return std.json.parseFromSliceLeaky(JsonRegistry, arena, bytes, .{});
     }
 };
 
 const DeclByName = std.StringArrayHashMapUnmanaged(Registry.TypeBase);
-const FunctionByName = std.StringArrayHashMapUnmanaged(Registry.Function.Index);
-const ConstantByName = std.StringArrayHashMapUnmanaged(Registry.Constant.Index);
+
+const Context = struct {
+    arena: std.mem.Allocator,
+    json: JsonRegistry,
+    decl_by_name: DeclByName,
+    result_enum: JsonRegistry.Enum,
+};
 
 fn convert(arena: std.mem.Allocator, json: JsonRegistry) !Registry {
     var decl_by_name: DeclByName = .empty;
-    var function_by_name: FunctionByName = .empty;
-    var constant_by_name: ConstantByName = .empty;
+    try addDecls(arena, &decl_by_name, json.typedefs, .typedef);
+    try addDecls(arena, &decl_by_name, json.opaques, .@"opaque");
+    try addDecls(arena, &decl_by_name, json.function_pointers, .function_pointer);
+    try addDecls(arena, &decl_by_name, json.structs, .@"struct");
+    try addDecls(arena, &decl_by_name, json.enums, .@"enum");
+    try addDecls(arena, &decl_by_name, json.flags, .flags);
 
-    for (json.typedefs, 0..) |d, i| try putDecl(arena, &decl_by_name, d.name, .{ .typedef = @enumFromInt(i) });
-    for (json.opaques, 0..) |d, i| try putDecl(arena, &decl_by_name, d.name, .{ .@"opaque" = @enumFromInt(i) });
-    for (json.function_pointers, 0..) |d, i| try putDecl(arena, &decl_by_name, d.name, .{ .function_pointer = @enumFromInt(i) });
-    for (json.structs, 0..) |d, i| try putDecl(arena, &decl_by_name, d.name, .{ .@"struct" = @enumFromInt(i) });
-    for (json.enums, 0..) |d, i| try putDecl(arena, &decl_by_name, d.name, .{ .@"enum" = @enumFromInt(i) });
-    for (json.flags, 0..) |d, i| try putDecl(arena, &decl_by_name, d.name, .{ .flags = @enumFromInt(i) });
+    const result_base = decl_by_name.get(json.result) orelse return error.UnknownType;
+    if (result_base != .@"enum") return error.ResultNotAnEnum;
+    const result_index = result_base.@"enum";
 
-    try constant_by_name.ensureTotalCapacity(arena, @intCast(json.constants.len));
-    for (json.constants, 0..) |k, i| constant_by_name.putAssumeCapacity(k.name, @enumFromInt(i));
-
-    try function_by_name.ensureTotalCapacity(arena, @intCast(json.functions.len));
-    for (json.functions, 0..) |f, i| function_by_name.putAssumeCapacity(f.name, @enumFromInt(i));
+    const context: Context = .{
+        .arena = arena,
+        .json = json,
+        .decl_by_name = decl_by_name,
+        .result_enum = json.enums[@intFromEnum(result_index)],
+    };
 
     const constants = try arena.alloc(Registry.Constant, json.constants.len);
-    for (json.constants, constants) |k, *out| out.* = .{
-        .name = k.name,
-        .type = try resolveTypeBase(&decl_by_name, k.type),
-        .value = k.value,
-        .doc = k.doc,
+    for (json.constants, constants) |json_constant, *constant| constant.* = .{
+        .name = json_constant.name,
+        .type = .{ .base = try resolveTypeBase(context, json_constant.type) },
+        .value = json_constant.value,
+        .doc = json_constant.doc,
+    };
+
+    const typedefs = try arena.alloc(Registry.Typedef, json.typedefs.len);
+    for (json.typedefs, typedefs) |json_typedef, *typedef| typedef.* = .{
+        .name = json_typedef.name,
+        .type = .{ .base = try resolveTypeBase(context, json_typedef.type) },
+        .doc = json_typedef.doc,
     };
 
     const enums = try arena.alloc(Registry.Enum, json.enums.len);
-    for (json.enums, enums) |json_enum, *out| {
-        const values = try arena.alloc(Registry.Enum.Value, json_enum.values.len);
-        for (json_enum.values, values) |v, *ov| ov.* = .{ .name = v.name, .value = v.value, .doc = v.doc };
-        out.* = .{
-            .name = json_enum.name,
-            .backing = std.meta.stringToEnum(Registry.Builtin, json_enum.backing_type) orelse return error.UnknownBackingType,
-            .values = values,
-            .doc = json_enum.doc,
-        };
-    }
+    for (json.enums, enums) |json_enum, *@"enum"| @"enum".* = .{
+        .name = json_enum.name,
+        .backing = json_enum.backing_type,
+        .values = json_enum.values,
+        .doc = json_enum.doc,
+    };
 
     const flags = try arena.alloc(Registry.Flags, json.flags.len);
-    for (json.flags, flags) |json_flags, *out| {
-        const bits = try arena.alloc(Registry.Flags.Bit, json_flags.bits.len);
-        for (json_flags.bits, bits) |b, *ob| ob.* = .{ .name = b.name, .bit = b.bit, .doc = b.doc };
-
-        const combinations = try arena.alloc(Registry.Flags.Combination, json_flags.combinations.len);
-        for (json_flags.combinations, combinations) |json_combination, *combination| {
-            const bit_indices = try arena.alloc(u32, json_combination.bits.len);
-            for (json_combination.bits, bit_indices) |bit_name, *index| {
-                index.* = for (json_flags.bits, 0..) |b, i| {
-                    if (std.mem.eql(u8, b.name, bit_name)) break @intCast(i);
-                } else return error.UnknownFlagBit;
-            }
-            combination.* = .{ .name = json_combination.name, .bits = bit_indices, .doc = json_combination.doc };
-        }
-
-        out.* = .{
-            .name = json_flags.name,
-            .backing = std.meta.stringToEnum(Registry.Builtin, json_flags.backing_type) orelse return error.UnknownBackingType,
-            .bits = bits,
-            .combinations = combinations,
-            .doc = json_flags.doc,
-        };
-    }
-
-    const typedefs = try arena.alloc(Registry.Typedef, json.typedefs.len);
-    for (json.typedefs, typedefs) |d, *out| out.* = .{
-        .name = d.name,
-        .type = .{ .base = try resolveTypeBase(&decl_by_name, d.type) },
-        .doc = d.doc,
+    for (json.flags, flags) |json_flags, *flags_decl| flags_decl.* = .{
+        .name = json_flags.name,
+        .backing = json_flags.backing_type,
+        .bits = json_flags.bits,
+        .combinations = try convertCombinations(context, json_flags),
+        .doc = json_flags.doc,
     };
-
-    const opaques = try arena.alloc(Registry.Opaque, json.opaques.len);
-    for (json.opaques, opaques) |d, *out| out.* = .{ .name = d.name, .doc = d.doc };
 
     const function_pointers = try arena.alloc(Registry.FunctionPointer, json.function_pointers.len);
-    for (json.function_pointers, function_pointers) |json_pointer, *out| {
-        const param_names = try arena.alloc([]const u8, json_pointer.params.len);
-        for (json_pointer.params, param_names) |p, *n| n.* = p.name;
-
-        out.* = .{
-            .name = json_pointer.name,
-            .return_type = try convertType(arena, &decl_by_name, &constant_by_name, json_pointer.@"return", param_names),
-            .params = try convertParams(arena, &decl_by_name, &constant_by_name, json_pointer.params),
-            .doc = json_pointer.doc,
-        };
-    }
+    for (json.function_pointers, function_pointers) |json_function_pointer, *function_pointer| function_pointer.* = .{
+        .name = json_function_pointer.name,
+        .return_type = try convertType(context, json_function_pointer.@"return", json_function_pointer.params),
+        .params = try convertParams(context, json_function_pointer.params),
+        .doc = json_function_pointer.doc,
+    };
 
     const structs = try arena.alloc(Registry.Struct, json.structs.len);
-    for (json.structs, structs) |d, *out| out.* = .{
-        .name = d.name,
-        .fields = try convertFields(arena, &decl_by_name, &constant_by_name, enums, d.fields),
-        .doc = d.doc,
+    for (json.structs, structs) |json_struct, *@"struct"| @"struct".* = .{
+        .name = json_struct.name,
+        .fields = try convertFields(context, json_struct.fields),
+        .doc = json_struct.doc,
     };
 
+    _ = findByName(json.functions, json.get_slot) orelse return error.UnknownFunction;
+    _ = findByName(json.functions, json.create_instance) orelse return error.UnknownFunction;
+
     const functions = try arena.alloc(Registry.Function, json.functions.len);
-    for (json.functions, functions) |json_function, *out| out.* = .{
-        .name = json_function.name,
-        .dispatch = json_function.dispatch,
-        .enumerate = json_function.enumerate,
-        .return_type = try convertType(arena, &decl_by_name, &constant_by_name, json_function.@"return", &.{}),
-        .errors = json_function.errors,
-        .params = try convertParams(arena, &decl_by_name, &constant_by_name, json_function.params),
-        .doc = json_function.doc,
-    };
+    for (json.functions, functions) |json_function, *function| {
+        function.* = .{
+            .name = json_function.name,
+            .dispatch = json_function.dispatch,
+            .role = blk: {
+                if (std.mem.eql(u8, json_function.name, context.json.create_instance)) break :blk .create_instance;
+                if (std.mem.eql(u8, json_function.name, context.json.get_slot)) break :blk .get_slot;
+                break :blk .normal;
+            },
+            .enumerate = json_function.enumerate,
+            .return_type = try convertType(context, json_function.@"return", json_function.params),
+            .errors = try convertErrors(context, json_function.errors),
+            .params = try convertParams(context, json_function.params),
+            .doc = json_function.doc,
+        };
+    }
 
     return .{
         .version = json.version,
         .fn_prefix = json.fn_prefix,
         .type_prefix = json.type_prefix,
         .enum_prefix = json.enum_prefix,
-        .symbol = decl_by_name.get(json.symbol) orelse return error.UnknownFunction,
-        .get_slot = function_by_name.get(json.get_slot) orelse return error.UnknownFunction,
-        .create_instance = function_by_name.get(json.create_instance) orelse return error.UnknownFunction,
+        .result = result_index,
+        .get_symbol_type = .{ .base = decl_by_name.get(json.symbol) orelse return error.UnknownType },
         .constants = constants,
         .typedefs = typedefs,
-        .opaques = opaques,
+        .opaques = json.opaques,
         .function_pointers = function_pointers,
         .structs = structs,
         .enums = enums,
         .flags = flags,
         .functions = functions,
-        .decl_by_name = decl_by_name,
-        .function_by_name = function_by_name,
-        .constant_by_name = constant_by_name,
     };
 }
 
-fn putDecl(arena: std.mem.Allocator, decl_by_name: *DeclByName, name: []const u8, ref: Registry.TypeBase) !void {
-    const gop = try decl_by_name.getOrPut(arena, name);
-    if (gop.found_existing) return error.DuplicateDecl;
-    gop.value_ptr.* = ref;
+fn addDecls(
+    arena: std.mem.Allocator,
+    decl_by_name: *DeclByName,
+    decls: anytype,
+    comptime tag: Registry.TypeBase.Tag,
+) !void {
+    const Index = @FieldType(Registry.TypeBase, @tagName(tag));
+    for (decls, 0..) |decl, index| {
+        const entry = try decl_by_name.getOrPut(arena, decl.name);
+        if (entry.found_existing) return error.DuplicateDecl;
+        entry.value_ptr.* = @unionInit(Registry.TypeBase, @tagName(tag), @as(Index, @enumFromInt(index)));
+    }
 }
 
-fn resolveTypeBase(decl_by_name: *const DeclByName, name: []const u8) !Registry.TypeBase {
-    if (std.meta.stringToEnum(Registry.Builtin, name)) |b| return .{ .builtin = b };
-    if (decl_by_name.get(name)) |d| return d;
-    return error.UnknownType;
+fn findByName(items: anytype, name: []const u8) ?usize {
+    for (items, 0..) |item, index| {
+        if (std.mem.eql(u8, item.name, name)) return index;
+    }
+    return null;
+}
+
+fn resolveTypeBase(context: Context, name: []const u8) !Registry.TypeBase {
+    if (std.meta.stringToEnum(Registry.Builtin, name)) |builtin| return .{ .builtin = builtin };
+    return context.decl_by_name.get(name) orelse error.UnknownType;
 }
 
 fn convertType(
-    arena: std.mem.Allocator,
-    decl_by_name: *const DeclByName,
-    constant_by_name: *const ConstantByName,
+    context: Context,
     json_type: JsonRegistry.Type,
-    args: []const []const u8,
+    siblings: anytype,
 ) !Registry.Type {
-    const ptrs = try arena.alloc(Registry.Type.Pointer, json_type.ptr.len);
-    for (json_type.ptr, ptrs) |json_pointer, *pointer| pointer.* = .{
+    const pointers = try context.arena.alloc(Registry.Type.Pointer, json_type.ptr.len);
+    for (json_type.ptr, pointers) |json_pointer, *pointer| pointer.* = .{
         .optional = json_pointer.optional,
         .@"const" = json_pointer.@"const",
         .size = blk: {
-            const len = json_pointer.len orelse break :blk .one;
-            if (std.mem.eql(u8, len, "none")) break :blk .many;
-            if (std.mem.eql(u8, len, "null_terminated")) break :blk .null_terminated;
-            for (args, 0..) |arg, i| {
-                if (std.mem.eql(u8, arg, len)) break :blk .{ .sized_by_arg = @intCast(i) };
-            }
-            return error.UnknownLen;
+            const len_name = json_pointer.len orelse break :blk .one;
+            if (std.mem.eql(u8, len_name, "none")) break :blk .many;
+            if (std.mem.eql(u8, len_name, "null_terminated")) break :blk .null_terminated;
+            const sibling_index = findByName(siblings, len_name) orelse return error.UnknownLen;
+            break :blk .{ .sized_by_arg = @intCast(sibling_index) };
         },
     };
 
     return .{
-        .base = try resolveTypeBase(decl_by_name, json_type.base),
-        .ptrs = ptrs,
+        .base = try resolveTypeBase(context, json_type.base),
+        .ptrs = pointers,
         .array = if (json_type.array) |array| switch (array) {
-            .int => |v| .{ .int = v },
-            .constant => |name| .{ .constant = constant_by_name.get(name) orelse return error.UnknownConstant },
+            .int => |length| .{ .int = length },
+            .constant => |name| .{
+                .constant = @enumFromInt(findByName(context.json.constants, name) orelse return error.UnknownConstant),
+            },
         } else null,
     };
 }
 
-fn convertParams(
-    arena: std.mem.Allocator,
-    decl_by_name: *const DeclByName,
-    constant_by_name: *const ConstantByName,
-    json_params: []const JsonRegistry.Param,
-) ![]Registry.Param {
-    const names = try arena.alloc([]const u8, json_params.len);
-    for (json_params, names) |p, *n| n.* = p.name;
-
-    const params = try arena.alloc(Registry.Param, json_params.len);
+fn convertParams(context: Context, json_params: []const JsonRegistry.Param) ![]const Registry.Param {
+    const params = try context.arena.alloc(Registry.Param, json_params.len);
     for (json_params, params) |json_param, *param| param.* = .{
         .name = json_param.name,
-        .type = try convertType(arena, decl_by_name, constant_by_name, json_param.type, names),
+        .type = try convertType(context, json_param.type, json_params),
         .out = json_param.out,
         .doc = json_param.doc,
     };
     return params;
 }
 
-fn convertFields(
-    arena: std.mem.Allocator,
-    decl_by_name: *const DeclByName,
-    constant_by_name: *const ConstantByName,
-    enums: []const Registry.Enum,
-    json_fields: []const JsonRegistry.Field,
-) ![]Registry.Field {
-    const names = try arena.alloc([]const u8, json_fields.len);
-    for (json_fields, names) |f, *n| n.* = f.name;
-
-    const fields = try arena.alloc(Registry.Field, json_fields.len);
+fn convertFields(context: Context, json_fields: []const JsonRegistry.Field) ![]const Registry.Field {
+    const fields = try context.arena.alloc(Registry.Field, json_fields.len);
     for (json_fields, fields) |json_field, *field| {
-        const @"type" = try convertType(arena, decl_by_name, constant_by_name, json_field.type, names);
+        const @"type" = try convertType(context, json_field.type, json_fields);
         field.* = .{
             .name = json_field.name,
             .type = @"type",
-            .default = if (json_field.default) |default| convertDefault(enums, @"type", default) else null,
+            .default = if (json_field.default) |default| convertDefault(context, @"type", default) else null,
             .doc = json_field.doc,
         };
     }
     return fields;
 }
 
-fn convertDefault(enums: []const Registry.Enum, @"type": Registry.Type, raw: []const u8) Registry.Default {
-    if (@"type".ptrs.len == 0 and @"type".array == null and @"type".base == .@"enum") {
-        const enum_index = @"type".base.@"enum";
-        for (enums[@intFromEnum(enum_index)].values, 0..) |value, i| {
-            if (std.mem.eql(u8, value.name, raw)) {
-                return .{ .enum_value = .{ .@"enum" = enum_index, .value = @intCast(i) } };
-            }
+fn convertDefault(
+    context: Context,
+    @"type": Registry.Type,
+    raw: []const u8,
+) Registry.Default {
+    const is_plain_enum = @"type".ptrs.len == 0 and @"type".array == null and @"type".base == .@"enum";
+    if (!is_plain_enum) return .{ .raw = raw };
+
+    const enum_index = @"type".base.@"enum";
+    const json_enum = context.json.enums[@intFromEnum(enum_index)];
+    const value_index = findByName(json_enum.values, raw) orelse return .{ .raw = raw };
+    return .{ .enum_value = .{ .@"enum" = enum_index, .value = @intCast(value_index) } };
+}
+
+fn convertCombinations(context: Context, json_flags: JsonRegistry.Flags) ![]const Registry.Flags.Combination {
+    const combinations = try context.arena.alloc(Registry.Flags.Combination, json_flags.combinations.len);
+    for (json_flags.combinations, combinations) |json_combination, *combination| {
+        const bit_indices = try context.arena.alloc(u32, json_combination.bits.len);
+        for (json_combination.bits, bit_indices) |bit_name, *bit_index| {
+            bit_index.* = @intCast(findByName(json_flags.bits, bit_name) orelse return error.UnknownFlagBit);
         }
+        combination.* = .{
+            .name = json_combination.name,
+            .bits = bit_indices,
+            .doc = json_combination.doc,
+        };
     }
-    return .{ .raw = raw };
+    return combinations;
+}
+
+fn convertErrors(context: Context, error_names: []const []const u8) ![]const Registry.Enum.Value {
+    const errors = try context.arena.alloc(Registry.Enum.Value, error_names.len);
+    for (error_names, errors) |error_name, *@"error"| {
+        const value_index = findByName(context.result_enum.values, error_name) orelse return error.UnknownResultValue;
+        @"error".* = context.result_enum.values[value_index];
+    }
+    return errors;
 }

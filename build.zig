@@ -20,7 +20,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(lib);
 
     const root_module = b.addModule("sulfur", .{
-        .root_source_file = b.path("src/sf_minimal.zig"),
+        .root_source_file = b.path("src/sf.zig"),
         .optimize = optimize,
         .target = target,
     });
@@ -35,7 +35,6 @@ pub fn build(b: *std.Build) void {
     const vulkan = b.dependency("vulkan", .{
         .registry = vulkan_headers_dep.path("registry/vk.xml"),
     });
-    root_module.addImport("vulkan", vulkan.module("vulkan-zig"));
     lib.root_module.addImport("vulkan", vulkan.module("vulkan-zig"));
 
     {
@@ -52,7 +51,12 @@ pub fn build(b: *std.Build) void {
         const generate_bindings_minimal = b.addRunArtifact(generate_sf_bindings_exe);
         generate_bindings_minimal.addArg("--bindings_minimal");
         generate_bindings_minimal.addFileArg(b.path("src/sulfur.json"));
-        const bindings = generate_bindings_minimal.addOutputFileArg("sf_minimal.zig");
+        const bindings_minimal = generate_bindings_minimal.addOutputFileArg("sf_minimal.zig");
+
+        const generate_bindings = b.addRunArtifact(generate_sf_bindings_exe);
+        generate_bindings.addArg("--bindings");
+        generate_bindings.addFileArg(b.path("src/sulfur.json"));
+        const bindings = generate_bindings.addOutputFileArg("sf.zig");
 
         const generate_driver_symbol_map = b.addRunArtifact(generate_sf_bindings_exe);
         generate_driver_symbol_map.addArg("--driver_symbol_map");
@@ -65,7 +69,8 @@ pub fn build(b: *std.Build) void {
         const loader_symbol_map = generate_loader_symbol_map.addOutputFileArg("loader_symbol_map.zig");
 
         const update_source_files = b.addUpdateSourceFiles();
-        update_source_files.addCopyFileToSource(bindings, "src/sf_minimal.zig");
+        update_source_files.addCopyFileToSource(bindings_minimal, "src/sf_minimal.zig");
+        update_source_files.addCopyFileToSource(bindings, "src/sf.zig");
         update_source_files.addCopyFileToSource(driver_symbol_map, "src/driver_symbol_map.zig");
         update_source_files.addCopyFileToSource(loader_symbol_map, "src/loader_symbol_map.zig");
         generate_sf_bindings.dependOn(&update_source_files.step);

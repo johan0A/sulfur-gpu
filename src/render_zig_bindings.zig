@@ -3,6 +3,7 @@ const Registry = @import("registry.zig").Registry;
 
 const Command = enum {
     bindings_minimal,
+    bindings,
     driver_symbol_map,
     loader_symbol_map,
 };
@@ -13,232 +14,113 @@ pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(arena);
     const cwd: std.Io.Dir = .cwd();
 
-    const command_string = args[1];
-    const command = std.meta.stringToEnum(Command, command_string[2..]) orelse return error.InvalidCommand;
+    const command = std.meta.stringToEnum(Command, stripPrefix(args[1], "--")) orelse return error.InvalidCommand;
+    const registry_path = args[2];
+    const output_path = args[3];
 
-    const registry_sub_path = args[2];
-    const output_sub_path = args[3];
+    const registry_source = try cwd.readFileAlloc(io, registry_path, arena, .unlimited);
+    const registry = try Registry.parse(arena, registry_source);
 
-    const input = try std.Io.Dir.readFileAlloc(cwd, io, registry_sub_path, arena, .unlimited);
-    const registry = try Registry.parse(arena, input);
-
-    var writer_impl: std.Io.Writer.Allocating = .init(arena);
+    var output: std.Io.Writer.Allocating = .init(arena);
+    const w = &output.writer;
     switch (command) {
-        .bindings_minimal => try renderMinimalBindings(&writer_impl.writer, registry),
-        .driver_symbol_map => try renderSymbolMap(arena, &writer_impl.writer, registry, .driver),
-        .loader_symbol_map => try renderSymbolMap(arena, &writer_impl.writer, registry, .loader),
+        .bindings_minimal => try renderBindings(w, arena, registry, .minimal),
+        .bindings => try renderBindings(w, arena, registry, .normal),
+        .driver_symbol_map => try renderSymbolMap(w, arena, registry, .table),
+        .loader_symbol_map => try renderSymbolMap(w, arena, registry, .symbol),
     }
-    try writer_impl.writer.flush();
+    try w.flush();
 
-    const file = try cwd.createFile(io, output_sub_path, .{});
+    const file = try cwd.createFile(io, output_path, .{});
     var buf: [1024]u8 = undefined;
     var file_writer = file.writer(io, &buf);
 
-    const source = try writer_impl.toOwnedSliceSentinel(0);
+    const source = try output.toOwnedSliceSentinel(0);
     const ast: std.zig.Ast = try .parse(arena, source, .zig);
     try ast.render(arena, &file_writer.interface, .{});
     try file_writer.flush();
 }
 
-const SymbolMapTarget = enum { driver, loader };
-
-fn renderSymbolMap(
-    arena: std.mem.Allocator,
-    w: *std.Io.Writer,
-    registry: Registry,
-    target: SymbolMapTarget,
-) !void {
+fn renderHeader(w: *std.Io.Writer, registry: Registry) !void {
     try w.print(
         \\// Generated file, do not edit.
         \\// version: {s}
-        \\
-        \\const std = @import("std");
-        \\const sf = @import("sf_minimal.zig");
-        \\
-        \\
-    , .{registry.version});
-
-    const dispatch: Registry.Function.Dispatch = switch (target) {
-        .driver => .table,
-        .loader => .symbol,
-    };
-
-    var handles: std.ArrayList(Registry.Opaque) = .empty;
-    try handles.appendSlice(arena, registry.opaques);
-
-    var handle_index: usize = 0;
-    outer: while (handle_index < handles.items.len) {
-        const handle = handles.items[handle_index];
-        for (registry.functions) |function| {
-            if (function.dispatch != dispatch) continue;
-            for (function.params) |param| {
-                if (param.type.base == .@"opaque") {
-                    const name = registry.opaques[@intFromEnum(param.type.base.@"opaque")].name;
-                    if (std.mem.eql(u8, name, handle.name)) {
-                        handle_index += 1;
-                        continue :outer;
-                    }
-                }
-            }
-            if (function.return_type.base == .@"opaque") {
-                const name = registry.opaques[@intFromEnum(function.return_type.base.@"opaque")].name;
-                if (std.mem.eql(u8, name, handle.name)) {
-                    handle_index += 1;
-                    continue :outer;
-                }
-            }
-        }
-        _ = handles.orderedRemove(handle_index);
-    }
-
-    try w.writeAll("const HandleTypes = struct {");
-    for (handles.items) |handle| {
-        try renderTypeName(w, registry, handle.name);
-        try w.writeAll(": type,");
-    }
-    try w.writeAll("};\n\n");
-
-    try w.writeAll("fn Functions(handle_types: HandleTypes) type { return struct {");
-    for (registry.functions) |function| {
-        if (function.dispatch != dispatch) continue;
-        try renderFnName(w, registry, function.name);
-        try w.writeAll(": fn (");
-        for (function.params, 0..) |param, i| {
-            if (i != 0) try w.writeAll(", ");
-            try renderId(w, param.name);
-            try w.writeAll(": ");
-            const prefix = if (param.type.base != .@"opaque") "sf." else "handle_types.";
-            try renderTypePrefix(w, registry, param.type, prefix);
-        }
-        try w.writeAll(")");
-        if (function.errors.len != 0) {
-            try w.writeAll("error{");
-            for (function.errors, 0..) |err, i| {
-                if (i != 0) try w.writeAll(", ");
-                try renderErrorName(w, err);
-            }
-            try w.writeAll("}!void");
-        } else {
-            const prefix = if (function.return_type.base != .@"opaque") "sf." else "handle_types.";
-            try renderTypePrefix(w, registry, function.return_type, prefix);
-        }
-        try w.writeAll(",");
-    }
-    try w.writeAll("};}\n\n");
-
-    const sf_errors = registry.enums[@intFromEnum(registry.lookupDecl("SfResult").?.@"enum")];
-
-    try w.writeAll("const Error = error{");
-    for (sf_errors.values) |value| {
-        if (std.mem.eql(u8, value.name, "SF_RESULT_OK")) continue;
-        try renderErrorName(w, value.name);
-        try w.writeAll(",\n");
-    }
-    try w.writeAll("};\n\n");
-
-    try w.writeAll("fn cResult(result: anytype) sf.Result { return if (result) return .ok else |err| switch (@as(Error, err)) {");
-    for (sf_errors.values) |value| {
-        if (std.mem.eql(u8, value.name, "SF_RESULT_OK")) continue;
-        try w.writeAll("error.");
-        try renderErrorName(w, value.name);
-        try w.writeAll(" => .");
-        try renderMemberName(w, registry, sf_errors.name, value.name);
-        try w.writeAll(",\n");
-    }
-    try w.writeAll("};}\n\n");
-
-    try w.writeAll("fn CFunctions(comptime handle_types: HandleTypes, comptime functions: Functions(handle_types)) type { return struct {");
-    for (registry.functions) |function| {
-        if (function.dispatch != dispatch) continue;
-        try w.writeAll("pub fn ");
-        try renderFnName(w, registry, function.name);
-        try w.writeAll("(");
-        for (function.params, 0..) |param, i| {
-            if (i != 0) try w.writeAll(", ");
-            try renderId(w, param.name);
-            try w.writeAll(": ");
-            const prefix = if (param.type.base != .@"opaque") "sf." else "handle_types.";
-            try renderTypePrefix(w, registry, param.type, prefix);
-        }
-        try w.writeAll(") callconv(sf.@\"callconv\")");
-        const prefix = if (function.return_type.base != .@"opaque") "sf." else "handle_types.";
-        try renderTypePrefix(w, registry, function.return_type, prefix);
-        try w.writeAll("{");
-
-        const has_errors = function.errors.len != 0;
-        try w.writeAll("return ");
-        if (has_errors) try w.writeAll("cResult(");
-        try w.writeAll("functions.");
-        try renderFnName(w, registry, function.name);
-        try w.writeAll("(");
-        for (function.params, 0..) |param, i| {
-            if (i != 0) try w.writeAll(", ");
-            try renderId(w, param.name);
-        }
-        if (has_errors) try w.writeAll(")");
-        try w.writeAll(");");
-
-        try w.writeAll("}");
-    }
-    try w.writeAll("};}\n\n");
-
-    try w.writeAll(
-        \\pub fn map(
-        \\    comptime handle_types: HandleTypes,
-        \\    comptime functions: Functions(handle_types),
-        \\) std.StaticStringMap(*const anyopaque) {
-        \\    const c_functions = CFunctions(handle_types, functions);
-        \\    return .initComptime(@as([]const struct { []const u8, *const anyopaque }, &.{
-    );
-    for (registry.functions) |function| {
-        if (function.dispatch != dispatch) continue;
-        try w.writeAll(".{ \"");
-        try w.writeAll(function.name);
-        try w.writeAll("\", @ptrCast(&c_functions.");
-        try renderFnName(w, registry, function.name);
-        try w.writeAll(") },");
-    }
-    try w.writeAll("}));}\n");
+    ++ "\n\n", .{registry.version});
 }
 
-fn renderMinimalBindings(w: *std.Io.Writer, registry: Registry) !void {
-    try w.print(
-        \\// Generated file, do not edit.
-        \\// version: {s}
-        \\
+const BindingStyle = enum {
+    minimal,
+    normal,
+};
+
+fn renderBindings(
+    w: *std.Io.Writer,
+    arena: std.mem.Allocator,
+    registry: Registry,
+    style: BindingStyle,
+) !void {
+    try renderHeader(w, registry);
+    try w.writeAll(
         \\const std = @import("std");
         \\const target = @import("builtin").target;
         \\
-        \\pub const @"callconv": std.builtin.CallingConvention = switch (target.os.tag) {{
-        \\  .windows => if (target.cpu.arch == .x86) .{{ .x86_stdcall = .{{}} }} else .c,
-        \\  else => .c,
-        \\}};
-        \\
-        \\
-    , .{registry.version});
+        \\pub const @"callconv": std.builtin.CallingConvention = switch (target.os.tag) {
+        \\    .windows => if (target.cpu.arch == .x86) .{ .x86_stdcall = .{} } else .c,
+        \\    else => .c,
+        \\};
+    ++ "\n\n");
 
     for (registry.constants) |constant| {
         try renderDoc(w, constant.doc);
         try w.writeAll("pub const ");
         try renderConstName(w, registry, constant.name);
         try w.writeAll(": ");
-        try renderTypeBase(w, registry, constant.type);
+        try renderType(w, registry, constant.type);
         try w.print(" = {s};\n", .{constant.value});
     }
-    try w.writeAll("\n");
-
+    try w.writeByte('\n');
     for (registry.typedefs) |typedef| {
         try renderDeclStart(w, registry, typedef.doc, typedef.name);
         try renderType(w, registry, typedef.type);
         try w.writeAll(";\n");
     }
-    try w.writeAll("\n");
+    try w.writeByte('\n');
 
-    for (registry.opaques) |@"opaque"| {
+    for (registry.opaques, 0..) |@"opaque", index| {
         try renderDeclStart(w, registry, @"opaque".doc, @"opaque".name);
-        try w.writeAll("opaque {};\n");
+        try w.writeAll("opaque {\n");
+        if (style == .normal) {
+            const type_name = stripPrefix(@"opaque".name, registry.type_prefix);
+
+            for (registry.functions) |function| {
+                if (function.role == .get_slot) continue;
+
+                const is_create = std.mem.startsWith(u8, stripPrefix(function.name, registry.fn_prefix), "Create");
+                const produces_handle = blk: {
+                    if (isHandle(function.return_type, index)) break :blk true;
+                    for (function.params) |param| {
+                        if (param.out and isHandle(param.type, index)) break :blk true;
+                    }
+                    break :blk false;
+                };
+
+                const creates_handle = is_create and produces_handle;
+                const takes_handle_first = function.params.len != 0 and isHandle(function.params[0].type, index);
+
+                if (!creates_handle and !takes_handle_first) continue;
+                if (creates_handle and takes_handle_first) continue;
+
+                const is_destroy = std.mem.startsWith(u8, stripPrefix(function.name, registry.fn_prefix), "Destroy");
+                const drops_type_name = creates_handle or is_destroy;
+                const method_c_name = if (drops_type_name) try std.mem.replaceOwned(u8, arena, function.name, type_name, "") else function.name;
+
+                try renderFunction(w, registry, function, method_c_name, .normal);
+            }
+        }
+        try w.writeAll("};\n");
+        if (style != .minimal) try w.writeByte('\n');
     }
-    try w.writeAll("\n");
+    try w.writeByte('\n');
 
     for (registry.enums) |@"enum"| {
         try renderDeclStart(w, registry, @"enum".doc, @"enum".name);
@@ -252,56 +134,12 @@ fn renderMinimalBindings(w: *std.Io.Writer, registry: Registry) !void {
         }
         try w.writeAll("};\n\n");
     }
-
-    for (registry.flags) |flags| {
-        try renderDeclStart(w, registry, flags.doc, flags.name);
-        try w.writeAll("packed struct(");
-        try renderBuiltinType(w, flags.backing);
-        try w.writeAll(") {\n");
-
-        var highest: u16 = 0;
-        for (flags.bits) |bit| highest = @max(highest, bit.bit + 1);
-
-        for (0..highest) |slot| {
-            const bit = for (flags.bits) |bit| {
-                if (bit.bit == slot) break bit;
-            } else {
-                try w.print("reserved_{d}: bool = false,\n", .{slot});
-                continue;
-            };
-            try renderDoc(w, bit.doc);
-            try renderMemberName(w, registry, flags.name, bit.name);
-            try w.writeAll(": bool = false,\n");
-        }
-
-        const width = try backingBitWidth(flags.backing);
-        if (highest < width) try w.print("padding: u{d} = 0,\n", .{width - highest});
-
-        for (flags.combinations) |combination| {
-            try renderDoc(w, combination.doc);
-            try w.writeAll("\npub const ");
-            try renderMemberName(w, registry, flags.name, combination.name);
-            try w.writeAll(": ");
-            try renderTypeName(w, registry, flags.name);
-            try w.writeAll(" = .{");
-            for (combination.bits) |bit| {
-                try w.writeAll(" .");
-                try renderMemberName(w, registry, flags.name, flags.bits[bit].name);
-                try w.writeAll(" = true,");
-            }
-            try w.writeAll(" };\n");
-        }
-
-        try w.writeAll("};\n\n");
-    }
-
+    for (registry.flags) |flags| try renderFlags(w, registry, flags);
     for (registry.function_pointers) |function_pointer| {
         try renderDeclStart(w, registry, function_pointer.doc, function_pointer.name);
         try renderFnType(w, registry, function_pointer.params, function_pointer.return_type);
-        try w.writeAll(";\n");
+        try w.writeAll(";\n\n");
     }
-    try w.writeAll("\n");
-
     for (registry.structs) |@"struct"| {
         try renderDeclStart(w, registry, @"struct".doc, @"struct".name);
         try w.writeAll("extern struct {\n");
@@ -319,14 +157,177 @@ fn renderMinimalBindings(w: *std.Io.Writer, registry: Registry) !void {
         try w.writeAll("};\n\n");
     }
 
+    if (style == .minimal) {
+        for (registry.functions) |function| {
+            if (function.role == .get_slot) continue;
+            try renderFunction(w, registry, function, function.name, .minimal);
+        }
+    }
+
+    try renderInternal(w, registry);
+}
+
+fn isHandle(@"type": Registry.Type, opaque_index: usize) bool {
+    return @"type".base == .@"opaque" and opaque_index == @intFromEnum(@"type".base.@"opaque");
+}
+
+fn renderFunction(
+    w: *std.Io.Writer,
+    registry: Registry,
+    function: Registry.Function,
+    c_name: []const u8,
+    style: BindingStyle,
+) !void {
+    const normal = style == .normal;
+    const is_create_instance = function.role == .create_instance;
+    const returns_error = normal and function.errors.len != 0;
+    var out_param_index: ?usize = null;
+    if (normal) for (function.params, 0..) |param, index| {
+        if (!param.out) continue;
+        if (param.type.ptrs[param.type.ptrs.len - 1].size != .one) continue;
+        if (out_param_index != null) return error.UnsupportedRegistry;
+        out_param_index = index;
+    };
+
+    try renderDoc(w, function.doc);
+    try w.writeAll("pub fn ");
+    try renderFnName(w, registry, c_name);
+    try w.writeByte('(');
+    for (function.params, 0..) |param, param_index| {
+        if (param_index == out_param_index) continue;
+        try renderId(w, param.name);
+        try w.writeAll(": ");
+        try renderType(w, registry, param.type);
+        try w.writeAll(", ");
+    }
+    if (is_create_instance) {
+        try w.writeAll("getSymbol: ");
+        try renderType(w, registry, registry.get_symbol_type);
+        try w.writeAll(", ");
+    }
+    try w.writeAll(") ");
+
+    if (returns_error) {
+        try renderErrorSet(w, registry, function.errors);
+        try w.writeByte('!');
+    }
+    if (out_param_index) |index| {
+        try renderType(w, registry, pointee(function.params[index].type));
+    } else if (returns_error) {
+        try w.writeAll("void");
+    } else {
+        try renderType(w, registry, function.return_type);
+    }
+    try w.writeAll(" {\n");
+
+    if (is_create_instance) try w.writeAll("internal.loadGlobals(getSymbol);\n");
+    switch (function.dispatch) {
+        .symbol => {
+            try w.writeAll("const f = internal.");
+            try renderSnakeName(w, registry, function.name);
+            try w.writeAll(".?;\n");
+        },
+        .table => {
+            try w.writeAll("const f: ");
+            try renderFnType(w, registry, function.params, function.return_type);
+            try w.writeAll(" = @ptrCast(internal.table(");
+            try renderId(w, function.params[0].name);
+            try w.writeAll(")[internal.slots.");
+            try renderSnakeName(w, registry, function.name);
+            try w.writeAll("]);\n");
+        },
+    }
+
+    if (out_param_index) |index| {
+        const param = function.params[index];
+        try w.writeAll("var ");
+        try renderId(w, param.name);
+        try w.writeAll(": ");
+        try renderType(w, registry, pointee(param.type));
+        try w.writeAll(" = undefined;\n");
+    }
+
+    if (is_create_instance) {
+        try w.writeAll("const instance = ");
+    } else if (returns_error) {
+        try w.writeAll("const result = ");
+    } else if (out_param_index == null) {
+        try w.writeAll("return ");
+    }
+    try w.writeAll("f(");
+    for (function.params, 0..) |param, param_index| {
+        if (param_index == out_param_index) try w.writeByte('&');
+        try renderId(w, param.name);
+        try w.writeAll(", ");
+    }
+    try w.writeAll(");\n");
+
+    if (is_create_instance) try w.writeAll("internal.loadSlots(instance);\nreturn instance;\n");
+    if (returns_error) {
+        const result_enum = registry.resultEnum();
+
+        try w.writeAll("switch (result) {\n.");
+        try renderMemberName(w, registry, result_enum.name, resultOk(registry).name);
+        try w.writeAll(" => {},\n");
+        for (function.errors) |@"error"| {
+            try w.writeByte('.');
+            try renderMemberName(w, registry, result_enum.name, @"error".name);
+            try w.writeAll(" => return error.");
+            try renderErrorName(w, registry, @"error");
+            try w.writeAll(",\n");
+        }
+        if (function.errors.len != resultErrors(registry).len) try w.writeAll("else => unreachable,\n");
+        try w.writeAll("}\n");
+    }
+    if (out_param_index) |index| {
+        try w.writeAll("return ");
+        try renderId(w, function.params[index].name);
+        try w.writeAll(";\n");
+    }
+    try w.writeAll("}\n\n");
+}
+
+fn pointee(@"type": Registry.Type) Registry.Type {
+    var result = @"type";
+    result.ptrs = result.ptrs[0 .. result.ptrs.len - 1];
+    return result;
+}
+
+fn renderErrorSet(
+    w: *std.Io.Writer,
+    registry: Registry,
+    errors: []const Registry.Enum.Value,
+) !void {
+    try w.writeAll("error{");
+    for (errors) |@"error"| {
+        try renderErrorName(w, registry, @"error");
+        try w.writeAll(", ");
+    }
+    try w.writeByte('}');
+}
+
+fn resultOk(registry: Registry) Registry.Enum.Value {
+    return registry.resultEnum().values[0];
+}
+
+fn resultErrors(registry: Registry) []const Registry.Enum.Value {
+    return registry.resultEnum().values[1..];
+}
+
+fn functionWithRole(registry: Registry, role: Registry.Function.Role) Registry.Function {
+    for (registry.functions) |function| {
+        if (function.role == role) return function;
+    }
+    unreachable;
+}
+
+fn renderInternal(w: *std.Io.Writer, registry: Registry) !void {
     try w.writeAll(
         \\const internal = struct {
-        \\inline fn table(handle: *const anyopaque) [*]const *const anyopaque {
-        \\    return @as(*const [*]const *const anyopaque, @ptrCast(@alignCast(handle))).*;
-        \\}
-        \\
-        \\
-    );
+        \\    inline fn table(handle: *const anyopaque) [*]const *const anyopaque {
+        \\        return @as(*const [*]const *const anyopaque, @ptrCast(@alignCast(handle))).*;
+        \\    }
+    ++ "\n\n");
 
     for (registry.functions) |function| {
         if (function.dispatch != .symbol) continue;
@@ -336,9 +337,8 @@ fn renderMinimalBindings(w: *std.Io.Writer, registry: Registry) !void {
         try renderFnType(w, registry, function.params, function.return_type);
         try w.writeAll(" = null;\n");
     }
-    try w.writeAll("\n");
 
-    try w.writeAll("var slots: struct {\n");
+    try w.writeAll("\nvar slots: struct {\n");
     for (registry.functions) |function| {
         if (function.dispatch != .table) continue;
         try renderSnakeName(w, registry, function.name);
@@ -347,7 +347,7 @@ fn renderMinimalBindings(w: *std.Io.Writer, registry: Registry) !void {
     try w.writeAll("} = .{};\n\n");
 
     try w.writeAll("fn loadGlobals(getSymbol: ");
-    try renderTypeName(w, registry, registry.declName(registry.symbol));
+    try renderType(w, registry, registry.get_symbol_type);
     try w.writeAll(") void {\n");
     for (registry.functions) |function| {
         if (function.dispatch != .symbol) continue;
@@ -356,164 +356,230 @@ fn renderMinimalBindings(w: *std.Io.Writer, registry: Registry) !void {
     }
     try w.writeAll("}\n\n");
 
-    try w.writeAll("fn loadSlots(instance: *Instance) void {\n");
+    const create_instance = functionWithRole(registry, .create_instance);
+    const get_slot = functionWithRole(registry, .get_slot);
+
+    try w.writeAll("fn loadSlots(instance: ");
+    try renderType(w, registry, create_instance.return_type);
+    try w.writeAll(") void {\n");
     for (registry.functions) |function| {
         if (function.dispatch != .table) continue;
         try w.writeAll("slots.");
         try renderSnakeName(w, registry, function.name);
         try w.writeAll(" = ");
-        try renderSnakeName(w, registry, registry.function(registry.get_slot).name);
+        try renderSnakeName(w, registry, get_slot.name);
         try w.print(".?(instance, \"{s}\");\n", .{function.name});
     }
-    try w.writeAll("}\n};\n\n");
+    try w.writeAll("}\n};\n");
+}
 
+fn renderSymbolMap(
+    w: *std.Io.Writer,
+    arena: std.mem.Allocator,
+    registry: Registry,
+    dispatch: Registry.Function.Dispatch,
+) !void {
+    try renderHeader(w, registry);
+    try w.writeAll(
+        \\const std = @import("std");
+        \\const sf = @import("sf_minimal.zig");
+    ++ "\n\n");
+
+    const handle_used = try arena.alloc(bool, registry.opaques.len);
+    @memset(handle_used, false);
     for (registry.functions) |function| {
-        if (std.mem.eql(u8, function.name, registry.function(registry.get_slot).name)) continue;
-        try renderDoc(w, function.doc);
+        if (function.dispatch != dispatch) continue;
+        markHandle(handle_used, function.return_type);
+        for (function.params) |param| markHandle(handle_used, param.type);
+    }
 
-        const is_create_instance = std.mem.eql(u8, function.name, registry.function(registry.create_instance).name);
+    try w.writeAll("const HandleTypes = struct {\n");
+    for (registry.opaques, handle_used) |@"opaque", used| {
+        if (!used) continue;
+        try renderTypeName(w, registry, @"opaque".name);
+        try w.writeAll(": type,\n");
+    }
+    try w.writeAll("};\n\n");
 
+    const qualifier: TypeQualifier = .{ .decl = "sf.", .handle = "handle_types." };
+
+    try w.writeAll("fn Functions(handle_types: HandleTypes) type {\nreturn struct {\n");
+    for (registry.functions) |function| {
+        if (function.dispatch != dispatch) continue;
+        try renderFnName(w, registry, function.name);
+        try w.writeAll(": fn (");
+        try renderParams(w, registry, function.params, qualifier);
+        try w.writeAll(") ");
+        if (function.errors.len != 0) {
+            try renderErrorSet(w, registry, function.errors);
+            try w.writeAll("!void");
+        } else {
+            try renderQualifiedType(w, registry, function.return_type, qualifier);
+        }
+        try w.writeAll(",\n");
+    }
+    try w.writeAll("};\n}\n\n");
+
+    const result_enum = registry.resultEnum();
+    try w.writeAll("const Error = ");
+    try renderErrorSet(w, registry, resultErrors(registry));
+    try w.writeAll(";\n\n");
+
+    try w.writeAll("fn cResult(result: anytype) sf.");
+    try renderTypeName(w, registry, result_enum.name);
+    try w.writeAll(" {\nif (result) return .");
+    try renderMemberName(w, registry, result_enum.name, resultOk(registry).name);
+    try w.writeAll(" else |err| return switch (@as(Error, err)) {\n");
+    for (resultErrors(registry)) |@"error"| {
+        try w.writeAll("error.");
+        try renderErrorName(w, registry, @"error");
+        try w.writeAll(" => .");
+        try renderMemberName(w, registry, result_enum.name, @"error".name);
+        try w.writeAll(",\n");
+    }
+    try w.writeAll("};\n}\n\n");
+
+    try w.writeAll("fn CFunctions(comptime handle_types: HandleTypes, comptime functions: Functions(handle_types)) type {\nreturn struct {\n");
+    for (registry.functions) |function| {
+        if (function.dispatch != dispatch) continue;
         try w.writeAll("pub fn ");
         try renderFnName(w, registry, function.name);
         try w.writeByte('(');
-        try renderParams(w, registry, function.params);
-        if (is_create_instance) {
-            if (function.params.len != 0) try w.writeAll(", ");
-            try w.writeAll("getSymbol: ");
-            try renderTypeName(w, registry, registry.declName(registry.symbol));
+        try renderParams(w, registry, function.params, qualifier);
+        try w.writeAll(") callconv(sf.@\"callconv\") ");
+        try renderQualifiedType(w, registry, function.return_type, qualifier);
+        try w.writeAll(" {\nreturn ");
+
+        const converts_errors = function.errors.len != 0;
+        if (converts_errors) try w.writeAll("cResult(");
+        try w.writeAll("functions.");
+        try renderFnName(w, registry, function.name);
+        try w.writeByte('(');
+        for (function.params) |param| {
+            try renderId(w, param.name);
+            try w.writeAll(", ");
         }
-        try w.writeAll(") ");
-        try renderType(w, registry, function.return_type);
-        try w.writeAll(" {\n");
-
-        if (is_create_instance) try w.writeAll("internal.loadGlobals(getSymbol);\n");
-
-        switch (function.dispatch) {
-            .symbol => {
-                try w.writeAll("const f = internal.");
-                try renderSnakeName(w, registry, function.name);
-                try w.writeAll(".?;\n");
-            },
-            .table => {
-                try w.writeAll("const f: ");
-                try renderFnType(w, registry, function.params, function.return_type);
-                try w.writeAll(" = @ptrCast(internal.table(");
-                try renderId(w, function.params[0].name);
-                try w.writeAll(")[internal.slots.");
-                try renderSnakeName(w, registry, function.name);
-                try w.writeAll("]);\n");
-            },
-        }
-
-        if (is_create_instance) {
-            try w.writeAll("const instance = f(");
-            try renderArgs(w, function.params);
-            try w.writeAll(");\ninternal.loadSlots(instance);\nreturn instance;\n");
-        } else {
-            try w.writeAll("return f(");
-            try renderArgs(w, function.params);
-            try w.writeAll(");\n");
-        }
-
-        try w.writeAll("}\n\n");
+        try w.writeByte(')');
+        if (converts_errors) try w.writeByte(')');
+        try w.writeAll(";\n}\n\n");
     }
+    try w.writeAll("};\n}\n\n");
+
+    try w.writeAll(
+        \\pub fn map(
+        \\    comptime handle_types: HandleTypes,
+        \\    comptime functions: Functions(handle_types),
+        \\) std.StaticStringMap(*const anyopaque) {
+        \\    const c_functions = CFunctions(handle_types, functions);
+        \\    return .initComptime(@as([]const struct { []const u8, *const anyopaque }, &.{
+        \\
+    );
+    for (registry.functions) |function| {
+        if (function.dispatch != dispatch) continue;
+        try w.print(".{{ \"{s}\", @ptrCast(&c_functions.", .{function.name});
+        try renderFnName(w, registry, function.name);
+        try w.writeAll(") },\n");
+    }
+    try w.writeAll("}));\n}\n");
 }
 
-fn renderDeclStart(w: *std.Io.Writer, registry: Registry, doc: []const u8, name: []const u8) !void {
+fn markHandle(handle_used: []bool, @"type": Registry.Type) void {
+    if (@"type".base == .@"opaque") handle_used[@intFromEnum(@"type".base.@"opaque")] = true;
+}
+
+fn renderDeclStart(
+    w: *std.Io.Writer,
+    registry: Registry,
+    doc: []const u8,
+    name: []const u8,
+) !void {
     try renderDoc(w, doc);
     try w.writeAll("pub const ");
     try renderTypeName(w, registry, name);
     try w.writeAll(" = ");
 }
 
-fn renderParams(w: *std.Io.Writer, registry: Registry, params: []const Registry.Param) !void {
-    for (params, 0..) |param, i| {
-        if (i != 0) try w.writeAll(", ");
-        try renderId(w, param.name);
-        try w.writeAll(": ");
-        try renderType(w, registry, param.type);
+fn renderFlags(
+    w: *std.Io.Writer,
+    registry: Registry,
+    flags: Registry.Flags,
+) !void {
+    try renderDeclStart(w, registry, flags.doc, flags.name);
+    try w.writeAll("packed struct(");
+    try renderBuiltinType(w, flags.backing);
+    try w.writeAll(") {\n");
+
+    var bit_count: u16 = 0;
+    for (flags.bits) |bit| bit_count = @max(bit_count, bit.bit + 1);
+
+    for (0..bit_count) |position| {
+        const bit = for (flags.bits) |bit| {
+            if (bit.bit == position) break bit;
+        } else {
+            try w.print("reserved_{d}: bool = false,\n", .{position});
+            continue;
+        };
+        try renderDoc(w, bit.doc);
+        try renderMemberName(w, registry, flags.name, bit.name);
+        try w.writeAll(": bool = false,\n");
     }
-}
 
-fn renderArgs(w: *std.Io.Writer, params: []const Registry.Param) !void {
-    for (params, 0..) |param, i| {
-        if (i != 0) try w.writeAll(", ");
-        try renderId(w, param.name);
-    }
-}
-
-fn renderType(w: *std.Io.Writer, registry: Registry, @"type": Registry.Type) !void {
-    try renderTypePrefix(w, registry, @"type", "");
-}
-
-fn renderTypePrefix(w: *std.Io.Writer, registry: Registry, @"type": Registry.Type, prefix: []const u8) !void {
-    if (@"type".array) |array| switch (array) {
-        .int => |n| try w.print("[{d}]", .{n}),
-        .constant => |c| {
-            try w.writeByte('[');
-            try renderConstName(w, registry, registry.constant(c).name);
-            try w.writeByte(']');
-        },
+    const width: u16 = switch (flags.backing) {
+        .uint8_t, .int8_t => 8,
+        .uint16_t, .int16_t => 16,
+        .uint32_t, .int32_t => 32,
+        .uint64_t, .int64_t => 64,
+        else => return error.UnsupportedRegistry,
     };
+    if (bit_count < width) try w.print("padding: u{d} = 0,\n", .{width - bit_count});
 
-    var i = @"type".ptrs.len;
-    while (i > 0) {
-        i -= 1;
-        const ptr = @"type".ptrs[i];
-        if (ptr.optional) try w.writeByte('?');
-        try w.writeAll(switch (ptr.size) {
-            .null_terminated => "[*:0]",
-            .many, .sized_by_arg => "[*]",
-            .one => "*",
-        });
-        if (ptr.@"const") try w.writeAll("const ");
+    for (flags.combinations) |combination| {
+        try w.writeByte('\n');
+        try renderDoc(w, combination.doc);
+        try w.writeAll("pub const ");
+        try renderMemberName(w, registry, flags.name, combination.name);
+        try w.writeAll(": ");
+        try renderTypeName(w, registry, flags.name);
+        try w.writeAll(" = .{");
+        for (combination.bits) |bit_index| {
+            try w.writeAll(" .");
+            try renderMemberName(w, registry, flags.name, flags.bits[bit_index].name);
+            try w.writeAll(" = true,");
+        }
+        try w.writeAll(" };\n");
     }
 
-    if (@"type".base != .builtin) try w.writeAll(prefix);
-
-    if (@"type".ptrs.len != 0 and @"type".base == .builtin and @"type".base.builtin == .void) {
-        try w.writeAll("anyopaque");
-    } else {
-        try renderTypeBase(w, registry, @"type".base);
-    }
+    try w.writeAll("};\n\n");
 }
 
-fn renderFnType(w: *std.Io.Writer, registry: Registry, params: []const Registry.Param, return_type: Registry.Type) !void {
-    try w.writeAll("*const fn (");
-    try renderParams(w, registry, params);
-    try w.writeAll(") callconv(@\"callconv\") ");
-    try renderType(w, registry, return_type);
-}
-
-fn renderDefault(w: *std.Io.Writer, registry: Registry, @"type": Registry.Type, value: Registry.Default) !void {
-    switch (value) {
+fn renderDefault(
+    w: *std.Io.Writer,
+    registry: Registry,
+    @"type": Registry.Type,
+    default: Registry.Default,
+) !void {
+    switch (default) {
         .enum_value => |enum_value| {
+            const @"enum" = registry.enums[@intFromEnum(enum_value.@"enum")];
             try w.writeByte('.');
-            const @"enum" = registry.@"enum"(enum_value.@"enum");
-            const name = @"enum".values[enum_value.value].name;
-            try renderMemberName(w, registry, @"enum".name, name);
+            try renderMemberName(w, registry, @"enum".name, @"enum".values[enum_value.value].name);
         },
         .raw => |raw| {
             if (@"type".ptrs.len != 0) return w.writeAll("null");
 
             if (@"type".array != null) {
-                var element = @"type";
-                element.array = null;
-
-                if (raw[0] != '{') {
-                    try w.writeAll("@splat(");
-                    try renderDefault(w, registry, element, value);
-                    try w.writeAll(")");
-                    return;
-                }
-
-                return error.UnsupportedRegistry;
+                if (raw[0] == '{') return error.UnsupportedRegistry;
+                var element_type = @"type";
+                element_type.array = null;
+                try w.writeAll("@splat(");
+                try renderDefault(w, registry, element_type, default);
+                return w.writeAll(")");
             }
 
-            for (registry.flags) |flags| {
-                if (!std.mem.eql(u8, flags.name, registry.declName(@"type".base))) continue;
+            if (@"type".base == .flags) {
                 if (std.mem.eql(u8, raw, "0")) return w.writeAll(".{}");
 
+                const flags = registry.flags[@intFromEnum(@"type".base.flags)];
                 for (flags.combinations) |combination| {
                     if (!std.mem.eql(u8, combination.name, raw)) continue;
                     try w.writeByte('.');
@@ -521,17 +587,16 @@ fn renderDefault(w: *std.Io.Writer, registry: Registry, @"type": Registry.Type, 
                 }
 
                 try w.writeAll(".{");
-                var it = std.mem.splitScalar(u8, raw, '|');
-                while (it.next()) |bit| {
+                var bit_names = std.mem.splitScalar(u8, raw, '|');
+                while (bit_names.next()) |bit_name| {
                     try w.writeAll(" .");
-                    try renderMemberName(w, registry, flags.name, std.mem.trim(u8, bit, " \t"));
+                    try renderMemberName(w, registry, flags.name, std.mem.trim(u8, bit_name, " \t"));
                     try w.writeAll(" = true,");
                 }
-                return w.writeAll(" }");
+                try w.writeAll(" }");
             }
 
             if (std.mem.startsWith(u8, raw, registry.enum_prefix)) return renderConstName(w, registry, raw);
-
             try w.writeAll(raw);
         },
     }
@@ -541,14 +606,60 @@ fn renderDoc(w: *std.Io.Writer, doc: []const u8) !void {
     const trimmed = std.mem.trim(u8, doc, " \t\r\n");
     if (trimmed.len == 0) return;
 
-    var it = std.mem.splitScalar(u8, trimmed, '\n');
-    while (it.next()) |line| try w.print("/// {s}\n", .{std.mem.trim(u8, line, " \t\r")});
+    var lines = std.mem.splitScalar(u8, trimmed, '\n');
+    while (lines.next()) |line| try w.print("/// {s}\n", .{std.mem.trim(u8, line, " \t\r")});
 }
 
-fn renderTypeBase(w: *std.Io.Writer, registry: Registry, type_ref: Registry.TypeBase) !void {
-    switch (type_ref) {
-        .builtin => |builtin| try renderBuiltinType(w, builtin),
-        else => try renderTypeName(w, registry, registry.declName(type_ref)),
+const TypeQualifier = struct {
+    decl: []const u8 = "",
+    handle: []const u8 = "",
+};
+
+fn renderType(w: *std.Io.Writer, registry: Registry, @"type": Registry.Type) !void {
+    try renderQualifiedType(w, registry, @"type", .{});
+}
+
+fn renderQualifiedType(
+    w: *std.Io.Writer,
+    registry: Registry,
+    @"type": Registry.Type,
+    qualifier: TypeQualifier,
+) !void {
+    if (@"type".array) |array| switch (array) {
+        .int => |length| try w.print("[{d}]", .{length}),
+        .constant => |constant_index| {
+            try w.writeByte('[');
+            try renderConstName(w, registry, registry.constants[@intFromEnum(constant_index)].name);
+            try w.writeByte(']');
+        },
+    };
+
+    var index = @"type".ptrs.len;
+    while (index > 0) {
+        index -= 1;
+        const pointer = @"type".ptrs[index];
+        if (pointer.optional) try w.writeByte('?');
+        try w.writeAll(switch (pointer.size) {
+            .one => "*",
+            .many, .sized_by_arg => "[*]",
+            .null_terminated => "[*:0]",
+        });
+        if (pointer.@"const") try w.writeAll("const ");
+    }
+
+    switch (@"type".base) {
+        .builtin => |builtin| {
+            if (@"type".ptrs.len != 0 and builtin == .void) return w.writeAll("anyopaque");
+            try renderBuiltinType(w, builtin);
+        },
+        .@"opaque" => {
+            try w.writeAll(qualifier.handle);
+            try renderTypeName(w, registry, registry.declName(@"type".base));
+        },
+        else => {
+            try w.writeAll(qualifier.decl);
+            try renderTypeName(w, registry, registry.declName(@"type".base));
+        },
     }
 }
 
@@ -571,44 +682,100 @@ fn renderBuiltinType(w: *std.Io.Writer, builtin: Registry.Builtin) !void {
     });
 }
 
-fn renderTypeName(w: *std.Io.Writer, registry: Registry, type_name: []const u8) !void {
-    try w.writeAll(stripPrefix(type_name, registry.type_prefix));
+fn renderFnType(
+    w: *std.Io.Writer,
+    registry: Registry,
+    params: []const Registry.Param,
+    return_type: Registry.Type,
+) !void {
+    try w.writeAll("*const fn (");
+    try renderParams(w, registry, params, .{});
+    try w.writeAll(") callconv(@\"callconv\") ");
+    try renderType(w, registry, return_type);
+}
+
+fn renderParams(
+    w: *std.Io.Writer,
+    registry: Registry,
+    params: []const Registry.Param,
+    qualifier: TypeQualifier,
+) !void {
+    for (params) |param| {
+        try renderId(w, param.name);
+        try w.writeAll(": ");
+        try renderQualifiedType(w, registry, param.type, qualifier);
+        try w.writeAll(", ");
+    }
+}
+
+fn renderTypeName(w: *std.Io.Writer, registry: Registry, name: []const u8) !void {
+    try w.writeAll(stripPrefix(name, registry.type_prefix));
 }
 
 fn renderFnName(w: *std.Io.Writer, registry: Registry, name: []const u8) !void {
     const stripped = stripPrefix(name, registry.fn_prefix);
-    try w.writeByte(std.ascii.toLower(stripped[0]));
-    try renderId(w, stripped[1..]);
+    var buffer: [256]u8 = undefined;
+    const camel = buffer[0..stripped.len];
+    @memcpy(camel, stripped);
+    camel[0] = std.ascii.toLower(camel[0]);
+    try renderId(w, camel);
 }
 
 fn renderSnakeName(w: *std.Io.Writer, registry: Registry, name: []const u8) !void {
-    var buf: [256]u8 = undefined;
-    const screaming = screamingCase(stripPrefix(name, registry.fn_prefix), &buf);
-    try renderLowerIdent(w, screaming);
+    var buffer: [256]u8 = undefined;
+    try renderLowerIdent(w, screamingCase(stripPrefix(name, registry.fn_prefix), &buffer));
 }
 
 fn renderConstName(w: *std.Io.Writer, registry: Registry, name: []const u8) !void {
     try renderLowerIdent(w, stripPrefix(name, registry.enum_prefix));
 }
 
-fn renderMemberName(w: *std.Io.Writer, registry: Registry, owner: []const u8, name: []const u8) !void {
-    var buf: [256]u8 = undefined;
-    const screaming = screamingCase(owner, &buf);
+fn renderMemberName(
+    w: *std.Io.Writer,
+    registry: Registry,
+    owner_type_name: []const u8,
+    member_name: []const u8,
+) !void {
+    var buffer: [256]u8 = undefined;
+    try renderLowerIdent(w, memberSuffix(registry, owner_type_name, member_name, &buffer));
+}
 
-    var rest = if (std.mem.startsWith(u8, name, screaming))
-        name[screaming.len..]
+fn renderErrorName(w: *std.Io.Writer, registry: Registry, value: Registry.Enum.Value) !void {
+    var buffer: [256]u8 = undefined;
+    const suffix = memberSuffix(registry, registry.resultEnum().name, value.name, &buffer);
+
+    var at_word_start = true;
+    for (suffix) |char| {
+        if (char == '_') {
+            at_word_start = true;
+            continue;
+        }
+        try w.writeByte(if (at_word_start) std.ascii.toUpper(char) else std.ascii.toLower(char));
+        at_word_start = false;
+    }
+}
+
+fn memberSuffix(
+    registry: Registry,
+    owner_type_name: []const u8,
+    member_name: []const u8,
+    buffer: []u8,
+) []const u8 {
+    const owner_screaming = screamingCase(owner_type_name, buffer);
+
+    var suffix = if (std.mem.startsWith(u8, member_name, owner_screaming))
+        member_name[owner_screaming.len..]
     else
-        stripPrefix(name, registry.enum_prefix);
+        stripPrefix(member_name, registry.enum_prefix);
 
-    rest = std.mem.trimStart(u8, rest, "_");
-    if (std.mem.endsWith(u8, rest, "_BIT")) rest = rest[0 .. rest.len - 4];
-
-    try renderLowerIdent(w, rest);
+    suffix = std.mem.trimStart(u8, suffix, "_");
+    if (std.mem.endsWith(u8, suffix, "_BIT")) suffix = suffix[0 .. suffix.len - "_BIT".len];
+    return suffix;
 }
 
 fn renderLowerIdent(w: *std.Io.Writer, name: []const u8) !void {
-    var buf: [256]u8 = undefined;
-    try renderId(w, std.ascii.lowerString(buf[0..name.len], name));
+    var buffer: [256]u8 = undefined;
+    try renderId(w, std.ascii.lowerString(buffer[0..name.len], name));
 }
 
 fn renderId(w: *std.Io.Writer, name: []const u8) !void {
@@ -621,38 +788,16 @@ fn stripPrefix(name: []const u8, prefix: []const u8) []const u8 {
     return name;
 }
 
-fn screamingCase(name: []const u8, buf: []u8) []const u8 {
-    var len: usize = 0;
-    for (name, 0..) |c, i| {
-        if (i != 0 and std.ascii.isUpper(c) and !std.ascii.isUpper(name[i - 1])) {
-            buf[len] = '_';
-            len += 1;
+fn screamingCase(name: []const u8, buffer: []u8) []const u8 {
+    var length: usize = 0;
+    for (name, 0..) |char, index| {
+        const starts_word = index != 0 and std.ascii.isUpper(char) and !std.ascii.isUpper(name[index - 1]);
+        if (starts_word) {
+            buffer[length] = '_';
+            length += 1;
         }
-        buf[len] = std.ascii.toUpper(c);
-        len += 1;
+        buffer[length] = std.ascii.toUpper(char);
+        length += 1;
     }
-    return buf[0..len];
-}
-
-fn renderErrorName(w: *std.Io.Writer, name: []const u8) !void {
-    const prefix = "SF_RESULT_";
-    const stripped_name = stripPrefix(name, prefix);
-    for (stripped_name, 0..) |char, i| {
-        if (char == '_') continue;
-        if (i == 0 or stripped_name[i - 1] == '_') {
-            try w.writeByte(char);
-        } else {
-            try w.writeByte(std.ascii.toLower(char));
-        }
-    }
-}
-
-fn backingBitWidth(backing: Registry.Builtin) !u16 {
-    return switch (backing) {
-        .uint8_t, .int8_t => 8,
-        .uint16_t, .int16_t => 16,
-        .uint32_t, .int32_t => 32,
-        .uint64_t, .int64_t => 64,
-        else => error.UnsupportedRegistry,
-    };
+    return buffer[0..length];
 }

@@ -5,6 +5,7 @@
   "type_prefix": "Sf",
   "enum_prefix": "SF_",
 
+  "result": "SfResult",
   "symbol": "SfSymbol",
   
   "get_slot": "sfGetSlot",
