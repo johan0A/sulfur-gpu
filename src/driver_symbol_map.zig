@@ -2,7 +2,7 @@
 // version: 0.1.0
 
 const std = @import("std");
-const sf = @import("sf_bindings.zig");
+const sf = @import("sf_minimal.zig");
 
 const HandleTypes = struct {
     Surface: type,

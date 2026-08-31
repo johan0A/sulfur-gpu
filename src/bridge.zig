@@ -1,5 +1,5 @@
 const std = @import("std");
-const gpu = @import("sf_bindings.zig");
+const gpu = @import("sf_minimal.zig");
 const sampler_desc = @import("sampler_desc.zig");
 const vk = @import("vulkan");
 

@@ -2,7 +2,7 @@ const std = @import("std");
 const Registry = @import("registry.zig").Registry;
 
 const Command = enum {
-    bindings,
+    bindings_minimal,
     driver_symbol_map,
     loader_symbol_map,
 };
@@ -24,7 +24,7 @@ pub fn main(init: std.process.Init) !void {
 
     var writer_impl: std.Io.Writer.Allocating = .init(arena);
     switch (command) {
-        .bindings => try renderBinding(&writer_impl.writer, registry),
+        .bindings_minimal => try renderMinimalBindings(&writer_impl.writer, registry),
         .driver_symbol_map => try renderSymbolMap(arena, &writer_impl.writer, registry, .driver),
         .loader_symbol_map => try renderSymbolMap(arena, &writer_impl.writer, registry, .loader),
     }
@@ -53,7 +53,7 @@ fn renderSymbolMap(
         \\// version: {s}
         \\
         \\const std = @import("std");
-        \\const sf = @import("sf_bindings.zig");
+        \\const sf = @import("sf_minimal.zig");
         \\
         \\
     , .{registry.version});
@@ -201,7 +201,7 @@ fn renderSymbolMap(
     try w.writeAll("}));}\n");
 }
 
-fn renderBinding(w: *std.Io.Writer, registry: Registry) !void {
+fn renderMinimalBindings(w: *std.Io.Writer, registry: Registry) !void {
     try w.print(
         \\// Generated file, do not edit.
         \\// version: {s}

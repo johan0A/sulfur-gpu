@@ -1,5 +1,5 @@
 const std = @import("std");
-const gpu = @import("sf_bindings.zig");
+const gpu = @import("sf_minimal.zig");
 const impl = @import("vulkan_implementation.zig");
 const symbol_map = @import("loader_symbol_map.zig");
 

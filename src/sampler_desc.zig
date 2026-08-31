@@ -1,4 +1,4 @@
-const gpu = @import("sf_bindings.zig");
+const gpu = @import("sf_minimal.zig");
 
 pub const CompareOp = enum(u3) {
     never = 0,

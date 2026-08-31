@@ -1,6 +1,6 @@
 const std = @import("std");
 const build_options = @import("options");
-const gpu = @import("sf_bindings.zig");
+const gpu = @import("sf_minimal.zig");
 const to_gpu = @import("bridge.zig").to_gpu;
 const to_vk = @import("bridge.zig").to_vk;
 const sfir = @import("sfir.zig");
