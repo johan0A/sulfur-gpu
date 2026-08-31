@@ -28,7 +28,7 @@ fn Functions(handle_types: HandleTypes) type {
         free: fn (device: *handle_types.Device, address: sf.DeviceAddress) void,
         descriptorSizeAndHeapAlign: fn (device: *handle_types.Device) sf.SizeAndAlign,
         storeDescriptor: fn (device: *handle_types.Device, descriptor: *const sf.Descriptor, heap: [*]u8, index: usize) void,
-        createQueue: fn (device: *handle_types.Device, queue_type: sf.QueueType) *handle_types.Queue,
+        getQueue: fn (device: *handle_types.Device, queue_type: sf.QueueType) *handle_types.Queue,
         startCommandRecording: fn (queue: *handle_types.Queue, command_buffer: **handle_types.CommandBuffer) error{ OutOfMemory, OutOfDeviceMemory, Unknown }!void,
         submit: fn (queue: *handle_types.Queue, command_buffer_count: usize, command_buffers: [*]const *handle_types.CommandBuffer) error{ OutOfDeviceMemory, OutOfMemory, DeviceLost, Unknown }!void,
         submitAndSignal: fn (queue: *handle_types.Queue, command_buffer_count: usize, command_buffers: [*]const *handle_types.CommandBuffer, signal_semaphore: *handle_types.Semaphore, signal_value: u64) error{ OutOfDeviceMemory, OutOfMemory, DeviceLost, Unknown }!void,
@@ -115,8 +115,8 @@ fn CFunctions(comptime handle_types: HandleTypes, comptime functions: Functions(
         pub fn storeDescriptor(device: *handle_types.Device, descriptor: *const sf.Descriptor, heap: [*]u8, index: usize) callconv(sf.@"callconv") void {
             return functions.storeDescriptor(device, descriptor, heap, index);
         }
-        pub fn createQueue(device: *handle_types.Device, queue_type: sf.QueueType) callconv(sf.@"callconv") *handle_types.Queue {
-            return functions.createQueue(device, queue_type);
+        pub fn getQueue(device: *handle_types.Device, queue_type: sf.QueueType) callconv(sf.@"callconv") *handle_types.Queue {
+            return functions.getQueue(device, queue_type);
         }
         pub fn startCommandRecording(queue: *handle_types.Queue, command_buffer: **handle_types.CommandBuffer) callconv(sf.@"callconv") sf.Result {
             return cResult(functions.startCommandRecording(queue, command_buffer));
@@ -228,7 +228,7 @@ pub fn map(
         .{ "sfFree", @ptrCast(&c_functions.free) },
         .{ "sfDescriptorSizeAndHeapAlign", @ptrCast(&c_functions.descriptorSizeAndHeapAlign) },
         .{ "sfStoreDescriptor", @ptrCast(&c_functions.storeDescriptor) },
-        .{ "sfCreateQueue", @ptrCast(&c_functions.createQueue) },
+        .{ "sfGetQueue", @ptrCast(&c_functions.getQueue) },
         .{ "sfStartCommandRecording", @ptrCast(&c_functions.startCommandRecording) },
         .{ "sfSubmit", @ptrCast(&c_functions.submit) },
         .{ "sfSubmitAndSignal", @ptrCast(&c_functions.submitAndSignal) },

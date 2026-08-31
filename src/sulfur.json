@@ -774,7 +774,7 @@
       "doc": ""
     },
     {
-      "name": "sfCreateQueue",
+      "name": "sfGetQueue",
       "group": "SfQueue",
       "dispatch": "table",
       "return": { "base": "SfQueue", "ptr": [{}] },

@@ -771,7 +771,7 @@ pub const Queue = struct {
     queue_type: gpu.QueueType,
     d: *Device,
 
-    pub fn sfCreateQueue(d: *Header(Device), queue_type: gpu.QueueType) *Header(Queue) {
+    pub fn sfGetQueue(d: *Header(Device), queue_type: gpu.QueueType) *Header(Queue) {
         return create(d.body(), queue_type);
     }
     fn create(d: *Device, queue_type: gpu.QueueType) *Header(Queue) {
@@ -2612,7 +2612,7 @@ pub fn sfSymbol(name: [*:0]const u8) callconv(gpu.@"callconv") *const anyopaque 
         .free = heap.sfFree,
         .descriptorSizeAndHeapAlign = Texture.Descriptor.sfDescriptorSizeAndHeapAlign,
         .storeDescriptor = Texture.Descriptor.sfStoreDescriptor,
-        .createQueue = Queue.sfCreateQueue,
+        .getQueue = Queue.sfGetQueue,
         .startCommandRecording = Queue.sfStartCommandRecording,
         .submit = Queue.sfSubmit,
         .submitAndSignal = Queue.sfSubmitAndSignal,

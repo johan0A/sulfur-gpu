@@ -14,7 +14,7 @@ pub fn main(init: std.process.Init) !void {
     const device: *gpu.Device = gpu.createDevice(instance, adapter);
     defer gpu.destroyDevice(device);
 
-    const queue: *gpu.Queue = gpu.createQueue(device, .graphics);
+    const queue: *gpu.Queue = gpu.getQueue(device, .graphics);
 
     const dimensions: [3]u32 = .{ 256, 256, 1 };
     const texture_info: gpu.TextureDesc = .{

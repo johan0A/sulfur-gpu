@@ -17,7 +17,7 @@ pub fn main(init: std.process.Init) !void {
     const device: *gpu.Device = gpu.createDevice(instance, adapter);
     defer gpu.destroyDevice(device);
 
-    const queue: *gpu.Queue = gpu.createQueue(device, .graphics);
+    const queue: *gpu.Queue = gpu.getQueue(device, .graphics);
 
     const props = c.SDL_GetWindowProperties(window);
     const surface = switch (target.os.tag) {

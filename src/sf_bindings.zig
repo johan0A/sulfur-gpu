@@ -412,7 +412,7 @@ const internal = struct {
         free: usize = 0,
         descriptor_size_and_heap_align: usize = 0,
         store_descriptor: usize = 0,
-        create_queue: usize = 0,
+        get_queue: usize = 0,
         start_command_recording: usize = 0,
         submit: usize = 0,
         submit_and_signal: usize = 0,
@@ -466,7 +466,7 @@ const internal = struct {
         slots.free = get_slot.?(instance, "sfFree");
         slots.descriptor_size_and_heap_align = get_slot.?(instance, "sfDescriptorSizeAndHeapAlign");
         slots.store_descriptor = get_slot.?(instance, "sfStoreDescriptor");
-        slots.create_queue = get_slot.?(instance, "sfCreateQueue");
+        slots.get_queue = get_slot.?(instance, "sfGetQueue");
         slots.start_command_recording = get_slot.?(instance, "sfStartCommandRecording");
         slots.submit = get_slot.?(instance, "sfSubmit");
         slots.submit_and_signal = get_slot.?(instance, "sfSubmitAndSignal");
@@ -583,8 +583,8 @@ pub fn storeDescriptor(device: *Device, descriptor: *const Descriptor, heap: [*]
     return f(device, descriptor, heap, index);
 }
 
-pub fn createQueue(device: *Device, queue_type: QueueType) *Queue {
-    const f: *const fn (device: *Device, queue_type: QueueType) callconv(@"callconv") *Queue = @ptrCast(internal.table(device)[internal.slots.create_queue]);
+pub fn getQueue(device: *Device, queue_type: QueueType) *Queue {
+    const f: *const fn (device: *Device, queue_type: QueueType) callconv(@"callconv") *Queue = @ptrCast(internal.table(device)[internal.slots.get_queue]);
     return f(device, queue_type);
 }
 
