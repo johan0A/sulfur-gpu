@@ -128,7 +128,7 @@
     {
       "name": "SfDepthAttachment",
       "fields": [
-        { "name": "texture", "type": { "base": "SfTexture", "ptr": [{ "const": true, "optional": true }] }, "default": "NULL", "doc": "" },
+        { "name": "texture", "type": { "base": "SfTexture", "ptr": [{ "optional": true }] }, "default": "NULL", "doc": "" },
         { "name": "load_op", "type": { "base": "SfLoadOp" }, "default": "SF_LOAD_OP_LOAD", "doc": "" },
         { "name": "store_op", "type": { "base": "SfStoreOp" }, "default": "SF_STORE_OP_STORE", "doc": "" },
         { "name": "clear_value", "type": { "base": "float" }, "default": "1.0", "doc": "" }
@@ -138,7 +138,7 @@
     {
       "name": "SfStencilAttachment",
       "fields": [
-        { "name": "texture", "type": { "base": "SfTexture", "ptr": [{ "const": true, "optional": true }] }, "default": "NULL", "doc": "" },
+        { "name": "texture", "type": { "base": "SfTexture", "ptr": [{ "optional": true }] }, "default": "NULL", "doc": "" },
         { "name": "load_op", "type": { "base": "SfLoadOp" }, "default": "SF_LOAD_OP_LOAD", "doc": "" },
         { "name": "store_op", "type": { "base": "SfStoreOp" }, "default": "SF_STORE_OP_STORE", "doc": "" },
         { "name": "clear_value", "type": { "base": "uint32_t" }, "default": "0", "doc": "" }
@@ -148,7 +148,7 @@
     {
       "name": "SfColorAttachment",
       "fields": [
-        { "name": "texture", "type": { "base": "SfTexture", "ptr": [{ "const": true }] }, "doc": "" },
+        { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" },
         { "name": "load_op", "type": { "base": "SfLoadOp" }, "default": "SF_LOAD_OP_LOAD", "doc": "" },
         { "name": "store_op", "type": { "base": "SfStoreOp" }, "default": "SF_STORE_OP_STORE", "doc": "" },
         { "name": "clear_color", "type": { "base": "float", "array": 4 }, "default": "0.0", "doc": "" }

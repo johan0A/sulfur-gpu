@@ -1588,9 +1588,9 @@ pub const CommandBuffer = struct {
 
         var color_attachments: [8]vk.RenderingAttachmentInfo = undefined;
         for (color_targets, 0..) |t, i| {
-            const texture: *const Texture = @ptrCast(@alignCast(t.texture));
+            const texture: *Header(Texture) = @ptrCast(@alignCast(t.texture));
             color_attachments[i] = .{
-                .image_view = texture.default_view,
+                .image_view = texture.body().default_view,
                 .image_layout = .general,
                 .resolve_mode = .{},
                 .resolve_image_view = .null_handle,
@@ -1603,9 +1603,9 @@ pub const CommandBuffer = struct {
 
         var depth_attachment: vk.RenderingAttachmentInfo = undefined;
         if (desc.depth_attachment.texture) |t| {
-            const texture: *const Texture = @ptrCast(@alignCast(t));
+            const texture: *Header(Texture) = @ptrCast(@alignCast(t));
             depth_attachment = .{
-                .image_view = texture.default_view,
+                .image_view = texture.body().default_view,
                 .image_layout = .general,
                 .resolve_mode = .{},
                 .resolve_image_view = .null_handle,
@@ -1618,9 +1618,9 @@ pub const CommandBuffer = struct {
 
         var stencil_attachment: vk.RenderingAttachmentInfo = undefined;
         if (desc.stencil_attachment.texture) |t| {
-            const texture: *const Texture = @ptrCast(@alignCast(t));
+            const texture: *Header(Texture) = @ptrCast(@alignCast(t));
             stencil_attachment = .{
-                .image_view = texture.default_view,
+                .image_view = texture.body().default_view,
                 .image_layout = .general,
                 .resolve_mode = .{},
                 .resolve_image_view = .null_handle,
@@ -1633,19 +1633,19 @@ pub const CommandBuffer = struct {
 
         const extent: [2]u32 = blk: {
             if (color_targets.len > 0) {
-                const texture: *const Texture = @ptrCast(@alignCast(color_targets[0].texture));
+                const texture: *Header(Texture) = @ptrCast(@alignCast(color_targets[0].texture));
                 break :blk .{
-                    texture.desc.dimensions[0],
-                    texture.desc.dimensions[1],
+                    texture.body().desc.dimensions[0],
+                    texture.body().desc.dimensions[1],
                 };
             }
             if (desc.depth_attachment.texture) |t| {
-                const texture: *const Texture = @ptrCast(@alignCast(t));
-                break :blk .{ texture.desc.dimensions[0], texture.desc.dimensions[1] };
+                const texture: *Header(Texture) = @ptrCast(@alignCast(t));
+                break :blk .{ texture.body().desc.dimensions[0], texture.body().desc.dimensions[1] };
             }
             if (desc.stencil_attachment.texture) |t| {
-                const texture: *const Texture = @ptrCast(@alignCast(t));
-                break :blk .{ texture.desc.dimensions[0], texture.desc.dimensions[1] };
+                const texture: *Header(Texture) = @ptrCast(@alignCast(t));
+                break :blk .{ texture.body().desc.dimensions[0], texture.body().desc.dimensions[1] };
             }
             unreachable;
         };

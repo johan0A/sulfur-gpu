@@ -17,7 +17,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     root_module.addImport("sulfur", sulfur_dep.module("sulfur"));
-    root_module.addImport("VulkanLoader", sulfur_dep.module("VulkanLoader"));
 
     const frag = sulfur.compileShader(sulfur_dep, b, b.path("src/shaders/frag.slang"), "main", &.{.{}});
     root_module.addAnonymousImport("frag.spv", .{ .root_source_file = frag });

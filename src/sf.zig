@@ -1555,21 +1555,21 @@ pub const SwapchainDesc = extern struct {
 };
 
 pub const DepthAttachment = extern struct {
-    texture: ?*const Texture = null,
+    texture: ?*Texture = null,
     load_op: LoadOp = .load,
     store_op: StoreOp = .store,
     clear_value: f32 = 1.0,
 };
 
 pub const StencilAttachment = extern struct {
-    texture: ?*const Texture = null,
+    texture: ?*Texture = null,
     load_op: LoadOp = .load,
     store_op: StoreOp = .store,
     clear_value: u32 = 0,
 };
 
 pub const ColorAttachment = extern struct {
-    texture: *const Texture,
+    texture: *Texture,
     load_op: LoadOp = .load,
     store_op: StoreOp = .store,
     clear_color: [4]f32 = @splat(0.0),
