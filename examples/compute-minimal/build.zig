@@ -17,7 +17,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     root_module.addImport("sulfur", sulfur_dep.module("sulfur"));
-    root_module.addImport("VulkanLoader", sulfur_dep.module("VulkanLoader"));
 
     const compute = sulfur.compileShader(sulfur_dep, b, b.path("src/shaders/generate_texture.slang"), "main", &.{});
     root_module.addAnonymousImport("generate_texture.spv", .{ .root_source_file = compute });

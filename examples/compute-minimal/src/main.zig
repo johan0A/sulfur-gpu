@@ -1,83 +1,88 @@
+const std = @import("std");
+const gpu = @import("sulfur");
+
 extern fn sfSymbol(name: [*:0]const u8) callconv(gpu.@"callconv") *const anyopaque;
 
+const Data = extern struct {
+    output_texture: u32,
+};
+
 pub fn main(init: std.process.Init) !void {
-    const instance: *gpu.Instance = gpu.createInstance(null, &sfSymbol);
-    defer gpu.destroyInstance(instance);
+    const io = init.io;
+    const arena = init.arena.allocator();
 
-    var adapters_buff: [64]*gpu.Adapter = undefined;
-    var adapters: []*gpu.Adapter = adapters_buff[0..0];
-    gpu.enumerateAdapters(instance, adapters_buff.len, &adapters_buff, &adapters.len);
+    const workgroup_size = 8;
+    const width = 256;
+    const height = 256;
 
-    // TODO: pick adapter
-    const adapter = adapters[0];
+    const instance = gpu.Instance.create(null, &sfSymbol);
+    defer instance.destroy();
 
-    const device: *gpu.Device = gpu.createDevice(instance, adapter);
-    defer gpu.destroyDevice(device);
+    const adapters = try instance.enumerateAdaptersAlloc(arena);
 
-    const queue: *gpu.Queue = gpu.getQueue(device, .graphics);
+    const adapter = adapters[0]; // TODO: pick adapter
 
-    const dimensions: [3]u32 = .{ 256, 256, 1 };
+    const device = instance.createDevice(adapter);
+    defer device.destroy();
+
+    const queue = device.getQueue(.graphics);
+
     const texture_info: gpu.TextureDesc = .{
-        .dimensions = dimensions,
+        .dimensions = .{ width, height, 1 },
         .format = .rgba8_unorm,
         .usage = .{ .storage = true },
     };
+    const texture_size_and_align = device.textureSizeAndAlign(texture_info);
+    const texture_gpu = device.malloc(texture_size_and_align.size, texture_size_and_align.alignment, .gpu);
+    defer device.free(texture_gpu);
+    const texture = try device.createTexture(texture_info, texture_gpu);
+    defer texture.destroy();
 
-    const texture_size_align = gpu.textureSizeAndAlign(device, texture_info);
-    const texture_gpu = gpu.malloc(device, texture_size_align.size, texture_size_align.alignment, .gpu);
-    defer gpu.free(device, texture_gpu);
+    const descriptor_size_and_align = device.descriptorSizeAndHeapAlign();
+    const heap_gpu = device.malloc(descriptor_size_and_align.size * 65536, descriptor_size_and_align.alignment, .default);
+    defer device.free(heap_gpu);
+    const heap: [*]u8 = @ptrCast(@alignCast(device.deviceToHostPointer(heap_gpu)));
+    const descriptor = try texture.textureStorageDescriptor(.{});
+    device.storeDescriptor(&descriptor, heap, 0);
 
-    const texture: *gpu.Texture = gpu.createTexture(device, texture_info, texture_gpu);
-    defer gpu.destroyTexture(texture);
+    const data_gpu = device.malloc(@sizeOf(Data), @alignOf(Data), .default);
+    defer device.free(data_gpu);
+    const data: *Data = @ptrCast(@alignCast(device.deviceToHostPointer(data_gpu)));
+    data.* = .{ .output_texture = 0 };
 
-    const descriptor_size_and_align = gpu.descriptorSizeAndHeapAlign(device);
-    const heap_gpu = gpu.malloc(device, descriptor_size_and_align.size * 65536, descriptor_size_and_align.alignment, .default);
-    defer gpu.free(device, heap_gpu);
-    const heap: [*]u8 = @ptrCast(@alignCast(gpu.deviceToHostPointer(device, heap_gpu)));
+    const pixel_buffer_size = width * height * 4;
+    const readback_gpu = device.malloc(pixel_buffer_size, 256, .readback);
+    defer device.free(readback_gpu);
 
-    const descriptor = gpu.textureStorageDescriptor(texture, .{});
-    gpu.storeDescriptor(device, &descriptor, heap, 0);
+    const pipeline = try device.createComputePipeline(@embedFile("generate_texture.spv"));
+    defer pipeline.destroy();
 
-    const data_gpu = gpu.malloc(device, @sizeOf(Data), @alignOf(Data), .default);
-    defer gpu.free(device, data_gpu);
-    const data_cpu: *Data = @ptrCast(@alignCast(gpu.deviceToHostPointer(device, data_gpu)));
-    data_cpu.output_texture = 0;
-
-    const pixel_buffer_size = dimensions[0] * dimensions[1] * 4;
-    const readback_gpu = gpu.malloc(device, pixel_buffer_size, 256, .readback);
-    defer gpu.free(device, readback_gpu);
-    const readback_cpu: [*]u8 = @ptrCast(gpu.deviceToHostPointer(device, readback_gpu));
-
-    const spv = @embedFile("generate_texture.spv");
-    const pipeline: *gpu.Pipeline = gpu.createComputePipeline(device, spv.len, spv);
-    defer gpu.destroyPipeline(pipeline);
-
-    const cb = gpu.startCommandRecording(queue);
-    gpu.setActiveTextureHeap(cb, heap_gpu);
-    gpu.setPipeline(cb, pipeline);
-    gpu.dispatch(
-        cb,
+    const command_buffer = try queue.startCommandRecording();
+    command_buffer.setActiveTextureHeap(heap_gpu);
+    command_buffer.setPipeline(pipeline);
+    command_buffer.dispatch(
         data_gpu,
-        (dimensions[0] + 7) / 8,
-        (dimensions[1] + 7) / 8,
+        (width + workgroup_size - 1) / workgroup_size,
+        (height + workgroup_size - 1) / workgroup_size,
         1,
     );
+    command_buffer.barrier(.{ .compute = true }, .{ .transfer = true }, .{});
+    command_buffer.copyTextureToBuffer(texture_gpu, readback_gpu, texture);
 
-    gpu.barrier(cb, .{ .compute = true }, .{ .transfer = true }, .{});
-    gpu.copyTextureToBuffer(cb, texture_gpu, readback_gpu, texture);
+    const done = try device.createSemaphore(0);
+    defer done.destroy();
+    try queue.submitAndSignal(&.{command_buffer}, done, 1);
+    try done.waitSemaphore(1);
 
-    const done: *gpu.Semaphore = gpu.createSemaphore(device, 0);
-    defer gpu.destroySemaphore(done);
-    gpu.submitAndSignal(queue, 1, &.{cb}, done, 1);
-    gpu.waitSemaphore(done, 1);
+    const readback: [*]const u8 = @ptrCast(device.deviceToHostPointer(readback_gpu));
+    const pixels = readback[0..pixel_buffer_size];
 
-    const pixel_buffer = readback_cpu[0..pixel_buffer_size];
-
-    var file = try std.Io.Dir.cwd().createFile(init.io, "out.bmp", .{});
-    defer file.close(init.io);
-    var buf: [4096]u8 = undefined;
-    var fw = file.writer(init.io, &buf);
-    try writeBmp(&fw.interface, pixel_buffer, dimensions[0], dimensions[1]);
+    const file = try std.Io.Dir.cwd().createFile(io, "out.bmp", .{});
+    defer file.close(io);
+    var buffer: [4096]u8 = undefined;
+    var file_writer = file.writer(io, &buffer);
+    try writeBmp(&file_writer.interface, pixels, width, height);
+    try file_writer.flush();
 }
 
 pub fn writeBmp(w: *std.Io.Writer, pixels: []const u8, width: u32, height: u32) !void {
@@ -112,11 +117,3 @@ pub fn writeBmp(w: *std.Io.Writer, pixels: []const u8, width: u32, height: u32) 
     }
     try w.flush();
 }
-
-const Data = extern struct {
-    output_texture: u32,
-};
-
-const std = @import("std");
-const gpu = @import("sulfur");
-const VulkanLoader = @import("VulkanLoader");
