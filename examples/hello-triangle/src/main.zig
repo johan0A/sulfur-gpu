@@ -3,7 +3,7 @@ const target = @import("builtin").target;
 const gpu = @import("sulfur");
 const c = @import("c");
 
-extern fn sfSymbol(name: [*:0]const u8) callconv(gpu.@"callconv") *const anyopaque;
+const sfSymbol = @extern(gpu.Symbol, .{ .name = "sfSymbol" });
 
 const frames_in_flight = 2;
 

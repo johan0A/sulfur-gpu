@@ -1,7 +1,7 @@
 const std = @import("std");
 const gpu = @import("sulfur");
 
-extern fn sfSymbol(name: [*:0]const u8) callconv(gpu.@"callconv") *const anyopaque;
+const sfSymbol = @extern(gpu.Symbol, .{ .name = "sfSymbol" });
 
 const Data = extern struct {
     output_texture: u32,
