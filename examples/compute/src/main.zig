@@ -1,6 +1,8 @@
 extern fn sfSymbol(name: [*:0]const u8) callconv(sf.@"callconv") *const anyopaque;
 
 pub fn main(init: std.process.Init) !void {
+    const arena = init.arena.allocator();
+
     var width: c_int = 512;
     var height: c_int = 512;
 
@@ -9,9 +11,7 @@ pub fn main(init: std.process.Init) !void {
     const instance: *sf.Instance = .create(null, sfSymbol);
     defer instance.destroy();
 
-    var adapters_buf: [64]*sf.Adapter = undefined;
-    var adapters: []*sf.Adapter = adapters_buf[0..0];
-    adapters.len = instance.enumerateAdapters(&adapters_buf);
+    const adapters = try instance.enumerateAdaptersAlloc(arena);
 
     // TODO: pick adapter
     const adapter = adapters[0];
@@ -39,9 +39,7 @@ pub fn main(init: std.process.Init) !void {
     };
     defer surface.destroy();
 
-    var surface_formats_buf: [256]sf.Format = undefined;
-    var surface_formats: []sf.Format = surface_formats_buf[0..0];
-    surface_formats.len = device.surfaceFormats(surface, &surface_formats_buf);
+    const surface_formats = try device.surfaceFormatsAlloc(surface, arena);
     const swapchain_format = for (surface_formats) |f| {
         if (f == .rgba8_unorm or f == .bgra8_unorm) break f;
     } else @panic("");

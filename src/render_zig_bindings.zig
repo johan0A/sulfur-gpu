@@ -115,6 +115,7 @@ fn renderBindings(
                 const method_c_name = if (drops_type_name) try std.mem.replaceOwned(u8, arena, function.name, type_name, "") else function.name;
 
                 try renderFunction(w, registry, function, method_c_name, .normal);
+                if (function.enumerate) try renderEnumerateAlloc(w, registry, function, method_c_name);
             }
         }
         try w.writeAll("};\n");
@@ -171,6 +172,82 @@ fn isHandle(@"type": Registry.Type, opaque_index: usize) bool {
     return @"type".base == .@"opaque" and opaque_index == @intFromEnum(@"type".base.@"opaque");
 }
 
+fn renderEnumerateAlloc(
+    w: *std.Io.Writer,
+    registry: Registry,
+    function: Registry.Function,
+    c_name: []const u8,
+) !void {
+    const out_param_index = try outParamIndex(function) orelse return error.UnsupportedRegistry;
+    const count_param = function.params[out_param_index];
+
+    var buffer_index: ?usize = null;
+    for (function.params, 0..) |_, param_index| {
+        if (paramRole(function, param_index, out_param_index) != .slice) continue;
+        if (buffer_index != null) return error.UnsupportedRegistry;
+        buffer_index = param_index;
+    }
+    const buffer_param = function.params[buffer_index orelse return error.UnsupportedRegistry];
+    if (!buffer_param.out or buffer_param.type.ptrs[buffer_param.type.ptrs.len - 1].@"const") return error.UnsupportedRegistry;
+
+    var name_buffer: [256]u8 = undefined;
+    const alloc_c_name = try std.fmt.bufPrint(&name_buffer, "{s}Alloc", .{c_name});
+
+    try w.writeAll("pub fn ");
+    try renderFnName(w, registry, alloc_c_name);
+    try w.writeByte('(');
+    for (function.params, 0..) |param, param_index| {
+        if (paramRole(function, param_index, out_param_index) != .plain) continue;
+        try renderId(w, param.name);
+        try w.writeAll(": ");
+        try renderType(w, registry, param.type);
+        try w.writeAll(", ");
+    }
+    try w.writeAll("gpa: std.mem.Allocator,) error{ OutOfMemory, ");
+    for (function.errors) |@"error"| {
+        try renderErrorName(w, registry, @"error");
+        try w.writeAll(", ");
+    }
+    try w.writeAll("}![]");
+    try renderSliceElementType(w, registry, buffer_param.type);
+    try w.writeAll(" {\n");
+
+    try w.writeAll("var ");
+    try renderId(w, buffer_param.name);
+    try w.writeAll(": []");
+    try renderSliceElementType(w, registry, buffer_param.type);
+    try w.writeAll(" = &.{};\nerrdefer gpa.free(");
+    try renderId(w, buffer_param.name);
+    try w.writeAll(");\nwhile (true) {\nconst ");
+    try renderId(w, count_param.name);
+    try w.writeAll(" = ");
+    if (function.errors.len != 0) try w.writeAll("try ");
+    try renderFnName(w, registry, c_name);
+    try w.writeByte('(');
+    for (function.params, 0..) |param, param_index| {
+        switch (paramRole(function, param_index, out_param_index)) {
+            .plain, .slice => try renderId(w, param.name),
+            .returned, .slice_length => continue,
+        }
+        try w.writeAll(", ");
+    }
+    try w.writeAll(");\nif (");
+    try renderId(w, count_param.name);
+    try w.writeAll(" <= ");
+    try renderId(w, buffer_param.name);
+    try w.writeAll(".len) return gpa.realloc(");
+    try renderId(w, buffer_param.name);
+    try w.writeAll(", ");
+    try renderId(w, count_param.name);
+    try w.writeAll(");\n");
+    try renderId(w, buffer_param.name);
+    try w.writeAll(" = try gpa.realloc(");
+    try renderId(w, buffer_param.name);
+    try w.writeAll(", ");
+    try renderId(w, count_param.name);
+    try w.writeAll(");\n}\n}\n\n");
+}
+
 fn renderFunction(
     w: *std.Io.Writer,
     registry: Registry,
@@ -181,13 +258,7 @@ fn renderFunction(
     const normal = style == .normal;
     const is_create_instance = function.role == .create_instance;
     const returns_error = normal and function.errors.len != 0;
-    var out_param_index: ?usize = null;
-    if (normal) for (function.params, 0..) |param, index| {
-        if (!param.out) continue;
-        if (param.type.ptrs[param.type.ptrs.len - 1].size != .one) continue;
-        if (out_param_index != null) return error.UnsupportedRegistry;
-        out_param_index = index;
-    };
+    const out_param_index = if (normal) try outParamIndex(function) else null;
 
     try renderDoc(w, function.doc);
     try w.writeAll("pub fn ");
@@ -205,15 +276,7 @@ fn renderFunction(
             .slice => {
                 try renderId(w, param.name);
                 try w.writeAll(": ");
-                const outermost = param.type.ptrs[param.type.ptrs.len - 1];
-                if (outermost.optional) try w.writeByte('?');
-                try w.writeAll("[]");
-                if (outermost.@"const") try w.writeAll("const ");
-
-                const element = pointee(param.type);
-                const is_untyped = element.ptrs.len == 0 and element.base == .builtin and element.base.builtin == .void;
-                if (is_untyped) return w.writeAll("u8");
-                try renderType(w, registry, element);
+                try renderSliceType(w, registry, param.type);
             },
         }
         try w.writeAll(", ");
@@ -378,6 +441,21 @@ fn renderSliceField(w: *std.Io.Writer, param: Registry.Param, field: enum { ptr,
     });
 }
 
+fn renderSliceType(w: *std.Io.Writer, registry: Registry, @"type": Registry.Type) !void {
+    const outermost = @"type".ptrs[@"type".ptrs.len - 1];
+    if (outermost.optional) try w.writeByte('?');
+    try w.writeAll("[]");
+    if (outermost.@"const") try w.writeAll("const ");
+    try renderSliceElementType(w, registry, @"type");
+}
+
+fn renderSliceElementType(w: *std.Io.Writer, registry: Registry, @"type": Registry.Type) !void {
+    const element = pointee(@"type");
+    const is_untyped = element.ptrs.len == 0 and element.base == .builtin and element.base.builtin == .void;
+    if (is_untyped) return w.writeAll("u8");
+    try renderType(w, registry, element);
+}
+
 fn pointee(@"type": Registry.Type) Registry.Type {
     var result = @"type";
     result.ptrs = result.ptrs[0 .. result.ptrs.len - 1];
@@ -410,6 +488,17 @@ fn functionWithRole(registry: Registry, role: Registry.Function.Role) Registry.F
         if (function.role == role) return function;
     }
     unreachable;
+}
+
+fn outParamIndex(function: Registry.Function) !?usize {
+    var found: ?usize = null;
+    for (function.params, 0..) |param, index| {
+        if (!param.out or param.type.ptrs.len == 0) continue;
+        if (param.type.ptrs[param.type.ptrs.len - 1].size != .one) continue;
+        if (found != null) return error.UnsupportedRegistry;
+        found = index;
+    }
+    return found;
 }
 
 fn renderInternal(w: *std.Io.Writer, registry: Registry) !void {

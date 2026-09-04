@@ -53,6 +53,24 @@ pub const Instance = opaque {
         return adapter_count;
     }
 
+    pub fn enumerateAdaptersAlloc(
+        instance: *Instance,
+        gpa: std.mem.Allocator,
+    ) error{
+        OutOfMemory,
+    }![]*Adapter {
+        var adapters: []*Adapter = &.{};
+        errdefer gpa.free(adapters);
+        while (true) {
+            const adapter_count = enumerateAdapters(
+                instance,
+                adapters,
+            );
+            if (adapter_count <= adapters.len) return gpa.realloc(adapters, adapter_count);
+            adapters = try gpa.realloc(adapters, adapter_count);
+        }
+    }
+
     pub fn createDevice(
         instance: *Instance,
         adapter: *Adapter,
@@ -194,6 +212,26 @@ pub const Device = opaque {
         return format_count;
     }
 
+    pub fn surfaceFormatsAlloc(
+        device: *Device,
+        surface: *Surface,
+        gpa: std.mem.Allocator,
+    ) error{
+        OutOfMemory,
+    }![]Format {
+        var formats: []Format = &.{};
+        errdefer gpa.free(formats);
+        while (true) {
+            const format_count = surfaceFormats(
+                device,
+                surface,
+                formats,
+            );
+            if (format_count <= formats.len) return gpa.realloc(formats, format_count);
+            formats = try gpa.realloc(formats, format_count);
+        }
+    }
+
     pub fn surfacePresentModes(
         device: *Device,
         surface: *Surface,
@@ -215,6 +253,26 @@ pub const Device = opaque {
             &present_mode_count,
         );
         return present_mode_count;
+    }
+
+    pub fn surfacePresentModesAlloc(
+        device: *Device,
+        surface: *Surface,
+        gpa: std.mem.Allocator,
+    ) error{
+        OutOfMemory,
+    }![]PresentMode {
+        var present_modes: []PresentMode = &.{};
+        errdefer gpa.free(present_modes);
+        while (true) {
+            const present_mode_count = surfacePresentModes(
+                device,
+                surface,
+                present_modes,
+            );
+            if (present_mode_count <= present_modes.len) return gpa.realloc(present_modes, present_mode_count);
+            present_modes = try gpa.realloc(present_modes, present_mode_count);
+        }
     }
 
     pub fn deviceToHostPointer(
