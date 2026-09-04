@@ -40,16 +40,16 @@ pub fn main(init: std.process.Init) !void {
         if (format == .rgba8_unorm_srgb or format == .bgra8_unorm_srgb) break format;
     } else return error.NoSrgbSurfaceFormat;
 
-    const frame_semaphore = try device.createSemaphore(0);
-    defer frame_semaphore.destroy();
-    var frame_index: u64 = 1;
-
     const swapchain = try queue.createSwapchain(surface, .{
         .format = swapchain_format,
         .usage = .{ .color_attachment = true },
         .present_mode = .fifo,
     });
     defer swapchain.destroy();
+
+    const frame_semaphore = try device.createSemaphore(0);
+    defer frame_semaphore.destroy();
+    var frame_index: u64 = 1;
 
     const descriptor_size_and_align = device.descriptorSizeAndHeapAlign();
     const descriptor_heap = device.malloc(descriptor_size_and_align.size * 65536, descriptor_size_and_align.alignment, .default);
@@ -116,7 +116,7 @@ pub fn main(init: std.process.Init) !void {
         command_buffer.endRenderPass();
 
         try queue.submitAndSignal(&.{command_buffer}, frame_semaphore, frame_index);
-        try swapchain.present(queue, frame_semaphore, frame_index);
+        try swapchain.present(queue);
 
         frame_index += 1;
     }

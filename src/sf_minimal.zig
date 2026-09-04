@@ -810,20 +810,14 @@ pub fn swapchainAcquireNextTexture(
 pub fn swapchainPresent(
     swapchain: *Swapchain,
     queue: *Queue,
-    semaphore: *Semaphore,
-    semaphore_value: u64,
 ) Result {
     const f: *const fn (
         swapchain: *Swapchain,
         queue: *Queue,
-        semaphore: *Semaphore,
-        semaphore_value: u64,
     ) callconv(@"callconv") Result = @ptrCast(internal.table(swapchain)[internal.slots.swapchain_present]);
     return f(
         swapchain,
         queue,
-        semaphore,
-        semaphore_value,
     );
 }
 

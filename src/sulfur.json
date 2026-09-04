@@ -947,9 +947,7 @@
       ],
       "params": [
         { "name": "swapchain", "type": { "base": "SfSwapchain", "ptr": [{}] }, "doc": "" },
-        { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
-        { "name": "semaphore", "type": { "base": "SfSemaphore", "ptr": [{}] }, "doc": "" },
-        { "name": "semaphore_value", "type": { "base": "uint64_t" }, "doc": "" }
+        { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" }
       ],
       "doc": ""
     },

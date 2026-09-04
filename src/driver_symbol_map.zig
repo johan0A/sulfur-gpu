@@ -154,8 +154,6 @@ fn Functions(handle_types: HandleTypes) type {
         swapchainPresent: fn (
             swapchain: *handle_types.Swapchain,
             queue: *handle_types.Queue,
-            semaphore: *handle_types.Semaphore,
-            semaphore_value: u64,
         ) error{
             OutOfMemory,
             OutOfDeviceMemory,
@@ -564,14 +562,10 @@ fn CFunctions(comptime handle_types: HandleTypes, comptime functions: Functions(
         pub fn swapchainPresent(
             swapchain: *handle_types.Swapchain,
             queue: *handle_types.Queue,
-            semaphore: *handle_types.Semaphore,
-            semaphore_value: u64,
         ) callconv(sf.@"callconv") sf.Result {
             return cResult(functions.swapchainPresent(
                 swapchain,
                 queue,
-                semaphore,
-                semaphore_value,
             ));
         }
 

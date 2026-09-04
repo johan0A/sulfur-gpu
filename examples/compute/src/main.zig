@@ -110,7 +110,7 @@ pub fn main(init: std.process.Init) !void {
         );
 
         try queue.submitAndSignal(&.{cb}, frame_semaphore, frame_index);
-        try swapchain.present(queue, frame_semaphore, frame_index);
+        try swapchain.present(queue);
 
         frame_index += 1;
     }

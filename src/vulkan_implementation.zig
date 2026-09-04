@@ -1038,10 +1038,6 @@ pub const Swapchain = struct {
         present_command_buffer: CommandBuffer,
         /// binary
         present_semaphore: vk.Semaphore,
-        present_timeline: ?struct {
-            semaphore: *Semaphore,
-            value: u64,
-        },
     };
 
     pub fn sfCreateSwapchain(
@@ -1162,14 +1158,10 @@ pub const Swapchain = struct {
     pub fn sfSwapchainPresent(
         swapchain: *Header(Swapchain),
         queue: *Header(Queue),
-        semaphore: *Header(Semaphore),
-        semaphore_value: u64,
     ) !void {
         present(
             swapchain.body(),
             queue.body(),
-            semaphore.body(),
-            semaphore_value,
         ) catch |err| return switch (err) {
             error.OutOfHostMemory => error.OutOfMemory,
             error.OutOfDeviceMemory, error.DeviceLost => |e| e,
@@ -1184,23 +1176,13 @@ pub const Swapchain = struct {
     fn present(
         swapchain: *Swapchain,
         queue: *Queue,
-        semaphore: *Semaphore,
-        semaphore_value: u64,
     ) !void {
         const texture = &swapchain.textures[swapchain.current];
-        texture.present_timeline = .{ .semaphore = semaphore, .value = semaphore_value };
         const queue_state = swapchain.d.queueStateForQueueId(queue.id);
 
         try swapchain.d.device.queueSubmit2(
             queue_state.queue,
             &.{.{
-                .wait_semaphore_info_count = 1,
-                .p_wait_semaphore_infos = &.{.{
-                    .semaphore = semaphore.semaphore,
-                    .value = semaphore_value,
-                    .stage_mask = .{ .all_commands_bit = true },
-                    .device_index = 0,
-                }},
                 .command_buffer_info_count = 1,
                 .p_command_buffer_infos = &.{.{
                     .command_buffer = texture.present_command_buffer.command_buffer,
@@ -1233,7 +1215,6 @@ pub const Swapchain = struct {
     }
 
     fn recreate(swapchain: *Swapchain, queue: *Queue, width: u32, height: u32) !void {
-        for (swapchain.textures) |t| if (t.present_timeline) |tl| try tl.semaphore.wait(tl.value);
         const d = swapchain.d;
         try d.device.queueWaitIdle(d.queueStateForQueueId(queue.id).queue);
 
@@ -1332,7 +1313,6 @@ pub const Swapchain = struct {
                 .texture = undefined,
                 .present_semaphore = try d.device.createSemaphore(&.{}, null),
                 .present_command_buffer = present_command_buffer,
-                .present_timeline = null,
             };
             texture.texture.set(swapchain.d.table, .{
                 .image = image,

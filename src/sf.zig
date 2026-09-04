@@ -796,8 +796,6 @@ pub const Swapchain = opaque {
     pub fn present(
         swapchain: *Swapchain,
         queue: *Queue,
-        semaphore: *Semaphore,
-        semaphore_value: u64,
     ) error{
         OutOfMemory,
         OutOfDeviceMemory,
@@ -808,14 +806,10 @@ pub const Swapchain = opaque {
         const f: *const fn (
             swapchain: *Swapchain,
             queue: *Queue,
-            semaphore: *Semaphore,
-            semaphore_value: u64,
         ) callconv(@"callconv") Result = @ptrCast(internal.table(swapchain)[internal.slots.swapchain_present]);
         const result = f(
             swapchain,
             queue,
-            semaphore,
-            semaphore_value,
         );
         switch (result) {
             .ok => {},
