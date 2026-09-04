@@ -194,10 +194,28 @@ fn renderFunction(
     try renderFnName(w, registry, c_name);
     try w.writeByte('(');
     for (function.params, 0..) |param, param_index| {
-        if (param_index == out_param_index) continue;
-        try renderId(w, param.name);
-        try w.writeAll(": ");
-        try renderType(w, registry, param.type);
+        const role: ParamRole = if (normal) paramRole(function, param_index, out_param_index) else .plain;
+        switch (role) {
+            .returned, .slice_length => continue,
+            .plain => {
+                try renderId(w, param.name);
+                try w.writeAll(": ");
+                try renderType(w, registry, param.type);
+            },
+            .slice => {
+                try renderId(w, param.name);
+                try w.writeAll(": ");
+                const outermost = param.type.ptrs[param.type.ptrs.len - 1];
+                if (outermost.optional) try w.writeByte('?');
+                try w.writeAll("[]");
+                if (outermost.@"const") try w.writeAll("const ");
+
+                const element = pointee(param.type);
+                const is_untyped = element.ptrs.len == 0 and element.base == .builtin and element.base.builtin == .void;
+                if (is_untyped) return w.writeAll("u8");
+                try renderType(w, registry, element);
+            },
+        }
         try w.writeAll(", ");
     }
     if (is_create_instance) {
@@ -247,6 +265,17 @@ fn renderFunction(
         try w.writeAll(" = undefined;\n");
     }
 
+    if (normal) for (function.params, 0..) |param, param_index| {
+        const length_index = sliceLengthIndex(function, param) orelse continue;
+        const first_slice_index = sliceIndexForLength(function, length_index).?;
+        if (first_slice_index == param_index) continue;
+        try w.writeAll("std.debug.assert(");
+        try renderSliceField(w, function.params[first_slice_index], .len);
+        try w.writeAll(" == ");
+        try renderSliceField(w, param, .len);
+        try w.writeAll(");\n");
+    };
+
     if (is_create_instance) {
         try w.writeAll("const instance = ");
     } else if (returns_error) {
@@ -256,8 +285,20 @@ fn renderFunction(
     }
     try w.writeAll("f(");
     for (function.params, 0..) |param, param_index| {
-        if (param_index == out_param_index) try w.writeByte('&');
-        try renderId(w, param.name);
+        const role: ParamRole = if (normal) paramRole(function, param_index, out_param_index) else .plain;
+        switch (role) {
+            .plain => try renderId(w, param.name),
+            .returned => {
+                try w.writeByte('&');
+                try renderId(w, param.name);
+            },
+            .slice => try renderSliceField(w, param, .ptr),
+            .slice_length => |slice_index| {
+                try w.writeAll("@intCast(");
+                try renderSliceField(w, function.params[slice_index], .len);
+                try w.writeByte(')');
+            },
+        }
         try w.writeAll(", ");
     }
     try w.writeAll(");\n");
@@ -285,6 +326,56 @@ fn renderFunction(
         try w.writeAll(";\n");
     }
     try w.writeAll("}\n\n");
+}
+
+const ParamRole = union(enum) {
+    plain,
+    returned,
+    slice: usize,
+    slice_length: usize,
+};
+
+fn paramRole(function: Registry.Function, param_index: usize, out_param_index: ?usize) ParamRole {
+    if (param_index == out_param_index) return .returned;
+    if (sliceLengthIndex(function, function.params[param_index])) |length_index| return .{ .slice = length_index };
+    if (sliceIndexForLength(function, param_index)) |slice_index| return .{ .slice_length = slice_index };
+    return .plain;
+}
+
+fn sliceLengthIndex(function: Registry.Function, param: Registry.Param) ?usize {
+    if (param.type.ptrs.len == 0) return null;
+    const outermost = param.type.ptrs[param.type.ptrs.len - 1];
+    if (outermost.size != .sized_by_arg) return null;
+
+    const length_param = function.params[outermost.size.sized_by_arg];
+    if (length_param.type.ptrs.len != 0 or length_param.type.array != null) return null;
+    return outermost.size.sized_by_arg;
+}
+
+fn sliceIndexForLength(function: Registry.Function, length_index: usize) ?usize {
+    for (function.params, 0..) |param, param_index| {
+        if (sliceLengthIndex(function, param) == length_index) return param_index;
+    }
+    return null;
+}
+
+fn renderSliceField(w: *std.Io.Writer, param: Registry.Param, field: enum { ptr, len }) !void {
+    const optional = param.type.ptrs[param.type.ptrs.len - 1].optional;
+    if (!optional) {
+        try renderId(w, param.name);
+        try w.print(".{s}", .{@tagName(field)});
+        return;
+    }
+
+    try w.writeAll("(if (");
+    try renderId(w, param.name);
+    try w.print(") |unwrapped| unwrapped.{s} else {s})", .{
+        @tagName(field),
+        switch (field) {
+            .ptr => "null",
+            .len => "0",
+        },
+    });
 }
 
 fn pointee(@"type": Registry.Type) Registry.Type {

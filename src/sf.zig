@@ -40,15 +40,14 @@ pub const Instance = opaque {
 
     pub fn enumerateAdapters(
         instance: *Instance,
-        adapters_capacity: usize,
-        adapters: ?[*]*Adapter,
+        adapters: ?[]*Adapter,
     ) usize {
         const f = internal.enumerate_adapters.?;
         var adapter_count: usize = undefined;
         f(
             instance,
-            adapters_capacity,
-            adapters,
+            @intCast((if (adapters) |unwrapped| unwrapped.len else 0)),
+            (if (adapters) |unwrapped| unwrapped.ptr else null),
             &adapter_count,
         );
         return adapter_count;
@@ -175,8 +174,7 @@ pub const Device = opaque {
     pub fn surfaceFormats(
         device: *Device,
         surface: *Surface,
-        formats_capacity: usize,
-        formats: ?[*]Format,
+        formats: ?[]Format,
     ) usize {
         const f: *const fn (
             device: *Device,
@@ -189,8 +187,8 @@ pub const Device = opaque {
         f(
             device,
             surface,
-            formats_capacity,
-            formats,
+            @intCast((if (formats) |unwrapped| unwrapped.len else 0)),
+            (if (formats) |unwrapped| unwrapped.ptr else null),
             &format_count,
         );
         return format_count;
@@ -199,8 +197,7 @@ pub const Device = opaque {
     pub fn surfacePresentModes(
         device: *Device,
         surface: *Surface,
-        present_modes_capacity: usize,
-        present_modes: ?[*]PresentMode,
+        present_modes: ?[]PresentMode,
     ) usize {
         const f: *const fn (
             device: *Device,
@@ -213,8 +210,8 @@ pub const Device = opaque {
         f(
             device,
             surface,
-            present_modes_capacity,
-            present_modes,
+            @intCast((if (present_modes) |unwrapped| unwrapped.len else 0)),
+            (if (present_modes) |unwrapped| unwrapped.ptr else null),
             &present_mode_count,
         );
         return present_mode_count;
@@ -390,8 +387,7 @@ pub const Device = opaque {
 
     pub fn createComputePipeline(
         device: *Device,
-        ir_size: usize,
-        ir: [*]const u8,
+        ir: []const u8,
     ) error{
         OutOfMemory,
         OutOfDeviceMemory,
@@ -406,8 +402,8 @@ pub const Device = opaque {
         var pipeline: *Pipeline = undefined;
         const result = f(
             device,
-            ir_size,
-            ir,
+            @intCast(ir.len),
+            ir.ptr,
             &pipeline,
         );
         switch (result) {
@@ -422,10 +418,8 @@ pub const Device = opaque {
 
     pub fn createGraphicsPipeline(
         device: *Device,
-        vertex_ir_size: usize,
-        vertex_ir: [*]const u8,
-        pixel_ir_size: usize,
-        pixel_ir: [*]const u8,
+        vertex_ir: []const u8,
+        pixel_ir: []const u8,
         desc: GraphicsPipelineDesc,
     ) error{
         OutOfMemory,
@@ -444,10 +438,10 @@ pub const Device = opaque {
         var pipeline: *Pipeline = undefined;
         const result = f(
             device,
-            vertex_ir_size,
-            vertex_ir,
-            pixel_ir_size,
-            pixel_ir,
+            @intCast(vertex_ir.len),
+            vertex_ir.ptr,
+            @intCast(pixel_ir.len),
+            pixel_ir.ptr,
             desc,
             &pipeline,
         );
@@ -491,8 +485,7 @@ pub const Queue = opaque {
 
     pub fn submit(
         queue: *Queue,
-        command_buffer_count: usize,
-        command_buffers: [*]const *CommandBuffer,
+        command_buffers: []const *CommandBuffer,
     ) error{
         OutOfDeviceMemory,
         OutOfMemory,
@@ -506,8 +499,8 @@ pub const Queue = opaque {
         ) callconv(@"callconv") Result = @ptrCast(internal.table(queue)[internal.slots.submit]);
         const result = f(
             queue,
-            command_buffer_count,
-            command_buffers,
+            @intCast(command_buffers.len),
+            command_buffers.ptr,
         );
         switch (result) {
             .ok => {},
@@ -521,8 +514,7 @@ pub const Queue = opaque {
 
     pub fn submitAndSignal(
         queue: *Queue,
-        command_buffer_count: usize,
-        command_buffers: [*]const *CommandBuffer,
+        command_buffers: []const *CommandBuffer,
         signal_semaphore: *Semaphore,
         signal_value: u64,
     ) error{
@@ -540,8 +532,8 @@ pub const Queue = opaque {
         ) callconv(@"callconv") Result = @ptrCast(internal.table(queue)[internal.slots.submit_and_signal]);
         const result = f(
             queue,
-            command_buffer_count,
-            command_buffers,
+            @intCast(command_buffers.len),
+            command_buffers.ptr,
             signal_semaphore,
             signal_value,
         );
@@ -1127,8 +1119,7 @@ pub const Texture = opaque {
 pub const Pipeline = opaque {
     pub fn createCompute(
         device: *Device,
-        ir_size: usize,
-        ir: [*]const u8,
+        ir: []const u8,
     ) error{
         OutOfMemory,
         OutOfDeviceMemory,
@@ -1143,8 +1134,8 @@ pub const Pipeline = opaque {
         var pipeline: *Pipeline = undefined;
         const result = f(
             device,
-            ir_size,
-            ir,
+            @intCast(ir.len),
+            ir.ptr,
             &pipeline,
         );
         switch (result) {
@@ -1159,10 +1150,8 @@ pub const Pipeline = opaque {
 
     pub fn createGraphics(
         device: *Device,
-        vertex_ir_size: usize,
-        vertex_ir: [*]const u8,
-        pixel_ir_size: usize,
-        pixel_ir: [*]const u8,
+        vertex_ir: []const u8,
+        pixel_ir: []const u8,
         desc: GraphicsPipelineDesc,
     ) error{
         OutOfMemory,
@@ -1181,10 +1170,10 @@ pub const Pipeline = opaque {
         var pipeline: *Pipeline = undefined;
         const result = f(
             device,
-            vertex_ir_size,
-            vertex_ir,
-            pixel_ir_size,
-            pixel_ir,
+            @intCast(vertex_ir.len),
+            vertex_ir.ptr,
+            @intCast(pixel_ir.len),
+            pixel_ir.ptr,
             desc,
             &pipeline,
         );
