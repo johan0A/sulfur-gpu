@@ -110,9 +110,7 @@ fn renderBindings(
                 if (!creates_handle and !takes_handle_first) continue;
                 if (creates_handle and takes_handle_first) continue;
 
-                const is_destroy = std.mem.startsWith(u8, stripPrefix(function.name, registry.fn_prefix), "Destroy");
-                const drops_type_name = creates_handle or is_destroy;
-                const method_c_name = if (drops_type_name) try std.mem.replaceOwned(u8, arena, function.name, type_name, "") else function.name;
+                const method_c_name = try std.mem.replaceOwned(u8, arena, function.name, type_name, "");
 
                 try renderFunction(w, registry, function, method_c_name, .normal);
                 if (function.enumerate) try renderEnumerateAlloc(w, registry, function, method_c_name);

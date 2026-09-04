@@ -61,11 +61,11 @@ pub fn main(init: std.process.Init) !void {
     const descriptor_size_and_align = device.descriptorSizeAndHeapAlign();
     const heap_gpu = device.malloc(descriptor_size_and_align.size * 65536, descriptor_size_and_align.alignment, .default);
     defer device.free(heap_gpu);
-    const heap: [*]u8 = @ptrCast(@alignCast(device.deviceToHostPointer(heap_gpu)));
+    const heap: [*]u8 = @ptrCast(@alignCast(device.toHostPointer(heap_gpu)));
 
     const data_gpu = device.malloc(@sizeOf(Data), @alignOf(Data), .default);
     defer device.free(data_gpu);
-    const data_cpu: *Data = @ptrCast(@alignCast(device.deviceToHostPointer(data_gpu)));
+    const data_cpu: *Data = @ptrCast(@alignCast(device.toHostPointer(data_gpu)));
 
     const spv = @embedFile("generate_texture.spv");
     const pipeline: *sf.Pipeline = try .createCompute(device, spv);
@@ -84,11 +84,11 @@ pub fn main(init: std.process.Init) !void {
         std.debug.assert(c.SDL_GetWindowSizeInPixels(window, &width, &height));
 
         if (frame_index > FRAMES_IN_FLIGHT)
-            _ = try frame_semaphore.waitSemaphore(frame_index - FRAMES_IN_FLIGHT);
+            try frame_semaphore.wait(frame_index - FRAMES_IN_FLIGHT);
 
-        const back_buffer: *sf.Texture = try swapchain.swapchainAcquireNextTexture(queue, @intCast(width), @intCast(height));
+        const back_buffer: *sf.Texture = try swapchain.acquireNextTexture(queue, @intCast(width), @intCast(height));
 
-        var descriptor: sf.Descriptor = try back_buffer.textureStorageDescriptor(.{});
+        var descriptor: sf.Descriptor = try back_buffer.storageDescriptor(.{});
         const output_texture: u32 = @intCast(frame_index % FRAMES_IN_FLIGHT);
         device.storeDescriptor(&descriptor, heap, output_texture);
 
@@ -110,12 +110,12 @@ pub fn main(init: std.process.Init) !void {
         );
 
         try queue.submitAndSignal(&.{cb}, frame_semaphore, frame_index);
-        try swapchain.swapchainPresent(queue, frame_semaphore, frame_index);
+        try swapchain.present(queue, frame_semaphore, frame_index);
 
         frame_index += 1;
     }
 
-    try frame_semaphore.waitSemaphore(frame_index - 1);
+    try frame_semaphore.wait(frame_index - 1);
 }
 
 const Data = extern struct {

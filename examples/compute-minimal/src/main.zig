@@ -41,13 +41,13 @@ pub fn main(init: std.process.Init) !void {
     const descriptor_size_and_align = device.descriptorSizeAndHeapAlign();
     const heap_gpu = device.malloc(descriptor_size_and_align.size * 65536, descriptor_size_and_align.alignment, .default);
     defer device.free(heap_gpu);
-    const heap: [*]u8 = @ptrCast(@alignCast(device.deviceToHostPointer(heap_gpu)));
-    const descriptor = try texture.textureStorageDescriptor(.{});
+    const heap: [*]u8 = @ptrCast(@alignCast(device.toHostPointer(heap_gpu)));
+    const descriptor = try texture.storageDescriptor(.{});
     device.storeDescriptor(&descriptor, heap, 0);
 
     const data_gpu = device.malloc(@sizeOf(Data), @alignOf(Data), .default);
     defer device.free(data_gpu);
-    const data: *Data = @ptrCast(@alignCast(device.deviceToHostPointer(data_gpu)));
+    const data: *Data = @ptrCast(@alignCast(device.toHostPointer(data_gpu)));
     data.* = .{ .output_texture = 0 };
 
     const pixel_buffer_size = width * height * 4;
@@ -72,9 +72,9 @@ pub fn main(init: std.process.Init) !void {
     const done = try device.createSemaphore(0);
     defer done.destroy();
     try queue.submitAndSignal(&.{command_buffer}, done, 1);
-    try done.waitSemaphore(1);
+    try done.wait(1);
 
-    const readback: [*]const u8 = @ptrCast(device.deviceToHostPointer(readback_gpu));
+    const readback: [*]const u8 = @ptrCast(device.toHostPointer(readback_gpu));
     const pixels = readback[0..pixel_buffer_size];
 
     const file = try std.Io.Dir.cwd().createFile(io, "out.bmp", .{});

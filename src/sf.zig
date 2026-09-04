@@ -275,7 +275,7 @@ pub const Device = opaque {
         }
     }
 
-    pub fn deviceToHostPointer(
+    pub fn toHostPointer(
         device: *Device,
         address: DeviceAddress,
     ) *anyopaque {
@@ -681,7 +681,7 @@ pub const Semaphore = opaque {
         );
     }
 
-    pub fn waitSemaphore(
+    pub fn wait(
         semaphore: *Semaphore,
         value: u64,
     ) error{
@@ -755,7 +755,7 @@ pub const Swapchain = opaque {
         );
     }
 
-    pub fn swapchainAcquireNextTexture(
+    pub fn acquireNextTexture(
         swapchain: *Swapchain,
         queue: *Queue,
         width: u32,
@@ -793,7 +793,7 @@ pub const Swapchain = opaque {
         return texture;
     }
 
-    pub fn swapchainPresent(
+    pub fn present(
         swapchain: *Swapchain,
         queue: *Queue,
         semaphore: *Semaphore,
@@ -1115,7 +1115,7 @@ pub const Texture = opaque {
         );
     }
 
-    pub fn textureStorageDescriptor(
+    pub fn storageDescriptor(
         texture: *Texture,
         desc: TextureViewDesc,
     ) error{
@@ -1144,7 +1144,7 @@ pub const Texture = opaque {
         return descriptor;
     }
 
-    pub fn textureViewDescriptor(
+    pub fn viewDescriptor(
         texture: *Texture,
         desc: TextureViewDesc,
     ) error{
