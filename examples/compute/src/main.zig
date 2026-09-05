@@ -86,7 +86,7 @@ pub fn main(init: std.process.Init) !void {
         if (frame_index > FRAMES_IN_FLIGHT)
             try frame_semaphore.wait(frame_index - FRAMES_IN_FLIGHT);
 
-        const back_buffer: *sf.Texture = try swapchain.acquireNextTexture(queue, @intCast(width), @intCast(height));
+        const back_buffer: *sf.Texture = try swapchain.acquireBackBuffer(@intCast(width), @intCast(height));
 
         var descriptor: sf.Descriptor = try back_buffer.storageDescriptor(.{});
         const output_texture: u32 = @intCast(frame_index % FRAMES_IN_FLIGHT);
@@ -110,7 +110,7 @@ pub fn main(init: std.process.Init) !void {
         );
 
         try queue.submitAndSignal(&.{cb}, frame_semaphore, frame_index);
-        try swapchain.present(queue);
+        try swapchain.present();
 
         frame_index += 1;
     }

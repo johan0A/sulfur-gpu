@@ -784,40 +784,34 @@ pub fn destroySwapchain(
     );
 }
 
-pub fn swapchainAcquireNextTexture(
+pub fn acquireBackBuffer(
     swapchain: *Swapchain,
-    queue: *Queue,
     width: u32,
     height: u32,
-    texture: **Texture,
+    back_buffer: **Texture,
 ) Result {
     const f: *const fn (
         swapchain: *Swapchain,
-        queue: *Queue,
         width: u32,
         height: u32,
-        texture: **Texture,
-    ) callconv(@"callconv") Result = @ptrCast(internal.table(swapchain)[internal.slots.swapchain_acquire_next_texture]);
+        back_buffer: **Texture,
+    ) callconv(@"callconv") Result = @ptrCast(internal.table(swapchain)[internal.slots.acquire_back_buffer]);
     return f(
         swapchain,
-        queue,
         width,
         height,
-        texture,
+        back_buffer,
     );
 }
 
-pub fn swapchainPresent(
+pub fn present(
     swapchain: *Swapchain,
-    queue: *Queue,
 ) Result {
     const f: *const fn (
         swapchain: *Swapchain,
-        queue: *Queue,
-    ) callconv(@"callconv") Result = @ptrCast(internal.table(swapchain)[internal.slots.swapchain_present]);
+    ) callconv(@"callconv") Result = @ptrCast(internal.table(swapchain)[internal.slots.present]);
     return f(
         swapchain,
-        queue,
     );
 }
 
@@ -1251,8 +1245,8 @@ const internal = struct {
         wait_semaphore: usize = 0,
         create_swapchain: usize = 0,
         destroy_swapchain: usize = 0,
-        swapchain_acquire_next_texture: usize = 0,
-        swapchain_present: usize = 0,
+        acquire_back_buffer: usize = 0,
+        present: usize = 0,
         set_active_texture_heap: usize = 0,
         set_pipeline: usize = 0,
         dispatch: usize = 0,
@@ -1305,8 +1299,8 @@ const internal = struct {
         slots.wait_semaphore = get_slot.?(instance, "sfWaitSemaphore");
         slots.create_swapchain = get_slot.?(instance, "sfCreateSwapchain");
         slots.destroy_swapchain = get_slot.?(instance, "sfDestroySwapchain");
-        slots.swapchain_acquire_next_texture = get_slot.?(instance, "sfSwapchainAcquireNextTexture");
-        slots.swapchain_present = get_slot.?(instance, "sfSwapchainPresent");
+        slots.acquire_back_buffer = get_slot.?(instance, "sfAcquireBackBuffer");
+        slots.present = get_slot.?(instance, "sfPresent");
         slots.set_active_texture_heap = get_slot.?(instance, "sfSetActiveTextureHeap");
         slots.set_pipeline = get_slot.?(instance, "sfSetPipeline");
         slots.dispatch = get_slot.?(instance, "sfDispatch");

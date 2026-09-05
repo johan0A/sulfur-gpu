@@ -96,7 +96,7 @@ pub fn main(init: std.process.Init) !void {
 
         if (frame_index > frames_in_flight) try frame_semaphore.wait(frame_index - frames_in_flight);
 
-        const back_buffer = try swapchain.acquireNextTexture(queue, @intCast(width), @intCast(height));
+        const back_buffer = try swapchain.acquireBackBuffer(@intCast(width), @intCast(height));
 
         const command_buffer = try queue.startCommandRecording();
         command_buffer.setActiveTextureHeap(descriptor_heap);
@@ -116,7 +116,7 @@ pub fn main(init: std.process.Init) !void {
         command_buffer.endRenderPass();
 
         try queue.submitAndSignal(&.{command_buffer}, frame_semaphore, frame_index);
-        try swapchain.present(queue);
+        try swapchain.present();
 
         frame_index += 1;
     }

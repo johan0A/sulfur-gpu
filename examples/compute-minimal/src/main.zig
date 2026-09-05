@@ -15,7 +15,7 @@ pub fn main(init: std.process.Init) !void {
     const width = 256;
     const height = 256;
 
-    const instance = gpu.Instance.create(null, &sfSymbol);
+    const instance = gpu.Instance.create(null, sfSymbol);
     defer instance.destroy();
 
     const adapters = try instance.enumerateAdaptersAlloc(arena);

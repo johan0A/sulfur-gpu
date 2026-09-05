@@ -138,12 +138,11 @@ fn Functions(handle_types: HandleTypes) type {
         destroySwapchain: fn (
             swapchain: *handle_types.Swapchain,
         ) void,
-        swapchainAcquireNextTexture: fn (
+        acquireBackBuffer: fn (
             swapchain: *handle_types.Swapchain,
-            queue: *handle_types.Queue,
             width: u32,
             height: u32,
-            texture: **handle_types.Texture,
+            back_buffer: **handle_types.Texture,
         ) error{
             OutOfMemory,
             OutOfDeviceMemory,
@@ -151,9 +150,8 @@ fn Functions(handle_types: HandleTypes) type {
             SurfaceLost,
             Unknown,
         }!void,
-        swapchainPresent: fn (
+        present: fn (
             swapchain: *handle_types.Swapchain,
-            queue: *handle_types.Queue,
         ) error{
             OutOfMemory,
             OutOfDeviceMemory,
@@ -543,29 +541,25 @@ fn CFunctions(comptime handle_types: HandleTypes, comptime functions: Functions(
             );
         }
 
-        pub fn swapchainAcquireNextTexture(
+        pub fn acquireBackBuffer(
             swapchain: *handle_types.Swapchain,
-            queue: *handle_types.Queue,
             width: u32,
             height: u32,
-            texture: **handle_types.Texture,
+            back_buffer: **handle_types.Texture,
         ) callconv(sf.@"callconv") sf.Result {
-            return cResult(functions.swapchainAcquireNextTexture(
+            return cResult(functions.acquireBackBuffer(
                 swapchain,
-                queue,
                 width,
                 height,
-                texture,
+                back_buffer,
             ));
         }
 
-        pub fn swapchainPresent(
+        pub fn present(
             swapchain: *handle_types.Swapchain,
-            queue: *handle_types.Queue,
         ) callconv(sf.@"callconv") sf.Result {
-            return cResult(functions.swapchainPresent(
+            return cResult(functions.present(
                 swapchain,
-                queue,
             ));
         }
 
@@ -863,8 +857,8 @@ pub fn map(
         .{ "sfWaitSemaphore", @ptrCast(&c_functions.waitSemaphore) },
         .{ "sfCreateSwapchain", @ptrCast(&c_functions.createSwapchain) },
         .{ "sfDestroySwapchain", @ptrCast(&c_functions.destroySwapchain) },
-        .{ "sfSwapchainAcquireNextTexture", @ptrCast(&c_functions.swapchainAcquireNextTexture) },
-        .{ "sfSwapchainPresent", @ptrCast(&c_functions.swapchainPresent) },
+        .{ "sfAcquireBackBuffer", @ptrCast(&c_functions.acquireBackBuffer) },
+        .{ "sfPresent", @ptrCast(&c_functions.present) },
         .{ "sfSetActiveTextureHeap", @ptrCast(&c_functions.setActiveTextureHeap) },
         .{ "sfSetPipeline", @ptrCast(&c_functions.setPipeline) },
         .{ "sfDispatch", @ptrCast(&c_functions.dispatch) },

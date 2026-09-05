@@ -755,9 +755,8 @@ pub const Swapchain = opaque {
         );
     }
 
-    pub fn acquireNextTexture(
+    pub fn acquireBackBuffer(
         swapchain: *Swapchain,
-        queue: *Queue,
         width: u32,
         height: u32,
     ) error{
@@ -769,18 +768,16 @@ pub const Swapchain = opaque {
     }!*Texture {
         const f: *const fn (
             swapchain: *Swapchain,
-            queue: *Queue,
             width: u32,
             height: u32,
-            texture: **Texture,
-        ) callconv(@"callconv") Result = @ptrCast(internal.table(swapchain)[internal.slots.swapchain_acquire_next_texture]);
-        var texture: *Texture = undefined;
+            back_buffer: **Texture,
+        ) callconv(@"callconv") Result = @ptrCast(internal.table(swapchain)[internal.slots.acquire_back_buffer]);
+        var back_buffer: *Texture = undefined;
         const result = f(
             swapchain,
-            queue,
             width,
             height,
-            &texture,
+            &back_buffer,
         );
         switch (result) {
             .ok => {},
@@ -790,12 +787,11 @@ pub const Swapchain = opaque {
             .surface_lost => return error.SurfaceLost,
             .unknown => return error.Unknown,
         }
-        return texture;
+        return back_buffer;
     }
 
     pub fn present(
         swapchain: *Swapchain,
-        queue: *Queue,
     ) error{
         OutOfMemory,
         OutOfDeviceMemory,
@@ -805,11 +801,9 @@ pub const Swapchain = opaque {
     }!void {
         const f: *const fn (
             swapchain: *Swapchain,
-            queue: *Queue,
-        ) callconv(@"callconv") Result = @ptrCast(internal.table(swapchain)[internal.slots.swapchain_present]);
+        ) callconv(@"callconv") Result = @ptrCast(internal.table(swapchain)[internal.slots.present]);
         const result = f(
             swapchain,
-            queue,
         );
         switch (result) {
             .ok => {},
@@ -1683,8 +1677,8 @@ const internal = struct {
         wait_semaphore: usize = 0,
         create_swapchain: usize = 0,
         destroy_swapchain: usize = 0,
-        swapchain_acquire_next_texture: usize = 0,
-        swapchain_present: usize = 0,
+        acquire_back_buffer: usize = 0,
+        present: usize = 0,
         set_active_texture_heap: usize = 0,
         set_pipeline: usize = 0,
         dispatch: usize = 0,
@@ -1737,8 +1731,8 @@ const internal = struct {
         slots.wait_semaphore = get_slot.?(instance, "sfWaitSemaphore");
         slots.create_swapchain = get_slot.?(instance, "sfCreateSwapchain");
         slots.destroy_swapchain = get_slot.?(instance, "sfDestroySwapchain");
-        slots.swapchain_acquire_next_texture = get_slot.?(instance, "sfSwapchainAcquireNextTexture");
-        slots.swapchain_present = get_slot.?(instance, "sfSwapchainPresent");
+        slots.acquire_back_buffer = get_slot.?(instance, "sfAcquireBackBuffer");
+        slots.present = get_slot.?(instance, "sfPresent");
         slots.set_active_texture_heap = get_slot.?(instance, "sfSetActiveTextureHeap");
         slots.set_pipeline = get_slot.?(instance, "sfSetPipeline");
         slots.dispatch = get_slot.?(instance, "sfDispatch");

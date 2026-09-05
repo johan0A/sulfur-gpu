@@ -869,8 +869,8 @@ pub const Queue = struct {
         const barriers = try gpa.alloc(vk.ImageMemoryBarrier2, image_count);
         defer gpa.free(barriers);
 
-        var transition_command_buffer: ?CommandBuffer = null;
-        errdefer if (transition_command_buffer) |cb| d.releaseCommandBuffer(cb);
+        var texture_init_command_buffer: ?CommandBuffer = null;
+        errdefer if (texture_init_command_buffer) |cb| d.releaseCommandBuffer(cb);
 
         if (image_count != 0) {
             var image_it = d.pending_texture_inits.iterator();
@@ -897,13 +897,14 @@ pub const Queue = struct {
                 };
             }
 
-            transition_command_buffer = try queue.startCommandRecording();
+            const cb = try queue.startCommandRecording();
+            texture_init_command_buffer = cb;
 
-            d.device.cmdPipelineBarrier2(transition_command_buffer.command_buffer, &.{
+            d.device.cmdPipelineBarrier2(cb.command_buffer, &.{
                 .image_memory_barrier_count = @intCast(barriers.len),
                 .p_image_memory_barriers = barriers.ptr,
             });
-            try d.device.endCommandBuffer(transition_command_buffer.command_buffer);
+            try d.device.endCommandBuffer(cb.command_buffer);
         }
 
         const submit_buffers = try gpa.alloc(vk.CommandBufferSubmitInfo, command_buffers.len);
@@ -916,10 +917,10 @@ pub const Queue = struct {
             };
         }
 
-        const pending_command_buffer_count = command_buffers.len + @intFromBool(transition_command_buffer != null);
-        try queue_state.pending_command_buffers.ensureUnusedCapacity(gpa, pending_command_buffer_count);
+        const pending_count = command_buffers.len + @intFromBool(texture_init_command_buffer != null);
+        try queue_state.pending_command_buffers.ensureUnusedCapacity(gpa, pending_count);
 
-        const has_transitions = transition_command_buffer != null;
+        const has_transitions = texture_init_command_buffer != null;
 
         const init_previous = texture_init_timeline.value;
         const init_target = if (has_transitions) init_previous + 1 else init_previous;
@@ -935,7 +936,7 @@ pub const Queue = struct {
         var transition_waits: [1]vk.SemaphoreSubmitInfo = undefined;
         var transition_signals: [2]vk.SemaphoreSubmitInfo = undefined;
 
-        if (transition_command_buffer) |cb| {
+        if (texture_init_command_buffer) |cb| {
             transition_submit_buffer = .{ .command_buffer = cb.command_buffer, .device_mask = 0 };
 
             transition_waits[0] = .{
@@ -1008,13 +1009,13 @@ pub const Queue = struct {
         texture_init_timeline.value = init_target;
         queue_state.last_submitted = work_value;
 
-        if (transition_command_buffer) |cb| {
+        if (texture_init_command_buffer) |cb| {
             d.pending_texture_inits.clearRetainingCapacity();
             queue_state.pending_command_buffers.appendAssumeCapacity(.{
                 .value = transition_value,
                 .command_buffer = cb.command_buffer,
             });
-            transition_command_buffer = null;
+            texture_init_command_buffer = null;
         }
         for (command_buffers) |command_buffer| {
             queue_state.pending_command_buffers.appendAssumeCapacity(.{
@@ -1154,16 +1155,14 @@ pub const Swapchain = struct {
         swapchain.d.gpa.destroy(swapchain);
     }
 
-    pub fn sfSwapchainAcquireNextTexture(
+    pub fn sfAcquireBackBuffer(
         swapchain: *Header(Swapchain),
-        queue: *Header(Queue),
         width: u32,
         height: u32,
-        texture: **Header(Texture),
+        back_buffer: **Header(Texture),
     ) !void {
-        texture.* = acquireNextTexture(
+        back_buffer.* = acquireNextTexture(
             swapchain.body(),
-            queue.body(),
             width,
             height,
         ) catch |err| return switch (err) {
@@ -1183,13 +1182,13 @@ pub const Swapchain = struct {
     }
     fn acquireNextTexture(
         swapchain: *Swapchain,
-        queue: *Queue,
         width: u32,
         height: u32,
     ) !*Header(Texture) {
+        const queue = swapchain.queue;
         var attempts: u32 = 0;
         while (true) : (attempts += 1) {
-            if (attempts > 8) return error.SurfaceLost;
+            if (attempts > 32) return error.SurfaceLost;
             if (swapchain.needs_recreate) try swapchain.recreate(queue, width, height);
 
             const result = swapchain.d.device.acquireNextImageKHR(
@@ -1220,13 +1219,11 @@ pub const Swapchain = struct {
         }
     }
 
-    pub fn sfSwapchainPresent(
+    pub fn sfPresent(
         swapchain: *Header(Swapchain),
-        queue: *Header(Queue),
     ) !void {
         present(
             swapchain.body(),
-            queue.body(),
         ) catch |err| return switch (err) {
             error.OutOfHostMemory => error.OutOfMemory,
             error.OutOfDeviceMemory, error.DeviceLost => |e| e,
@@ -1240,8 +1237,8 @@ pub const Swapchain = struct {
     }
     fn present(
         swapchain: *Swapchain,
-        queue: *Queue,
     ) !void {
+        const queue = swapchain.queue;
         const texture = &swapchain.textures[swapchain.current];
         const queue_state = swapchain.d.queueStateForQueueId(queue.id);
 
@@ -2666,8 +2663,8 @@ pub fn sfSymbol(name: [*:0]const u8) callconv(gpu.@"callconv") *const anyopaque 
         .waitSemaphore = Semaphore.sfWaitSemaphore,
         .createSwapchain = Swapchain.sfCreateSwapchain,
         .destroySwapchain = Swapchain.sfDestroySwapchain,
-        .swapchainAcquireNextTexture = Swapchain.sfSwapchainAcquireNextTexture,
-        .swapchainPresent = Swapchain.sfSwapchainPresent,
+        .acquireBackBuffer = Swapchain.sfAcquireBackBuffer,
+        .present = Swapchain.sfPresent,
         .setActiveTextureHeap = CommandBuffer.sfSetActiveTextureHeap,
         .setPipeline = CommandBuffer.sfSetPipeline,
         .dispatch = CommandBuffer.sfDispatch,

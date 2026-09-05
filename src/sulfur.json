@@ -913,7 +913,7 @@
       "doc": ""
     },
     {
-      "name": "sfSwapchainAcquireNextTexture",
+      "name": "sfAcquireBackBuffer",
       "group": "SfSwapchain",
       "dispatch": "table",
       "return": { "base": "SfResult" },
@@ -926,15 +926,14 @@
       ],
       "params": [
         { "name": "swapchain", "type": { "base": "SfSwapchain", "ptr": [{}] }, "doc": "" },
-        { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" },
         { "name": "width", "type": { "base": "uint32_t" }, "doc": "" },
         { "name": "height", "type": { "base": "uint32_t" }, "doc": "" },
-        { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}, {}] }, "out": true, "doc": "" }
+        { "name": "back_buffer", "type": { "base": "SfTexture", "ptr": [{}, {}] }, "out": true, "doc": "" }
       ],
       "doc": ""
     },
     {
-      "name": "sfSwapchainPresent",
+      "name": "sfPresent",
       "group": "SfSwapchain",
       "dispatch": "table",
       "return": { "base": "SfResult" },
@@ -946,8 +945,7 @@
         "SF_RESULT_UNKNOWN"
       ],
       "params": [
-        { "name": "swapchain", "type": { "base": "SfSwapchain", "ptr": [{}] }, "doc": "" },
-        { "name": "queue", "type": { "base": "SfQueue", "ptr": [{}] }, "doc": "" }
+        { "name": "swapchain", "type": { "base": "SfSwapchain", "ptr": [{}] }, "doc": "" }
       ],
       "doc": ""
     },
