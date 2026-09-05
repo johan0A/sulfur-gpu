@@ -5,7 +5,9 @@ const std = @import("std");
 const sf = @import("sf_minimal.zig");
 
 const HandleTypes = struct {
+    Instance: type,
     Surface: type,
+    Adapter: type,
     Device: type,
     Queue: type,
     Semaphore: type,
@@ -17,6 +19,10 @@ const HandleTypes = struct {
 
 fn Functions(handle_types: HandleTypes) type {
     return struct {
+        adapterInfo: fn (
+            instance: *handle_types.Instance,
+            adapter: *handle_types.Adapter,
+        ) sf.AdpaterInfo,
         createSurfaceWin32: fn (
             device: *handle_types.Device,
             desc: sf.SurfaceWin32Desc,
@@ -315,6 +321,16 @@ fn cResult(result: anytype) sf.Result {
 
 fn CFunctions(comptime handle_types: HandleTypes, comptime functions: Functions(handle_types)) type {
     return struct {
+        pub fn adapterInfo(
+            instance: *handle_types.Instance,
+            adapter: *handle_types.Adapter,
+        ) callconv(sf.@"callconv") sf.AdpaterInfo {
+            return functions.adapterInfo(
+                instance,
+                adapter,
+            );
+        }
+
         pub fn createSurfaceWin32(
             device: *handle_types.Device,
             desc: sf.SurfaceWin32Desc,
@@ -837,6 +853,7 @@ pub fn map(
 ) std.StaticStringMap(*const anyopaque) {
     const c_functions = CFunctions(handle_types, functions);
     return .initComptime(@as([]const struct { []const u8, *const anyopaque }, &.{
+        .{ "sfAdapterInfo", @ptrCast(&c_functions.adapterInfo) },
         .{ "sfCreateSurfaceWin32", @ptrCast(&c_functions.createSurfaceWin32) },
         .{ "sfCreateSurfaceXlib", @ptrCast(&c_functions.createSurfaceXlib) },
         .{ "sfDestroySurface", @ptrCast(&c_functions.destroySurface) },

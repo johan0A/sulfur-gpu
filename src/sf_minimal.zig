@@ -10,6 +10,7 @@ pub const @"callconv": std.builtin.CallingConvention = switch (target.os.tag) {
 };
 
 pub const descriptor_max_size: usize = 64;
+pub const adapter_name_max_lenght: usize = 256;
 pub const all_mips: u32 = 0xFFFFFFFF;
 pub const all_layers: u32 = 0xFFFFFFFF;
 
@@ -39,6 +40,14 @@ pub const Memory = enum(u32) {
     default = 0,
     gpu = 1,
     readback = 2,
+};
+
+pub const AdapterType = enum(u32) {
+    other = 0,
+    integrated_gpu = 1,
+    discrete_gpu = 2,
+    virtual_gpu = 3,
+    cpu = 4,
 };
 
 pub const PresentMode = enum(u32) {
@@ -307,6 +316,12 @@ pub const SizeAndAlign = extern struct {
     alignment: usize,
 };
 
+pub const AdpaterInfo = extern struct {
+    name_lenght: u8,
+    name: [adapter_name_max_lenght]u8,
+    type: AdapterType,
+};
+
 pub const SurfaceWin32Desc = extern struct {
     hinstance: *anyopaque,
     hwnd: *anyopaque,
@@ -462,6 +477,20 @@ pub fn destroyDevice(
     const f = internal.destroy_device.?;
     return f(
         device,
+    );
+}
+
+pub fn adapterInfo(
+    instance: *Instance,
+    adapter: *Adapter,
+) AdpaterInfo {
+    const f: *const fn (
+        instance: *Instance,
+        adapter: *Adapter,
+    ) callconv(@"callconv") AdpaterInfo = @ptrCast(internal.table(instance)[internal.slots.adapter_info]);
+    return f(
+        instance,
+        adapter,
     );
 }
 
@@ -1225,6 +1254,7 @@ const internal = struct {
     ) callconv(@"callconv") void = null;
 
     var slots: struct {
+        adapter_info: usize = 0,
         create_surface_win32: usize = 0,
         create_surface_xlib: usize = 0,
         destroy_surface: usize = 0,
@@ -1279,6 +1309,7 @@ const internal = struct {
     }
 
     fn loadSlots(instance: *Instance) void {
+        slots.adapter_info = get_slot.?(instance, "sfAdapterInfo");
         slots.create_surface_win32 = get_slot.?(instance, "sfCreateSurfaceWin32");
         slots.create_surface_xlib = get_slot.?(instance, "sfCreateSurfaceXlib");
         slots.destroy_surface = get_slot.?(instance, "sfDestroySurface");

@@ -13,6 +13,7 @@
 
   "constants": [
     { "name": "SF_DESCRIPTOR_MAX_SIZE", "type": "size_t", "value": "64", "doc": "" },
+    { "name": "SF_ADAPTER_NAME_MAX_LENGHT", "type": "size_t", "value": "256", "doc": "" },
     { "name": "SF_ALL_MIPS", "type": "uint32_t", "value": "0xFFFFFFFF", "doc": "" },
     { "name": "SF_ALL_LAYERS", "type": "uint32_t", "value": "0xFFFFFFFF", "doc": "" }
   ],
@@ -94,6 +95,15 @@
       "fields": [
         { "name": "size", "type": { "base": "size_t" }, "doc": "" },
         { "name": "alignment", "type": { "base": "size_t" }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfAdpaterInfo",
+      "fields": [
+        { "name": "name_lenght", "type": { "base": "uint8_t" }, "doc": "" },
+        { "name": "name", "type": { "base": "uint8_t", "array": "SF_ADAPTER_NAME_MAX_LENGHT" }, "doc": "" },
+        { "name": "type", "type": { "base": "SfAdapterType" }, "doc": "" }
       ],
       "doc": ""
     },
@@ -266,6 +276,18 @@
         { "name": "SF_MEMORY_DEFAULT", "value": 0, "doc": "" },
         { "name": "SF_MEMORY_GPU", "value": 1, "doc": "" },
         { "name": "SF_MEMORY_READBACK", "value": 2, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfAdapterType",
+      "backing_type": "uint32_t",
+      "values": [
+        { "name": "SF_ADAPTER_TYPE_OTHER", "value": 0, "doc": "" },
+        { "name": "SF_ADAPTER_TYPE_INTEGRATED_GPU", "value": 1, "doc": "" },
+        { "name": "SF_ADAPTER_TYPE_DISCRETE_GPU", "value": 2, "doc": "" },
+        { "name": "SF_ADAPTER_TYPE_VIRTUAL_GPU", "value": 3, "doc": "" },
+        { "name": "SF_ADAPTER_TYPE_CPU", "value": 4, "doc": "" }
       ],
       "doc": ""
     },
@@ -638,6 +660,17 @@
       "return": { "base": "void" },
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfAdapterInfo",
+      "group": "SfInstance",
+      "dispatch": "table",
+      "return": { "base": "SfAdpaterInfo" },
+      "params": [
+        { "name": "instance", "type": { "base": "SfInstance", "ptr": [{}] }, "doc": "" },
+        { "name": "adapter", "type": { "base": "SfAdapter", "ptr": [{}] }, "doc": "" }
       ],
       "doc": ""
     },

@@ -155,6 +155,7 @@ pub const Instance = struct {
         enumerateAdapters(instance.body(), if (adapters_buffer) |buf| buf[0..adapters_buffer_size] else null, adapters_count) catch @panic("TODO");
     }
     fn enumerateAdapters(instance: *Instance, adapters_buffer_opt: ?[]*Adapter, adapters_count: *usize) !void {
+        // TODO: filter incompatible devices
         const physical_devices = try instance.instance.enumeratePhysicalDevicesAlloc(instance.gpa);
         defer instance.gpa.free(physical_devices);
         adapters_count.* = physical_devices.len;
@@ -163,6 +164,23 @@ pub const Instance = struct {
         for (0..@min(adapters_buffer.len, physical_devices.len)) |i| {
             adapters_buffer[i] = .fromPhysicalDevice(physical_devices[i]);
         }
+    }
+
+    pub fn sfAdapterInfo(instance: *Header(Instance), adapter: *Adapter) gpu.AdpaterInfo {
+        return adapterInfo(instance.body(), adapter);
+    }
+    pub fn adapterInfo(instance: *Instance, adapter: *Adapter) gpu.AdpaterInfo {
+        const physical_device = adapter.asPhysicalDevice();
+        const properties = instance.instance.getPhysicalDeviceProperties(physical_device);
+        return .{
+            .name_lenght = @intCast(std.mem.findScalar(u8, &properties.device_name, 0) orelse
+                properties.device_name.len),
+            .name = properties.device_name,
+            .type = switch (properties.device_type) {
+                inline else => |t| @field(gpu.AdapterType, @tagName(t)),
+                _ => .other,
+            },
+        };
     }
 };
 
@@ -2629,6 +2647,8 @@ fn debugCallback(
 
 pub fn sfSymbol(name: [*:0]const u8) callconv(gpu.@"callconv") *const anyopaque {
     const map = symbol_map.map(.{
+        .Instance = Header(Instance),
+        .Adapter = Adapter,
         .Surface = Header(Surface),
         .Device = Header(Device),
         .Queue = Header(Queue),
@@ -2643,6 +2663,7 @@ pub fn sfSymbol(name: [*:0]const u8) callconv(gpu.@"callconv") *const anyopaque 
         // .enumerateAdapters = Instance.sfEnumerateAdapters,
         // .createDevice = Device.sfCreateDevice,
         // .destroyDevice = Device.sfDestroyDevice,
+        .adapterInfo = Instance.sfAdapterInfo,
         .createSurfaceWin32 = Surface.sfCreateSurfaceWin32,
         .createSurfaceXlib = Surface.sfCreateSurfaceXlib,
         .destroySurface = Surface.sfDestroySurface,

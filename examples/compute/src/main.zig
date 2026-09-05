@@ -13,8 +13,13 @@ pub fn main(init: std.process.Init) !void {
 
     const adapters = try instance.enumerateAdaptersAlloc(arena);
 
-    // TODO: pick adapter
-    const adapter = adapters[0];
+    if (adapters.len == 0) return error.NoAdapter;
+    const adapter = for (adapters) |adapter| {
+        const info = instance.adapterInfo(adapter);
+        if (info.type == .discrete_gpu) break adapter;
+    } else adapters[0];
+    const adapter_info = instance.adapterInfo(adapter);
+    std.log.info("selected device: {s}", .{adapter_info.name[0..adapter_info.name_lenght]});
 
     const device: *sf.Device = .create(instance, adapter);
     defer device.destroy();
