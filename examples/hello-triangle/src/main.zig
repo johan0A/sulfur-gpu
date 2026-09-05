@@ -20,7 +20,7 @@ pub fn main(init: std.process.Init) !void {
     const window = c.SDL_CreateWindow("title", width, height, c.SDL_WINDOW_VULKAN | c.SDL_WINDOW_RESIZABLE) orelse
         return error.SdlCreateWindow;
 
-    const instance = gpu.Instance.create(null, &sfSymbol);
+    const instance = gpu.Instance.create(null, sfSymbol);
     defer instance.destroy();
 
     const adapters = try instance.enumerateAdaptersAlloc(arena);

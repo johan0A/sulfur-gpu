@@ -229,7 +229,11 @@ pub const Device = struct {
 
     texture_heap_set_layout: vk.DescriptorSetLayout,
 
-    pending_general_layout_transitions: std.array_hash_map.Auto(vk.Image, gpu.TextureDesc),
+    pending_texture_inits: std.array_hash_map.Auto(vk.Image, gpu.TextureDesc),
+    texture_init_timeline: struct {
+        semaphore: Semaphore,
+        value: u64,
+    },
 
     memory_properties: vk.PhysicalDeviceMemoryProperties,
     has_host_visible_device_local: bool,
@@ -443,7 +447,13 @@ pub const Device = struct {
             .heap = .{ .entries = .empty },
             .descriptor_buffer_properties = null,
             .texture_heap_set_layout = descriptor_set_layout,
-            .pending_general_layout_transitions = .empty,
+
+            .pending_texture_inits = .empty,
+            .texture_init_timeline = .{
+                .value = 0,
+                .semaphore = try .createVkDevice(handle, 0),
+            },
+
             .memory_properties = memory_properties,
             .has_host_visible_device_local = has_host_visible_device_local,
 
@@ -470,13 +480,14 @@ pub const Device = struct {
             queue.free_command_buffers.deinit(d.gpa);
             queue.pending_command_buffers.deinit(d.gpa);
         }
+        d.texture_init_timeline.semaphore.destroyVkDevice(d.device);
         d.device.destroyDescriptorSetLayout(d.texture_heap_set_layout, null);
         d.device.destroyDevice(null);
         d.gpa.destroy(d.device.wrapper);
         // TODO: make a debug gpa and uncomment next line
         // for (d.heap.entries.items) |entry| entry.destroy(d);
         d.heap.entries.deinit(d.gpa);
-        d.pending_general_layout_transitions.deinit(d.gpa);
+        d.pending_texture_inits.deinit(d.gpa);
         const gpa = d.gpa;
         gpa.destroy(d);
     }
@@ -846,118 +857,172 @@ pub const Queue = struct {
         command_buffers: []const *Header(CommandBuffer),
         extra_signal: ?Signal,
     ) !void {
-        errdefer for (command_buffers) |command_buffer| queue.d.releaseCommandBuffer(command_buffer.body().*);
-        try queue.submitPendingGeneralLayoutTransitions();
-        try queue.submitRecordedCommandBuffers(command_buffers, extra_signal);
-        for (command_buffers) |command_buffer| queue.d.command_buffers.destroy(command_buffer);
-    }
+        const d = queue.d;
+        const gpa = d.gpa;
+        const queue_state = d.queueStateForQueueId(queue.id);
+        const texture_init_timeline = &d.texture_init_timeline;
 
-    fn submitPendingGeneralLayoutTransitions(queue: Queue) !void {
-        const image_count = queue.d.pending_general_layout_transitions.count();
-        if (image_count == 0) return;
+        errdefer for (command_buffers) |command_buffer| d.releaseCommandBuffer(command_buffer.body().*);
 
-        const barriers = try queue.d.gpa.alloc(vk.ImageMemoryBarrier2, image_count);
-        defer queue.d.gpa.free(barriers);
+        const image_count = d.pending_texture_inits.count();
 
-        var image_it = queue.d.pending_general_layout_transitions.iterator();
+        const barriers = try gpa.alloc(vk.ImageMemoryBarrier2, image_count);
+        defer gpa.free(barriers);
 
-        for (barriers) |*barrier| {
-            const item = image_it.next().?;
-            const image = item.key_ptr.*;
-            const info = item.value_ptr.*;
+        var transition_command_buffer: ?CommandBuffer = null;
+        errdefer if (transition_command_buffer) |cb| d.releaseCommandBuffer(cb);
 
-            barrier.* = .{
-                .dst_stage_mask = .{
-                    .all_commands_bit = true,
-                },
-                .dst_access_mask = .{
-                    .memory_read_bit = true,
-                    .memory_write_bit = true,
-                },
-                .old_layout = .undefined,
-                .new_layout = .general,
-                .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                .image = image,
-                .subresource_range = .{
-                    .aspect_mask = to_vk.aspectsForFormat(info.format),
-                    .base_mip_level = 0,
-                    .level_count = info.mip_count,
-                    .base_array_layer = 0,
-                    .layer_count = info.layer_count,
-                },
-            };
+        if (image_count != 0) {
+            var image_it = d.pending_texture_inits.iterator();
+            for (barriers) |*barrier| {
+                const entry = image_it.next().?;
+                const image = entry.key_ptr.*;
+                const info = entry.value_ptr.*;
+
+                barrier.* = .{
+                    .dst_stage_mask = .{ .all_commands_bit = true },
+                    .dst_access_mask = .{ .memory_read_bit = true, .memory_write_bit = true },
+                    .old_layout = .undefined,
+                    .new_layout = .general,
+                    .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                    .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                    .image = image,
+                    .subresource_range = .{
+                        .aspect_mask = to_vk.aspectsForFormat(info.format),
+                        .base_mip_level = 0,
+                        .level_count = info.mip_count,
+                        .base_array_layer = 0,
+                        .layer_count = info.layer_count,
+                    },
+                };
+            }
+
+            transition_command_buffer = try queue.startCommandRecording();
+
+            d.device.cmdPipelineBarrier2(transition_command_buffer.command_buffer, &.{
+                .image_memory_barrier_count = @intCast(barriers.len),
+                .p_image_memory_barriers = barriers.ptr,
+            });
+            try d.device.endCommandBuffer(transition_command_buffer.command_buffer);
         }
 
-        const command_buffer = try queue.startCommandRecording();
-
-        errdefer queue.d.releaseCommandBuffer(command_buffer);
-
-        const dependency_info: vk.DependencyInfo = .{
-            .image_memory_barrier_count = @intCast(barriers.len),
-            .p_image_memory_barriers = barriers.ptr,
-        };
-        queue.d.device.cmdPipelineBarrier2(command_buffer.command_buffer, &dependency_info);
-
-        var command_buffer_with_header: Header(CommandBuffer) = undefined;
-        command_buffer_with_header.set(queue.d.table, command_buffer);
-        try queue.submitRecordedCommandBuffers(&.{&command_buffer_with_header}, null);
-
-        queue.d.pending_general_layout_transitions.clearRetainingCapacity();
-    }
-
-    fn submitRecordedCommandBuffers(
-        queue: Queue,
-        command_buffers: []const *Header(CommandBuffer),
-        extra_signal: ?Signal,
-    ) !void {
-        const submit_buffers = try queue.d.gpa.alloc(vk.CommandBufferSubmitInfo, command_buffers.len);
-        defer queue.d.gpa.free(submit_buffers);
+        const submit_buffers = try gpa.alloc(vk.CommandBufferSubmitInfo, command_buffers.len);
+        defer gpa.free(submit_buffers);
         for (command_buffers, submit_buffers) |command_buffer, *submit_buffer| {
-            try queue.d.device.endCommandBuffer(command_buffer.body().command_buffer);
+            try d.device.endCommandBuffer(command_buffer.body().command_buffer);
             submit_buffer.* = .{
                 .command_buffer = command_buffer.body().command_buffer,
                 .device_mask = 0,
             };
         }
 
-        const queue_state = queue.d.queueStateForQueueId(queue.id);
-        try queue_state.pending_command_buffers.ensureUnusedCapacity(queue.d.gpa, command_buffers.len);
+        const pending_command_buffer_count = command_buffers.len + @intFromBool(transition_command_buffer != null);
+        try queue_state.pending_command_buffers.ensureUnusedCapacity(gpa, pending_command_buffer_count);
+
+        const has_transitions = transition_command_buffer != null;
+
+        const init_previous = texture_init_timeline.value;
+        const init_target = if (has_transitions) init_previous + 1 else init_previous;
 
         const timeline = queue_state.timeline;
-        const value = queue_state.last_submitted + 1;
+        const transition_value = queue_state.last_submitted + 1;
+        const work_value = if (has_transitions) transition_value + 1 else transition_value;
 
-        var signal_infos: [2]vk.SemaphoreSubmitInfo = undefined;
-        signal_infos[0] = .{
+        var submits: [2]vk.SubmitInfo2 = undefined;
+        var submit_count: usize = 0;
+
+        var transition_submit_buffer: vk.CommandBufferSubmitInfo = undefined;
+        var transition_waits: [1]vk.SemaphoreSubmitInfo = undefined;
+        var transition_signals: [2]vk.SemaphoreSubmitInfo = undefined;
+
+        if (transition_command_buffer) |cb| {
+            transition_submit_buffer = .{ .command_buffer = cb.command_buffer, .device_mask = 0 };
+
+            transition_waits[0] = .{
+                .semaphore = texture_init_timeline.semaphore.semaphore,
+                .value = init_previous,
+                .stage_mask = .{ .all_commands_bit = true },
+                .device_index = 0,
+            };
+            transition_signals[0] = .{
+                .semaphore = timeline.semaphore,
+                .value = transition_value,
+                .stage_mask = .{ .all_commands_bit = true },
+                .device_index = 0,
+            };
+            transition_signals[1] = .{
+                .semaphore = texture_init_timeline.semaphore.semaphore,
+                .value = init_target,
+                .stage_mask = .{ .all_commands_bit = true },
+                .device_index = 0,
+            };
+
+            submits[submit_count] = .{
+                .wait_semaphore_info_count = 1,
+                .p_wait_semaphore_infos = &transition_waits,
+                .command_buffer_info_count = 1,
+                .p_command_buffer_infos = @ptrCast(&transition_submit_buffer),
+                .signal_semaphore_info_count = 2,
+                .p_signal_semaphore_infos = &transition_signals,
+            };
+            submit_count += 1;
+        }
+
+        var work_waits: [1]vk.SemaphoreSubmitInfo = .{.{
+            .semaphore = texture_init_timeline.semaphore.semaphore,
+            .value = init_target,
+            .stage_mask = .{ .all_commands_bit = true },
+            .device_index = 0,
+        }};
+
+        var work_signals: [2]vk.SemaphoreSubmitInfo = undefined;
+        var work_signal_count: u32 = 1;
+        work_signals[0] = .{
             .semaphore = timeline.semaphore,
-            .value = value,
+            .value = work_value,
             .stage_mask = .{ .all_commands_bit = true },
             .device_index = 0,
         };
-        var signals: []const vk.SemaphoreSubmitInfo = signal_infos[0..1];
         if (extra_signal) |signal| {
-            signal_infos[1] = .{
+            work_signals[1] = .{
                 .semaphore = signal.semaphore.semaphore,
                 .value = signal.value,
                 .stage_mask = .{ .all_commands_bit = true },
                 .device_index = 0,
             };
-            signals = signal_infos[0..2];
+            work_signal_count = 2;
         }
 
-        const submit_info: vk.SubmitInfo2 = .{
+        submits[submit_count] = .{
+            .wait_semaphore_info_count = 1,
+            .p_wait_semaphore_infos = &work_waits,
             .command_buffer_info_count = @intCast(submit_buffers.len),
             .p_command_buffer_infos = submit_buffers.ptr,
-            .signal_semaphore_info_count = @intCast(signals.len),
-            .p_signal_semaphore_infos = signals.ptr,
+            .signal_semaphore_info_count = work_signal_count,
+            .p_signal_semaphore_infos = &work_signals,
         };
-        try queue.d.device.queueSubmit2(queue_state.queue, &.{submit_info}, .null_handle);
+        submit_count += 1;
 
-        queue_state.last_submitted = value;
-        for (command_buffers) |command_buffer| queue_state.pending_command_buffers.appendAssumeCapacity(.{
-            .value = value,
-            .command_buffer = command_buffer.body().command_buffer,
-        });
+        try d.device.queueSubmit2(queue_state.queue, submits[0..submit_count], .null_handle);
+
+        texture_init_timeline.value = init_target;
+        queue_state.last_submitted = work_value;
+
+        if (transition_command_buffer) |cb| {
+            d.pending_texture_inits.clearRetainingCapacity();
+            queue_state.pending_command_buffers.appendAssumeCapacity(.{
+                .value = transition_value,
+                .command_buffer = cb.command_buffer,
+            });
+            transition_command_buffer = null;
+        }
+        for (command_buffers) |command_buffer| {
+            queue_state.pending_command_buffers.appendAssumeCapacity(.{
+                .value = work_value,
+                .command_buffer = command_buffer.body().command_buffer,
+            });
+            d.command_buffers.destroy(command_buffer);
+        }
     }
 };
 
@@ -1149,7 +1214,7 @@ pub const Swapchain = struct {
             swapchain.current = index;
             const texture = &swapchain.textures[index].texture;
 
-            try swapchain.d.pending_general_layout_transitions.put(swapchain.d.gpa, texture.body().image, texture.body().desc);
+            try swapchain.d.pending_texture_inits.put(swapchain.d.gpa, texture.body().image, texture.body().desc);
 
             return texture;
         }
@@ -1835,7 +1900,7 @@ pub const Texture = struct {
         const default_view = try createView(d, image, info, .{});
         errdefer d.device.destroyImageView(default_view, null);
 
-        try d.pending_general_layout_transitions.put(d.gpa, image, info);
+        try d.pending_texture_inits.put(d.gpa, image, info);
         const texture = try d.textures.create(d.gpa);
         texture.set(d.table, .{
             .image = image,
@@ -1856,7 +1921,7 @@ pub const Texture = struct {
     }
 
     fn destroyOptions(texture: *Texture, owns_vk_image: bool) void {
-        _ = texture.d.pending_general_layout_transitions.swapRemove(texture.image);
+        _ = texture.d.pending_texture_inits.swapRemove(texture.image);
         if (owns_vk_image) texture.d.device.destroyImage(texture.image, null);
         texture.d.device.destroyImageView(texture.default_view, null);
         var it = texture.views.valueIterator();
