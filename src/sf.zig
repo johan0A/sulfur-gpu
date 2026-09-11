@@ -304,24 +304,37 @@ pub const Device = opaque {
         );
     }
 
-    pub fn malloc(
+    pub fn alloc(
         device: *Device,
         size: usize,
         alignment: usize,
-        memory: Memory,
-    ) DeviceAddress {
+        memory: MemoryType,
+    ) error{
+        OutOfMemory,
+        OutOfDeviceMemory,
+    }!HostDeviceAddress {
         const f: *const fn (
             device: *Device,
             size: usize,
             alignment: usize,
-            memory: Memory,
-        ) callconv(@"callconv") DeviceAddress = @ptrCast(internal.table(device)[internal.slots.malloc]);
-        return f(
+            memory: MemoryType,
+            device_mapping: *HostDeviceAddress,
+        ) callconv(@"callconv") Result = @ptrCast(internal.table(device)[internal.slots.alloc]);
+        var device_mapping: HostDeviceAddress = undefined;
+        const result = f(
             device,
             size,
             alignment,
             memory,
+            &device_mapping,
         );
+        switch (result) {
+            .ok => {},
+            .out_of_memory => return error.OutOfMemory,
+            .out_of_device_memory => return error.OutOfDeviceMemory,
+            else => unreachable,
+        }
+        return device_mapping;
     }
 
     pub fn free(
@@ -1269,9 +1282,9 @@ pub const Result = enum(u32) {
     unknown = 5,
 };
 
-pub const Memory = enum(u32) {
-    default = 0,
-    gpu = 1,
+pub const MemoryType = enum(u32) {
+    upload = 0,
+    device_local = 1,
     readback = 2,
 };
 
@@ -1565,6 +1578,11 @@ pub const SurfaceXlibDesc = extern struct {
     window: u64,
 };
 
+pub const HostDeviceAddress = extern struct {
+    host: *anyopaque,
+    device: DeviceAddress,
+};
+
 pub const SwapchainDesc = extern struct {
     format: Format,
     present_mode: PresentMode,
@@ -1694,7 +1712,7 @@ const internal = struct {
         surface_formats: usize = 0,
         surface_present_modes: usize = 0,
         device_to_host_pointer: usize = 0,
-        malloc: usize = 0,
+        alloc: usize = 0,
         free: usize = 0,
         descriptor_size_and_heap_align: usize = 0,
         store_descriptor: usize = 0,
@@ -1749,7 +1767,7 @@ const internal = struct {
         slots.surface_formats = get_slot.?(instance, "sfSurfaceFormats");
         slots.surface_present_modes = get_slot.?(instance, "sfSurfacePresentModes");
         slots.device_to_host_pointer = get_slot.?(instance, "sfDeviceToHostPointer");
-        slots.malloc = get_slot.?(instance, "sfMalloc");
+        slots.alloc = get_slot.?(instance, "sfAlloc");
         slots.free = get_slot.?(instance, "sfFree");
         slots.descriptor_size_and_heap_align = get_slot.?(instance, "sfDescriptorSizeAndHeapAlign");
         slots.store_descriptor = get_slot.?(instance, "sfStoreDescriptor");

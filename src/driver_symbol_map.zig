@@ -56,12 +56,16 @@ fn Functions(handle_types: HandleTypes) type {
             device: *handle_types.Device,
             address: sf.DeviceAddress,
         ) *anyopaque,
-        malloc: fn (
+        alloc: fn (
             device: *handle_types.Device,
             size: usize,
             alignment: usize,
-            memory: sf.Memory,
-        ) sf.DeviceAddress,
+            memory: sf.MemoryType,
+            device_mapping: *sf.HostDeviceAddress,
+        ) error{
+            OutOfMemory,
+            OutOfDeviceMemory,
+        }!void,
         free: fn (
             device: *handle_types.Device,
             address: sf.DeviceAddress,
@@ -411,18 +415,20 @@ fn CFunctions(comptime handle_types: HandleTypes, comptime functions: Functions(
             );
         }
 
-        pub fn malloc(
+        pub fn alloc(
             device: *handle_types.Device,
             size: usize,
             alignment: usize,
-            memory: sf.Memory,
-        ) callconv(sf.@"callconv") sf.DeviceAddress {
-            return functions.malloc(
+            memory: sf.MemoryType,
+            device_mapping: *sf.HostDeviceAddress,
+        ) callconv(sf.@"callconv") sf.Result {
+            return cResult(functions.alloc(
                 device,
                 size,
                 alignment,
                 memory,
-            );
+                device_mapping,
+            ));
         }
 
         pub fn free(
@@ -861,7 +867,7 @@ pub fn map(
         .{ "sfSurfaceFormats", @ptrCast(&c_functions.surfaceFormats) },
         .{ "sfSurfacePresentModes", @ptrCast(&c_functions.surfacePresentModes) },
         .{ "sfDeviceToHostPointer", @ptrCast(&c_functions.deviceToHostPointer) },
-        .{ "sfMalloc", @ptrCast(&c_functions.malloc) },
+        .{ "sfAlloc", @ptrCast(&c_functions.alloc) },
         .{ "sfFree", @ptrCast(&c_functions.free) },
         .{ "sfDescriptorSizeAndHeapAlign", @ptrCast(&c_functions.descriptorSizeAndHeapAlign) },
         .{ "sfStoreDescriptor", @ptrCast(&c_functions.storeDescriptor) },

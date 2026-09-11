@@ -125,7 +125,14 @@
       ],
       "doc": ""
     },
-
+    {
+      "name": "SfHostDeviceAddress",
+      "fields": [
+        { "name": "host", "type": { "base": "void", "ptr": [{}] }, "doc": "" },
+        { "name": "device", "type": { "base": "SfDeviceAddress" }, "doc": "" }
+      ],
+      "doc": ""
+    },
     {
       "name": "SfSwapchainDesc",
       "fields": [
@@ -270,12 +277,12 @@
       "doc": ""
     },
     {
-      "name": "SfMemory",
+      "name": "SfMemoryType",
       "backing_type": "uint32_t",
       "values": [
-        { "name": "SF_MEMORY_DEFAULT", "value": 0, "doc": "" },
-        { "name": "SF_MEMORY_GPU", "value": 1, "doc": "" },
-        { "name": "SF_MEMORY_READBACK", "value": 2, "doc": "" }
+        { "name": "SF_MEMORY_TYPE_UPLOAD", "value": 0, "doc": "" },
+        { "name": "SF_MEMORY_TYPE_DEVICE_LOCAL", "value": 1, "doc": "" },
+        { "name": "SF_MEMORY_TYPE_READBACK", "value": 2, "doc": "" }
       ],
       "doc": ""
     },
@@ -761,15 +768,20 @@
       "doc": ""
     },
     {
-      "name": "sfMalloc",
+      "name": "sfAlloc",
       "group": "SfDevice",
       "dispatch": "table",
-      "return": { "base": "SfDeviceAddress" },
+      "return": { "base": "SfResult" },
+      "errors": [
+        "SF_RESULT_OUT_OF_MEMORY",
+        "SF_RESULT_OUT_OF_DEVICE_MEMORY"
+      ],
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "size", "type": { "base": "size_t" }, "doc": "" },
         { "name": "alignment", "type": { "base": "size_t" }, "doc": "" },
-        { "name": "memory", "type": { "base": "SfMemory" }, "doc": "" }
+        { "name": "memory", "type": { "base": "SfMemoryType" }, "doc": "" },
+        { "name": "device_mapping", "type": { "base": "SfHostDeviceAddress", "ptr": [{}] }, "out": true, "doc": "" }
       ],
       "doc": ""
     },

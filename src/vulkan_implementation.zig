@@ -2425,24 +2425,37 @@ pub const Pipeline = struct {
 };
 
 pub const heap = struct {
-    pub fn sfMalloc(
+    pub fn sfAlloc(
         d: *Header(Device),
         bytes: usize,
         alignment: usize,
-        memory: gpu.Memory,
-    ) gpu.DeviceAddress {
-        return malloc(d.body(), bytes, .fromByteUnits(alignment), memory) catch return 0; // TODO: investigate what can error
+        memory: gpu.MemoryType,
+        mapped_memory: *gpu.HostDeviceAddress,
+    ) !void {
+        mapped_memory.* = alloc(d.body(), bytes, .fromByteUnits(alignment), memory) catch |err| return switch (err) {
+            // TODO: inverstigate:
+            error.ValidationFailed,
+            error.Unknown,
+            error.InvalidOpaqueCaptureAddressKHR,
+            error.InvalidExternalHandle,
+
+            error.MemoryMapFailed,
+            error.OutOfHostMemory,
+            error.OutOfMemory,
+            => error.OutOfMemory,
+            error.OutOfDeviceMemory => error.OutOfDeviceMemory,
+        };
     }
-    fn malloc(
+    fn alloc(
         d: *Device,
         bytes: usize,
         alignment: std.mem.Alignment,
-        memory: gpu.Memory,
-    ) !gpu.DeviceAddress {
+        memory: gpu.MemoryType,
+    ) !gpu.HostDeviceAddress {
         std.debug.assert(bytes > 0);
 
         const usage: vk.BufferUsageFlags = switch (memory) {
-            .default => .{
+            .upload => .{
                 .storage_buffer_bit = true,
                 .index_buffer_bit = true,
                 .indirect_buffer_bit = true,
@@ -2450,7 +2463,7 @@ pub const heap = struct {
                 .shader_device_address_bit = true,
                 .resource_descriptor_buffer_bit_ext = true,
             },
-            .gpu => .{
+            .device_local => .{
                 .storage_buffer_bit = true,
                 .index_buffer_bit = true,
                 .indirect_buffer_bit = true,
@@ -2491,8 +2504,8 @@ pub const heap = struct {
         }
 
         const memory_type_bits = switch (memory) {
-            .default, .readback => buffer_memory_requirements.memory_type_bits,
-            .gpu => bits: {
+            .upload, .readback => buffer_memory_requirements.memory_type_bits,
+            .device_local => bits: {
                 const color_bits = probeImageMemoryTypeBits(d.*, .r8g8b8a8_unorm, .{
                     .sampled_bit = true,
                     .transfer_dst_bit = true,
@@ -2507,12 +2520,12 @@ pub const heap = struct {
         };
 
         const properties: vk.MemoryPropertyFlags = switch (memory) {
-            .default => .{
+            .upload => .{
                 .device_local_bit = d.has_host_visible_device_local,
                 .host_visible_bit = true,
                 .host_coherent_bit = true,
             },
-            .gpu => .{
+            .device_local => .{
                 .device_local_bit = true,
             },
             .readback => .{
@@ -2541,10 +2554,10 @@ pub const heap = struct {
         std.debug.assert(delta + bytes <= buffer_info.size);
 
         const host_addr: ?usize = switch (memory) {
-            .readback, .default => @intFromPtr(
+            .readback, .upload => @intFromPtr(
                 try d.device.mapMemory(buffer_memory, 0, vk.WHOLE_SIZE, .{}),
             ) + delta,
-            .gpu => null,
+            .device_local => null,
         };
 
         try d.heap.insert(d.gpa, .{
@@ -2555,7 +2568,10 @@ pub const heap = struct {
             .host_addr = host_addr,
         });
 
-        return device_addr;
+        return .{
+            .device = device_addr,
+            .host = @ptrFromInt(host_addr orelse undefined),
+        };
     }
 
     pub fn sfFree(d: *Header(Device), ptr: gpu.DeviceAddress) void {
@@ -2671,7 +2687,7 @@ pub fn sfSymbol(name: [*:0]const u8) callconv(gpu.@"callconv") *const anyopaque 
         .surfaceFormats = Device.sfSurfaceFormats,
         .surfacePresentModes = Device.sfSurfacePresentModes,
         .deviceToHostPointer = Device.sfDeviceToHostPointer,
-        .malloc = heap.sfMalloc,
+        .alloc = heap.sfAlloc,
         .free = heap.sfFree,
         .descriptorSizeAndHeapAlign = Texture.Descriptor.sfDescriptorSizeAndHeapAlign,
         .storeDescriptor = Texture.Descriptor.sfStoreDescriptor,

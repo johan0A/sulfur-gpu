@@ -33,48 +33,48 @@ pub fn main(init: std.process.Init) !void {
         .usage = .{ .storage = true },
     };
     const texture_size_and_align = device.textureSizeAndAlign(texture_info);
-    const texture_gpu = device.malloc(texture_size_and_align.size, texture_size_and_align.alignment, .gpu);
-    defer device.free(texture_gpu);
-    const texture = try device.createTexture(texture_info, texture_gpu);
+    const texture_map = try device.alloc(texture_size_and_align.size, texture_size_and_align.alignment, .device_local);
+    defer device.free(texture_map.device);
+    const texture = try device.createTexture(texture_info, texture_map.device);
     defer texture.destroy();
 
     const descriptor_size_and_align = device.descriptorSizeAndHeapAlign();
-    const heap_gpu = device.malloc(descriptor_size_and_align.size * 65536, descriptor_size_and_align.alignment, .default);
-    defer device.free(heap_gpu);
-    const heap: [*]u8 = @ptrCast(@alignCast(device.toHostPointer(heap_gpu)));
+    const heap_map = try device.alloc(descriptor_size_and_align.size * 65536, descriptor_size_and_align.alignment, .upload);
+    defer device.free(heap_map.device);
+    const heap: [*]u8 = @ptrCast(heap_map.host);
     const descriptor = try texture.storageDescriptor(.{});
     device.storeDescriptor(&descriptor, heap, 0);
 
-    const data_gpu = device.malloc(@sizeOf(Data), @alignOf(Data), .default);
-    defer device.free(data_gpu);
-    const data: *Data = @ptrCast(@alignCast(device.toHostPointer(data_gpu)));
+    const data_map = try device.alloc(@sizeOf(Data), @alignOf(Data), .upload);
+    defer device.free(data_map.device);
+    const data: *Data = @ptrCast(@alignCast(data_map.host));
     data.* = .{ .output_texture = 0 };
 
     const pixel_buffer_size = width * height * 4;
-    const readback_gpu = device.malloc(pixel_buffer_size, 256, .readback);
-    defer device.free(readback_gpu);
+    const readback_map = try device.alloc(pixel_buffer_size, 256, .readback);
+    defer device.free(readback_map.device);
 
     const pipeline = try device.createComputePipeline(@embedFile("generate_texture.spv"));
     defer pipeline.destroy();
 
     const command_buffer = try queue.startCommandRecording();
-    command_buffer.setActiveTextureHeap(heap_gpu);
+    command_buffer.setActiveTextureHeap(heap_map.device);
     command_buffer.setPipeline(pipeline);
     command_buffer.dispatch(
-        data_gpu,
+        data_map.device,
         (width + workgroup_size - 1) / workgroup_size,
         (height + workgroup_size - 1) / workgroup_size,
         1,
     );
     command_buffer.barrier(.{ .compute = true }, .{ .transfer = true }, .{});
-    command_buffer.copyTextureToBuffer(texture_gpu, readback_gpu, texture);
+    command_buffer.copyTextureToBuffer(texture_map.device, readback_map.device, texture);
 
     const done = try device.createSemaphore(0);
     defer done.destroy();
     try queue.submitAndSignal(&.{command_buffer}, done, 1);
     try done.wait(1);
 
-    const readback: [*]const u8 = @ptrCast(device.toHostPointer(readback_gpu));
+    const readback: [*]const u8 = @ptrCast(readback_map.host);
     const pixels = readback[0..pixel_buffer_size];
 
     const file = try std.Io.Dir.cwd().createFile(io, "out.bmp", .{});
