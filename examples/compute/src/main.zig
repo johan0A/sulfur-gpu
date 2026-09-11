@@ -39,7 +39,7 @@ pub fn main(init: std.process.Init) !void {
             const x11_window = c.SDL_GetNumberProperty(props, c.SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0);
             if (x11_window == 0) @panic("TODO");
             const surface_desc: sf.SurfaceXlibDesc = .{ .display = display, .window = @intCast(x11_window) };
-            break :blk sf.createSurfaceXlib(device, surface_desc);
+            break :blk sf.Surface.createXlib(device, surface_desc);
         },
     };
     defer surface.destroy();
