@@ -22,7 +22,7 @@ pub export fn sfSymbol(name: [*:0]u8) callconv(gpu.@"callconv") *const anyopaque
 var slot_index: usize = 0;
 var table: [1024]*const anyopaque = undefined;
 
-fn createInstance(allocator: ?*gpu.Allocator) *impl.Header(impl.Instance) {
+fn createInstance(allocator: ?*gpu.HostAllocator) *impl.Header(impl.Instance) {
     const instance = impl.Instance.sfCreateInstance(allocator);
     instance.table = @ptrCast(&table);
     return instance;

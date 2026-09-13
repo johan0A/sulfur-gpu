@@ -76,7 +76,7 @@ fn Functions(handle_types: HandleTypes) type {
         storeDescriptor: fn (
             device: *handle_types.Device,
             descriptor: *const sf.Descriptor,
-            heap: [*]u8,
+            descriptor_heap: [*]u8,
             index: usize,
         ) void,
         getQueue: fn (
@@ -452,13 +452,13 @@ fn CFunctions(comptime handle_types: HandleTypes, comptime functions: Functions(
         pub fn storeDescriptor(
             device: *handle_types.Device,
             descriptor: *const sf.Descriptor,
-            heap: [*]u8,
+            descriptor_heap: [*]u8,
             index: usize,
         ) callconv(sf.@"callconv") void {
             return functions.storeDescriptor(
                 device,
                 descriptor,
-                heap,
+                descriptor_heap,
                 index,
             );
         }

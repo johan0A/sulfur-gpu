@@ -13,7 +13,7 @@ const HandleTypes = struct {
 fn Functions(handle_types: HandleTypes) type {
     return struct {
         createInstance: fn (
-            allocator: ?*sf.Allocator,
+            allocator: ?*sf.HostAllocator,
         ) *handle_types.Instance,
         destroyInstance: fn (
             instance: *handle_types.Instance,
@@ -59,7 +59,7 @@ fn cResult(result: anytype) sf.Result {
 fn CFunctions(comptime handle_types: HandleTypes, comptime functions: Functions(handle_types)) type {
     return struct {
         pub fn createInstance(
-            allocator: ?*sf.Allocator,
+            allocator: ?*sf.HostAllocator,
         ) callconv(sf.@"callconv") *handle_types.Instance {
             return functions.createInstance(
                 allocator,

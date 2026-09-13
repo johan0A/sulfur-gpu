@@ -81,7 +81,7 @@
 
   "structs": [
     {
-      "name": "SfAllocator",
+      "name": "SfHostAllocator",
       "fields": [
         { "name": "user_data", "type": { "base": "void", "ptr": [{}] }, "doc": "" },
         { "name": "alloc", "type": { "base": "SfAllocFn" }, "doc": "" },
@@ -611,7 +611,7 @@
       "dispatch": "symbol",
       "return": { "base": "SfInstance", "ptr": [{}] },
       "params": [
-        { "name": "allocator", "type": { "base": "SfAllocator", "ptr": [{ "optional": true }] }, "doc": "" }
+        { "name": "allocator", "type": { "base": "SfHostAllocator", "ptr": [{ "optional": true }] }, "doc": "" }
       ],
       "doc": ""
     },
@@ -814,7 +814,7 @@
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "descriptor", "type": { "base": "SfDescriptor", "ptr": [{ "const": true }] }, "doc": "" },
-        { "name": "heap", "type": { "base": "uint8_t", "ptr": [{ "len": "none" }] }, "doc": "" },
+        { "name": "descriptor_heap", "type": { "base": "uint8_t", "ptr": [{ "len": "none" }] }, "doc": "" },
         { "name": "index", "type": { "base": "size_t" }, "doc": "" }
       ],
       "doc": ""

@@ -30,7 +30,7 @@ pub const Instance = struct {
     loader: VulkanLoader,
     surface_support: SurfaceSupport,
     debug_messenger: vk.DebugUtilsMessengerEXT,
-    sf_gpa: gpu.Allocator,
+    sf_gpa: gpu.HostAllocator,
     gpa: std.mem.Allocator,
 
     devices: std.heap.MemoryPool(Header(Device)),
@@ -42,12 +42,12 @@ pub const Instance = struct {
     };
 
     pub fn sfCreateInstance(
-        host_allocator: ?*gpu.Allocator,
+        host_allocator: ?*gpu.HostAllocator,
     ) *Header(Instance) {
         return create(host_allocator) catch @panic("TODO");
     }
     fn create(
-        host_allocator: ?*gpu.Allocator,
+        host_allocator: ?*gpu.HostAllocator,
     ) !*Header(Instance) {
         const gpa: std.mem.Allocator = if (host_allocator) |ha| .{
             .ptr = @ptrCast(@alignCast(ha)),
@@ -608,6 +608,195 @@ pub const Device = struct {
         const entry = d.body().heap.addrToEntry(ptr);
         const offset = ptr - entry.device_addr;
         return @ptrFromInt(entry.host_addr.? + offset);
+    }
+
+    pub fn sfAlloc(
+        d: *Header(Device),
+        bytes: usize,
+        alignment: usize,
+        memory: gpu.MemoryType,
+        mapped_memory: *gpu.HostDeviceAddress,
+    ) !void {
+        mapped_memory.* = alloc(d.body(), bytes, .fromByteUnits(alignment), memory) catch |err| return switch (err) {
+            // TODO: inverstigate:
+            error.ValidationFailed,
+            error.Unknown,
+            error.InvalidOpaqueCaptureAddressKHR,
+            error.InvalidExternalHandle,
+
+            error.MemoryMapFailed,
+            error.OutOfHostMemory,
+            error.OutOfMemory,
+            => error.OutOfMemory,
+            error.OutOfDeviceMemory => error.OutOfDeviceMemory,
+        };
+    }
+    fn alloc(
+        d: *Device,
+        bytes: usize,
+        alignment: std.mem.Alignment,
+        memory: gpu.MemoryType,
+    ) !gpu.HostDeviceAddress {
+        std.debug.assert(bytes > 0);
+
+        const usage: vk.BufferUsageFlags = switch (memory) {
+            .upload => .{
+                .storage_buffer_bit = true,
+                .index_buffer_bit = true,
+                .indirect_buffer_bit = true,
+                .transfer_src_bit = true,
+                .shader_device_address_bit = true,
+                .resource_descriptor_buffer_bit_ext = true,
+            },
+            .device_local => .{
+                .storage_buffer_bit = true,
+                .index_buffer_bit = true,
+                .indirect_buffer_bit = true,
+                .transfer_src_bit = true,
+                .transfer_dst_bit = true,
+                .shader_device_address_bit = true,
+            },
+            .readback => .{
+                .storage_buffer_bit = true,
+                .transfer_dst_bit = true,
+                .shader_device_address_bit = true,
+            },
+        };
+
+        var families_buf: [Device.max_queue_state_count]u32 = undefined;
+        for (d.queue_states[0..d.queue_state_count], 0..) |q, i| families_buf[i] = q.family;
+        const families = families_buf[0..d.queue_state_count];
+
+        const concurrent = families.len > 1;
+        var buffer_info: vk.BufferCreateInfo = .{
+            .size = bytes,
+            .usage = usage,
+            .sharing_mode = if (concurrent) .concurrent else .exclusive,
+            .queue_family_index_count = if (concurrent) @intCast(families.len) else 0,
+            .p_queue_family_indices = if (concurrent) families.ptr else null,
+        };
+        var buffer = try d.device.createBuffer(&buffer_info, null);
+        errdefer d.device.destroyBuffer(buffer, null);
+
+        var buffer_memory_requirements = d.device.getBufferMemoryRequirements(buffer);
+
+        const padded = buffer_memory_requirements.alignment < alignment.toByteUnits();
+        if (padded) {
+            d.device.destroyBuffer(buffer, null);
+            buffer_info.size = bytes + alignment.toByteUnits() - 1;
+            buffer = try d.device.createBuffer(&buffer_info, null);
+            buffer_memory_requirements = d.device.getBufferMemoryRequirements(buffer);
+        }
+
+        const memory_type_bits = switch (memory) {
+            .upload, .readback => buffer_memory_requirements.memory_type_bits,
+            .device_local => bits: {
+                const color_bits = probeImageMemoryTypeBits(d.*, .r8g8b8a8_unorm, .{
+                    .sampled_bit = true,
+                    .transfer_dst_bit = true,
+                    .color_attachment_bit = true,
+                });
+                const depth_bits = probeImageMemoryTypeBits(d.*, .d32_sfloat, .{
+                    .depth_stencil_attachment_bit = true,
+                    .sampled_bit = true,
+                });
+                break :bits buffer_memory_requirements.memory_type_bits & color_bits & depth_bits;
+            },
+        };
+
+        const properties: vk.MemoryPropertyFlags = switch (memory) {
+            .upload => .{
+                .device_local_bit = d.has_host_visible_device_local,
+                .host_visible_bit = true,
+                .host_coherent_bit = true,
+            },
+            .device_local => .{
+                .device_local_bit = true,
+            },
+            .readback => .{
+                .host_visible_bit = true,
+                .host_cached_bit = true,
+                .host_coherent_bit = true,
+            },
+        };
+        const alloc_flags: vk.MemoryAllocateFlagsInfo = .{
+            .flags = .{ .device_address_bit = true },
+            .device_mask = 0,
+        };
+        const buffer_memory = try d.device.allocateMemory(&.{
+            .p_next = &alloc_flags,
+            .allocation_size = buffer_memory_requirements.size,
+            .memory_type_index = findMemoryType(d.*, memory_type_bits, properties),
+        }, null);
+        errdefer d.device.freeMemory(buffer_memory, null);
+
+        try d.device.bindBufferMemory(buffer, buffer_memory, 0);
+
+        const raw_device_addr = d.device.getBufferDeviceAddress(&.{ .buffer = buffer });
+        const device_addr = std.mem.alignForward(u64, raw_device_addr, alignment.toByteUnits());
+        const delta: usize = @intCast(device_addr - raw_device_addr);
+        if (!padded) std.debug.assert(delta == 0);
+        std.debug.assert(delta + bytes <= buffer_info.size);
+
+        const host_addr: ?usize = switch (memory) {
+            .readback, .upload => @intFromPtr(
+                try d.device.mapMemory(buffer_memory, 0, vk.WHOLE_SIZE, .{}),
+            ) + delta,
+            .device_local => null,
+        };
+
+        try d.heap.insert(d.gpa, .{
+            .buffer = buffer,
+            .memory = buffer_memory,
+            .size = bytes,
+            .device_addr = device_addr,
+            .host_addr = host_addr,
+        });
+
+        return .{
+            .device = device_addr,
+            .host = if (host_addr) |addr| @ptrFromInt(addr) else undefined,
+        };
+    }
+
+    pub fn sfFree(d: *Header(Device), ptr: gpu.DeviceAddress) void {
+        free(d.body(), ptr);
+    }
+    fn free(d: *Device, ptr: gpu.DeviceAddress) void {
+        const index = d.heap.indexFromAddr(ptr);
+        var entry = d.heap.entries.orderedRemove(index);
+        entry.destroy(d.*);
+    }
+
+    // TODO: cache this
+    fn findMemoryType(d: Device, type_filter: u32, properties: vk.MemoryPropertyFlags) u32 {
+        for (0..d.memory_properties.memory_type_count) |i| {
+            if ((type_filter & (@as(u32, 1) << @intCast(i))) != 0 and
+                (d.memory_properties.memory_types[i].property_flags.intersect(properties)) == properties)
+            {
+                return @intCast(i);
+            }
+        }
+        @panic(""); // TODO
+    }
+
+    // TODO: cache this
+    fn probeImageMemoryTypeBits(d: Device, format: vk.Format, usage: vk.ImageUsageFlags) u32 {
+        const ici: vk.ImageCreateInfo = .{
+            .image_type = .@"2d",
+            .format = format,
+            .extent = .{ .width = 16, .height = 16, .depth = 1 },
+            .mip_levels = 1,
+            .array_layers = 1,
+            .samples = .{ .@"1_bit" = true },
+            .tiling = .optimal,
+            .usage = usage,
+            .sharing_mode = .exclusive,
+            .initial_layout = .undefined,
+        };
+        var req: vk.MemoryRequirements2 = .{ .memory_requirements = undefined };
+        d.device.getDeviceImageMemoryRequirements(&.{ .plane_aspect = .{}, .p_create_info = &ici }, &req);
+        return req.memory_requirements.memory_type_bits;
     }
 
     fn descriptorBufferProperties(d: *Device) *vk.PhysicalDeviceDescriptorBufferPropertiesEXT {
@@ -2424,211 +2613,20 @@ pub const Pipeline = struct {
     }
 };
 
-pub const heap = struct {
-    pub fn sfAlloc(
-        d: *Header(Device),
-        bytes: usize,
-        alignment: usize,
-        memory: gpu.MemoryType,
-        mapped_memory: *gpu.HostDeviceAddress,
-    ) !void {
-        mapped_memory.* = alloc(d.body(), bytes, .fromByteUnits(alignment), memory) catch |err| return switch (err) {
-            // TODO: inverstigate:
-            error.ValidationFailed,
-            error.Unknown,
-            error.InvalidOpaqueCaptureAddressKHR,
-            error.InvalidExternalHandle,
-
-            error.MemoryMapFailed,
-            error.OutOfHostMemory,
-            error.OutOfMemory,
-            => error.OutOfMemory,
-            error.OutOfDeviceMemory => error.OutOfDeviceMemory,
-        };
-    }
-    fn alloc(
-        d: *Device,
-        bytes: usize,
-        alignment: std.mem.Alignment,
-        memory: gpu.MemoryType,
-    ) !gpu.HostDeviceAddress {
-        std.debug.assert(bytes > 0);
-
-        const usage: vk.BufferUsageFlags = switch (memory) {
-            .upload => .{
-                .storage_buffer_bit = true,
-                .index_buffer_bit = true,
-                .indirect_buffer_bit = true,
-                .transfer_src_bit = true,
-                .shader_device_address_bit = true,
-                .resource_descriptor_buffer_bit_ext = true,
-            },
-            .device_local => .{
-                .storage_buffer_bit = true,
-                .index_buffer_bit = true,
-                .indirect_buffer_bit = true,
-                .transfer_src_bit = true,
-                .transfer_dst_bit = true,
-                .shader_device_address_bit = true,
-            },
-            .readback => .{
-                .storage_buffer_bit = true,
-                .transfer_dst_bit = true,
-                .shader_device_address_bit = true,
-            },
-        };
-
-        var families_buf: [Device.max_queue_state_count]u32 = undefined;
-        for (d.queue_states[0..d.queue_state_count], 0..) |q, i| families_buf[i] = q.family;
-        const families = families_buf[0..d.queue_state_count];
-
-        const concurrent = families.len > 1;
-        var buffer_info: vk.BufferCreateInfo = .{
-            .size = bytes,
-            .usage = usage,
-            .sharing_mode = if (concurrent) .concurrent else .exclusive,
-            .queue_family_index_count = if (concurrent) @intCast(families.len) else 0,
-            .p_queue_family_indices = if (concurrent) families.ptr else null,
-        };
-        var buffer = try d.device.createBuffer(&buffer_info, null);
-        errdefer d.device.destroyBuffer(buffer, null);
-
-        var buffer_memory_requirements = d.device.getBufferMemoryRequirements(buffer);
-
-        const padded = buffer_memory_requirements.alignment < alignment.toByteUnits();
-        if (padded) {
-            d.device.destroyBuffer(buffer, null);
-            buffer_info.size = bytes + alignment.toByteUnits() - 1;
-            buffer = try d.device.createBuffer(&buffer_info, null);
-            buffer_memory_requirements = d.device.getBufferMemoryRequirements(buffer);
-        }
-
-        const memory_type_bits = switch (memory) {
-            .upload, .readback => buffer_memory_requirements.memory_type_bits,
-            .device_local => bits: {
-                const color_bits = probeImageMemoryTypeBits(d.*, .r8g8b8a8_unorm, .{
-                    .sampled_bit = true,
-                    .transfer_dst_bit = true,
-                    .color_attachment_bit = true,
-                });
-                const depth_bits = probeImageMemoryTypeBits(d.*, .d32_sfloat, .{
-                    .depth_stencil_attachment_bit = true,
-                    .sampled_bit = true,
-                });
-                break :bits buffer_memory_requirements.memory_type_bits & color_bits & depth_bits;
-            },
-        };
-
-        const properties: vk.MemoryPropertyFlags = switch (memory) {
-            .upload => .{
-                .device_local_bit = d.has_host_visible_device_local,
-                .host_visible_bit = true,
-                .host_coherent_bit = true,
-            },
-            .device_local => .{
-                .device_local_bit = true,
-            },
-            .readback => .{
-                .host_visible_bit = true,
-                .host_cached_bit = true,
-                .host_coherent_bit = true,
-            },
-        };
-        const alloc_flags: vk.MemoryAllocateFlagsInfo = .{
-            .flags = .{ .device_address_bit = true },
-            .device_mask = 0,
-        };
-        const buffer_memory = try d.device.allocateMemory(&.{
-            .p_next = &alloc_flags,
-            .allocation_size = buffer_memory_requirements.size,
-            .memory_type_index = findMemoryType(d.*, memory_type_bits, properties),
-        }, null);
-        errdefer d.device.freeMemory(buffer_memory, null);
-
-        try d.device.bindBufferMemory(buffer, buffer_memory, 0);
-
-        const raw_device_addr = d.device.getBufferDeviceAddress(&.{ .buffer = buffer });
-        const device_addr = std.mem.alignForward(u64, raw_device_addr, alignment.toByteUnits());
-        const delta: usize = @intCast(device_addr - raw_device_addr);
-        if (!padded) std.debug.assert(delta == 0);
-        std.debug.assert(delta + bytes <= buffer_info.size);
-
-        const host_addr: ?usize = switch (memory) {
-            .readback, .upload => @intFromPtr(
-                try d.device.mapMemory(buffer_memory, 0, vk.WHOLE_SIZE, .{}),
-            ) + delta,
-            .device_local => null,
-        };
-
-        try d.heap.insert(d.gpa, .{
-            .buffer = buffer,
-            .memory = buffer_memory,
-            .size = bytes,
-            .device_addr = device_addr,
-            .host_addr = host_addr,
-        });
-
-        return .{
-            .device = device_addr,
-            .host = @ptrFromInt(host_addr orelse undefined),
-        };
-    }
-
-    pub fn sfFree(d: *Header(Device), ptr: gpu.DeviceAddress) void {
-        free(d.body(), ptr);
-    }
-    fn free(d: *Device, ptr: gpu.DeviceAddress) void {
-        const index = d.heap.indexFromAddr(ptr);
-        var entry = d.heap.entries.orderedRemove(index);
-        entry.destroy(d.*);
-    }
-
-    // TODO: cache this
-    fn findMemoryType(d: Device, type_filter: u32, properties: vk.MemoryPropertyFlags) u32 {
-        for (0..d.memory_properties.memory_type_count) |i| {
-            if ((type_filter & (@as(u32, 1) << @intCast(i))) != 0 and
-                (d.memory_properties.memory_types[i].property_flags.intersect(properties)) == properties)
-            {
-                return @intCast(i);
-            }
-        }
-        @panic(""); // TODO
-    }
-
-    // TODO: cache this
-    fn probeImageMemoryTypeBits(d: Device, format: vk.Format, usage: vk.ImageUsageFlags) u32 {
-        const ici: vk.ImageCreateInfo = .{
-            .image_type = .@"2d",
-            .format = format,
-            .extent = .{ .width = 16, .height = 16, .depth = 1 },
-            .mip_levels = 1,
-            .array_layers = 1,
-            .samples = .{ .@"1_bit" = true },
-            .tiling = .optimal,
-            .usage = usage,
-            .sharing_mode = .exclusive,
-            .initial_layout = .undefined,
-        };
-        var req: vk.MemoryRequirements2 = .{ .memory_requirements = undefined };
-        d.device.getDeviceImageMemoryRequirements(&.{ .plane_aspect = .{}, .p_create_info = &ici }, &req);
-        return req.memory_requirements.memory_type_bits;
-    }
-};
-
 const wrap_sf_allocator = struct {
     fn alloc(user_data: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
         _ = ret_addr;
-        const sf_gpa: *gpu.Allocator = @ptrCast(@alignCast(user_data));
+        const sf_gpa: *gpu.HostAllocator = @ptrCast(@alignCast(user_data));
         return sf_gpa.alloc(sf_gpa.user_data, len, alignment.toByteUnits());
     }
     fn remap(user_data: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
         _ = ret_addr;
-        const sf_gpa: *gpu.Allocator = @ptrCast(@alignCast(user_data));
+        const sf_gpa: *gpu.HostAllocator = @ptrCast(@alignCast(user_data));
         return sf_gpa.remap(sf_gpa.user_data, memory.ptr, memory.len, alignment.toByteUnits(), new_len);
     }
     fn free(user_data: *anyopaque, memory: []u8, alignment: std.mem.Alignment, ret_addr: usize) void {
         _ = ret_addr;
-        const sf_gpa: *gpu.Allocator = @ptrCast(@alignCast(user_data));
+        const sf_gpa: *gpu.HostAllocator = @ptrCast(@alignCast(user_data));
         return sf_gpa.free(sf_gpa.user_data, memory.ptr, memory.len, alignment.toByteUnits());
     }
 };
@@ -2687,8 +2685,8 @@ pub fn sfSymbol(name: [*:0]const u8) callconv(gpu.@"callconv") *const anyopaque 
         .surfaceFormats = Device.sfSurfaceFormats,
         .surfacePresentModes = Device.sfSurfacePresentModes,
         .deviceToHostPointer = Device.sfDeviceToHostPointer,
-        .alloc = heap.sfAlloc,
-        .free = heap.sfFree,
+        .alloc = Device.sfAlloc,
+        .free = Device.sfFree,
         .descriptorSizeAndHeapAlign = Texture.Descriptor.sfDescriptorSizeAndHeapAlign,
         .storeDescriptor = Texture.Descriptor.sfStoreDescriptor,
         .getQueue = Queue.sfGetQueue,

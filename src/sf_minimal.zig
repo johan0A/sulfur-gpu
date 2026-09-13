@@ -304,7 +304,7 @@ pub const Symbol = *const fn (
     name: [*:0]const u8,
 ) callconv(@"callconv") ?*const anyopaque;
 
-pub const Allocator = extern struct {
+pub const HostAllocator = extern struct {
     user_data: *anyopaque,
     alloc: AllocFn,
     remap: RemapFn,
@@ -429,7 +429,7 @@ pub const GraphicsPipelineDesc = extern struct {
 };
 
 pub fn createInstance(
-    allocator: ?*Allocator,
+    allocator: ?*HostAllocator,
     getSymbol: Symbol,
 ) *Instance {
     internal.loadGlobals(getSymbol);
@@ -663,19 +663,19 @@ pub fn descriptorSizeAndHeapAlign(
 pub fn storeDescriptor(
     device: *Device,
     descriptor: *const Descriptor,
-    heap: [*]u8,
+    descriptor_heap: [*]u8,
     index: usize,
 ) void {
     const f: *const fn (
         device: *Device,
         descriptor: *const Descriptor,
-        heap: [*]u8,
+        descriptor_heap: [*]u8,
         index: usize,
     ) callconv(@"callconv") void = @ptrCast(internal.table(device)[internal.slots.store_descriptor]);
     return f(
         device,
         descriptor,
-        heap,
+        descriptor_heap,
         index,
     );
 }
@@ -1238,7 +1238,7 @@ const internal = struct {
     }
 
     var create_instance: ?*const fn (
-        allocator: ?*Allocator,
+        allocator: ?*HostAllocator,
     ) callconv(@"callconv") *Instance = null;
     var destroy_instance: ?*const fn (
         instance: *Instance,

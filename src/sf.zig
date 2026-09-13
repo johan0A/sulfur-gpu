@@ -9,6 +9,14 @@ pub const @"callconv": std.builtin.CallingConvention = switch (target.os.tag) {
     else => .c,
 };
 
+pub const heap = @import("heap.zig");
+pub const PointerAttributes = heap.PointerAttributes;
+pub const PointerInfo = heap.PointerInfo;
+pub const Ptr = heap.Ptr;
+pub const SliceInfo = heap.SliceInfo;
+pub const Slice = heap.Slice;
+pub const DeviceAllocator = heap.DeviceAllocator;
+
 pub const descriptor_max_size: usize = 64;
 pub const adapter_name_max_lenght: usize = 256;
 pub const all_mips: u32 = 0xFFFFFFFF;
@@ -18,7 +26,7 @@ pub const DeviceAddress = u64;
 
 pub const Instance = opaque {
     pub fn create(
-        allocator: ?*Allocator,
+        allocator: ?*HostAllocator,
         getSymbol: Symbol,
     ) *Instance {
         internal.loadGlobals(getSymbol);
@@ -365,19 +373,19 @@ pub const Device = opaque {
     pub fn storeDescriptor(
         device: *Device,
         descriptor: *const Descriptor,
-        heap: [*]u8,
+        descriptor_heap: [*]u8,
         index: usize,
     ) void {
         const f: *const fn (
             device: *Device,
             descriptor: *const Descriptor,
-            heap: [*]u8,
+            descriptor_heap: [*]u8,
             index: usize,
         ) callconv(@"callconv") void = @ptrCast(internal.table(device)[internal.slots.store_descriptor]);
         return f(
             device,
             descriptor,
-            heap,
+            descriptor_heap,
             index,
         );
     }
@@ -1550,7 +1558,7 @@ pub const Symbol = *const fn (
     name: [*:0]const u8,
 ) callconv(@"callconv") ?*const anyopaque;
 
-pub const Allocator = extern struct {
+pub const HostAllocator = extern struct {
     user_data: *anyopaque,
     alloc: AllocFn,
     remap: RemapFn,
@@ -1680,7 +1688,7 @@ const internal = struct {
     }
 
     var create_instance: ?*const fn (
-        allocator: ?*Allocator,
+        allocator: ?*HostAllocator,
     ) callconv(@"callconv") *Instance = null;
     var destroy_instance: ?*const fn (
         instance: *Instance,

@@ -70,6 +70,18 @@ fn renderBindings(
         \\};
     ++ "\n\n");
 
+    if (style == .normal) {
+        try w.writeAll(
+            \\pub const heap = @import("heap.zig");
+            \\pub const PointerAttributes = heap.PointerAttributes;
+            \\pub const PointerInfo = heap.PointerInfo;
+            \\pub const Ptr = heap.Ptr;
+            \\pub const SliceInfo = heap.SliceInfo;
+            \\pub const Slice = heap.Slice;
+            \\pub const DeviceAllocator = heap.DeviceAllocator;
+        ++ "\n\n");
+    }
+
     for (registry.constants) |constant| {
         try renderDoc(w, constant.doc);
         try w.writeAll("pub const ");
@@ -117,7 +129,7 @@ fn renderBindings(
             }
         }
         try w.writeAll("};\n");
-        if (style != .minimal) try w.writeByte('\n');
+        if (style == .normal) try w.writeByte('\n');
     }
     try w.writeByte('\n');
 
