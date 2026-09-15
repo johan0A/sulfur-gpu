@@ -97,8 +97,7 @@ pub fn compileShader(
         "spirv",
         "-profile",
         "spirv_1_6",
-        "-fvk-use-entrypoint-name",
-        "-fvk-use-scalar-layout",
+        "-fvk-use-c-layout",
         "-entry",
         entry,
     });
