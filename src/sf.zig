@@ -1567,7 +1567,11 @@ pub const HostAllocator = extern struct {
 
 pub const SizeAndAlign = extern struct {
     size: usize,
-    alignment: usize,
+    alignment_byte_units: usize,
+
+    pub fn alignment(size_and_align: SizeAndAlign) std.mem.Alignment {
+        return .fromByteUnits(size_and_align.alignment_byte_units);
+    }
 };
 
 pub const AdpaterInfo = extern struct {

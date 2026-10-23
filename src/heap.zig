@@ -236,18 +236,22 @@ pub fn AllocationOne(Element: type, @"align": ?Alignment) type {
 pub fn Allocation(Element: type, @"align": ?Alignment) type {
     const alignment = if (@"align") |a| a.toByteUnits() else @alignOf(Element);
     return struct {
-        device: Ptr(.many, Element, .{ .@"align" = @"align" }),
-        host: [*]align(alignment) Element,
+        device_ptr: Ptr(.many, Element, .{ .@"align" = @"align" }),
+        host_ptr: [*]align(alignment) Element,
         len: usize,
 
         pub const empty: @This() = .{
-            .device = .empty,
-            .host = &.{},
+            .device_ptr = .empty,
+            .host_ptr = &.{},
             .len = 0,
         };
 
-        pub fn deviceSlice(allocation: @This()) Slice(Element, .{ .@"align" = @"align" }) {
-            return allocation.device.slice(allocation.len);
+        pub fn host(allocation: @This()) []align(alignment) Element {
+            return allocation.host_ptr[0..allocation.len];
+        }
+
+        pub fn device(allocation: @This()) Slice(Element, .{ .@"align" = @"align" }) {
+            return allocation.device_ptr.slice(allocation.len);
         }
     };
 }
@@ -367,7 +371,7 @@ const DeviceAllocator = struct {
     ) Error!Allocation(T, alignment) {
         const a: Alignment = alignment orelse comptime .of(T);
         const owned = try self.runtimeAlignedAllocWithRetAddr(T, a, n, memory, return_address);
-        return .{ .device = .alignCast(owned.device), .host = @alignCast(owned.host), .len = owned.len };
+        return .{ .device_ptr = .alignCast(owned.device_ptr), .host_ptr = @alignCast(owned.host_ptr), .len = owned.len };
     }
 
     pub inline fn runtimeAlignedAllocWithRetAddr(
@@ -382,8 +386,8 @@ const DeviceAllocator = struct {
         const result = try self.allocBytesWithAlignment(alignment, byte_count, memory, return_address);
         const host_ptr: [*]T = @ptrCast(@alignCast(result.host));
         return .{
-            .device = .fromInt(result.device),
-            .host = host_ptr,
+            .device_ptr = .fromInt(result.device),
+            .host_ptr = host_ptr,
             .len = n,
         };
     }
@@ -498,7 +502,7 @@ pub const FixedBufferAllocator = struct {
         const empty: Region = .{ .buffer = .empty, .end_index = 0 };
 
         fn base(r: *const Region) u64 {
-            return r.buffer.device.addr;
+            return r.buffer.device_ptr.addr;
         }
 
         fn ownsAddr(r: *const Region, addr: u64) bool {
@@ -524,7 +528,7 @@ pub const FixedBufferAllocator = struct {
 
             return .{
                 .device = addr,
-                .host = @ptrCast(r.buffer.host + start),
+                .host = @ptrCast(r.buffer.host_ptr + start),
             };
         }
 
@@ -574,7 +578,7 @@ pub const FixedBufferAllocator = struct {
     pub fn deinit(fba: *FixedBufferAllocator, gpa: DeviceAllocator) void {
         for (std.enums.values(sf.MemoryType)) |m| {
             const buffer = &fba.regions.getPtr(m).buffer;
-            if (buffer.len > 0) gpa.free(buffer.deviceSlice(), m);
+            if (buffer.len > 0) gpa.free(buffer.device(), m);
             buffer.* = .empty;
         }
     }

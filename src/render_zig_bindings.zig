@@ -152,11 +152,17 @@ fn renderBindings(
         try w.writeAll(";\n\n");
     }
     for (registry.structs) |@"struct"| {
+        const is_sf_size_and_align = style == .normal and std.mem.eql(u8, @"struct".name, "SfSizeAndAlign");
+
         try renderDeclStart(w, registry, @"struct".doc, @"struct".name);
         try w.writeAll("extern struct {\n");
         for (@"struct".fields) |field| {
             try renderDoc(w, field.doc);
-            try renderId(w, field.name);
+            if (is_sf_size_and_align and std.mem.eql(u8, field.name, "alignment")) {
+                try renderId(w, "alignment_byte_units");
+            } else {
+                try renderId(w, field.name);
+            }
             try w.writeAll(": ");
             try renderType(w, registry, field.type);
             if (field.default) |default| {
@@ -164,6 +170,13 @@ fn renderBindings(
                 try renderDefault(w, registry, field.type, default);
             }
             try w.writeAll(",\n");
+        }
+        if (is_sf_size_and_align) {
+            try w.writeAll("\n" ++
+                \\pub fn alignment(size_and_align: SizeAndAlign) std.mem.Alignment {
+                \\    return .fromByteUnits(size_and_align.alignment_byte_units);
+                \\}
+            );
         }
         try w.writeAll("};\n\n");
     }
