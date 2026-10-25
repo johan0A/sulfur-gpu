@@ -192,15 +192,13 @@ fn Functions(handle_types: HandleTypes) type {
         ) void,
         copyTextureToBuffer: fn (
             command_buffer: *handle_types.CommandBuffer,
-            source: sf.DeviceAddress,
+            source_texture: *handle_types.Texture,
             destination: sf.DeviceAddress,
-            texture: *handle_types.Texture,
         ) void,
         copyBufferToTexture: fn (
             command_buffer: *handle_types.CommandBuffer,
             source: sf.DeviceAddress,
-            destination: sf.DeviceAddress,
-            texture: *handle_types.Texture,
+            destination_texture: *handle_types.Texture,
         ) void,
         beginRenderPass: fn (
             command_buffer: *handle_types.CommandBuffer,
@@ -637,29 +635,25 @@ fn CFunctions(comptime handle_types: HandleTypes, comptime functions: Functions(
 
         pub fn copyTextureToBuffer(
             command_buffer: *handle_types.CommandBuffer,
-            source: sf.DeviceAddress,
+            source_texture: *handle_types.Texture,
             destination: sf.DeviceAddress,
-            texture: *handle_types.Texture,
         ) callconv(sf.@"callconv") void {
             return functions.copyTextureToBuffer(
                 command_buffer,
-                source,
+                source_texture,
                 destination,
-                texture,
             );
         }
 
         pub fn copyBufferToTexture(
             command_buffer: *handle_types.CommandBuffer,
             source: sf.DeviceAddress,
-            destination: sf.DeviceAddress,
-            texture: *handle_types.Texture,
+            destination_texture: *handle_types.Texture,
         ) callconv(sf.@"callconv") void {
             return functions.copyBufferToTexture(
                 command_buffer,
                 source,
-                destination,
-                texture,
+                destination_texture,
             );
         }
 

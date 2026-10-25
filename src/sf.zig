@@ -300,11 +300,11 @@ pub const Device = opaque {
 
     pub fn toHostPointer(
         device: *Device,
-        address: DeviceAddress,
+        address: Ptr(.many, u8, .{}),
     ) *anyopaque {
         const f: *const fn (
             device: *Device,
-            address: DeviceAddress,
+            address: Ptr(.many, u8, .{}),
         ) callconv(@"callconv") *anyopaque = @ptrCast(internal.table(device)[internal.slots.device_to_host_pointer]);
         return f(
             device,
@@ -347,11 +347,11 @@ pub const Device = opaque {
 
     pub fn free(
         device: *Device,
-        address: DeviceAddress,
+        address: Ptr(.many, u8, .{}),
     ) void {
         const f: *const fn (
             device: *Device,
-            address: DeviceAddress,
+            address: Ptr(.many, u8, .{}),
         ) callconv(@"callconv") void = @ptrCast(internal.table(device)[internal.slots.free]);
         return f(
             device,
@@ -450,7 +450,7 @@ pub const Device = opaque {
     pub fn createTexture(
         device: *Device,
         desc: TextureDesc,
-        data: DeviceAddress,
+        data: Ptr(.many, u8, .{}),
     ) error{
         OutOfMemory,
         OutOfDeviceMemory,
@@ -459,7 +459,7 @@ pub const Device = opaque {
         const f: *const fn (
             device: *Device,
             desc: TextureDesc,
-            data: DeviceAddress,
+            data: Ptr(.many, u8, .{}),
             texture: **Texture,
         ) callconv(@"callconv") Result = @ptrCast(internal.table(device)[internal.slots.create_texture]);
         var texture: *Texture = undefined;
@@ -855,11 +855,11 @@ pub const Swapchain = opaque {
 pub const CommandBuffer = opaque {
     pub fn setActiveTextureHeap(
         command_buffer: *CommandBuffer,
-        heap_address: DeviceAddress,
+        heap_address: Ptr(.many, u8, .{}),
     ) void {
         const f: *const fn (
             command_buffer: *CommandBuffer,
-            heap_address: DeviceAddress,
+            heap_address: Ptr(.many, u8, .{}),
         ) callconv(@"callconv") void = @ptrCast(internal.table(command_buffer)[internal.slots.set_active_texture_heap]);
         return f(
             command_buffer,
@@ -883,14 +883,14 @@ pub const CommandBuffer = opaque {
 
     pub fn dispatch(
         command_buffer: *CommandBuffer,
-        data: DeviceAddress,
+        data: Ptr(.one, anyopaque, .{}),
         x: u32,
         y: u32,
         z: u32,
     ) void {
         const f: *const fn (
             command_buffer: *CommandBuffer,
-            data: DeviceAddress,
+            data: Ptr(.one, anyopaque, .{}),
             x: u32,
             y: u32,
             z: u32,
@@ -927,41 +927,35 @@ pub const CommandBuffer = opaque {
     /// 256 bytes is a typical optimal alignment for destination
     pub fn copyTextureToBuffer(
         command_buffer: *CommandBuffer,
-        source: DeviceAddress,
-        destination: DeviceAddress,
-        texture: *Texture,
+        source_texture: *Texture,
+        destination: Ptr(.many, u8, .{ .@"align" = .@"16" }),
     ) void {
         const f: *const fn (
             command_buffer: *CommandBuffer,
-            source: DeviceAddress,
-            destination: DeviceAddress,
-            texture: *Texture,
+            source_texture: *Texture,
+            destination: Ptr(.many, u8, .{ .@"align" = .@"16" }),
         ) callconv(@"callconv") void = @ptrCast(internal.table(command_buffer)[internal.slots.copy_texture_to_buffer]);
         return f(
             command_buffer,
-            source,
+            source_texture,
             destination,
-            texture,
         );
     }
 
     pub fn copyBufferToTexture(
         command_buffer: *CommandBuffer,
-        source: DeviceAddress,
-        destination: DeviceAddress,
-        texture: *Texture,
+        source: Ptr(.many, u8, .{}),
+        destination_texture: *Texture,
     ) void {
         const f: *const fn (
             command_buffer: *CommandBuffer,
-            source: DeviceAddress,
-            destination: DeviceAddress,
-            texture: *Texture,
+            source: Ptr(.many, u8, .{}),
+            destination_texture: *Texture,
         ) callconv(@"callconv") void = @ptrCast(internal.table(command_buffer)[internal.slots.copy_buffer_to_texture]);
         return f(
             command_buffer,
             source,
-            destination,
-            texture,
+            destination_texture,
         );
     }
 
@@ -992,15 +986,15 @@ pub const CommandBuffer = opaque {
 
     pub fn draw(
         command_buffer: *CommandBuffer,
-        vertex_data: DeviceAddress,
-        pixel_data: DeviceAddress,
+        vertex_data: Ptr(.one, anyopaque, .{}),
+        pixel_data: Ptr(.one, anyopaque, .{}),
         vertex_count: u32,
         instance_count: u32,
     ) void {
         const f: *const fn (
             command_buffer: *CommandBuffer,
-            vertex_data: DeviceAddress,
-            pixel_data: DeviceAddress,
+            vertex_data: Ptr(.one, anyopaque, .{}),
+            pixel_data: Ptr(.one, anyopaque, .{}),
             vertex_count: u32,
             instance_count: u32,
         ) callconv(@"callconv") void = @ptrCast(internal.table(command_buffer)[internal.slots.draw]);
@@ -1015,18 +1009,18 @@ pub const CommandBuffer = opaque {
 
     pub fn drawIndexed(
         command_buffer: *CommandBuffer,
-        vertex_data: DeviceAddress,
-        pixel_data: DeviceAddress,
+        vertex_data: Ptr(.one, anyopaque, .{}),
+        pixel_data: Ptr(.one, anyopaque, .{}),
         index_type: IndexType,
-        indices: DeviceAddress,
+        indices: Ptr(.many, u8, .{}),
         index_count: u32,
     ) void {
         const f: *const fn (
             command_buffer: *CommandBuffer,
-            vertex_data: DeviceAddress,
-            pixel_data: DeviceAddress,
+            vertex_data: Ptr(.one, anyopaque, .{}),
+            pixel_data: Ptr(.one, anyopaque, .{}),
             index_type: IndexType,
-            indices: DeviceAddress,
+            indices: Ptr(.many, u8, .{}),
             index_count: u32,
         ) callconv(@"callconv") void = @ptrCast(internal.table(command_buffer)[internal.slots.draw_indexed]);
         return f(
@@ -1041,19 +1035,19 @@ pub const CommandBuffer = opaque {
 
     pub fn drawIndexedInstanced(
         command_buffer: *CommandBuffer,
-        vertex_data: DeviceAddress,
-        pixel_data: DeviceAddress,
+        vertex_data: Ptr(.one, anyopaque, .{}),
+        pixel_data: Ptr(.one, anyopaque, .{}),
         index_type: IndexType,
-        indices: DeviceAddress,
+        indices: Ptr(.many, u8, .{}),
         index_count: u32,
         instance_count: u32,
     ) void {
         const f: *const fn (
             command_buffer: *CommandBuffer,
-            vertex_data: DeviceAddress,
-            pixel_data: DeviceAddress,
+            vertex_data: Ptr(.one, anyopaque, .{}),
+            pixel_data: Ptr(.one, anyopaque, .{}),
             index_type: IndexType,
-            indices: DeviceAddress,
+            indices: Ptr(.many, u8, .{}),
             index_count: u32,
             instance_count: u32,
         ) callconv(@"callconv") void = @ptrCast(internal.table(command_buffer)[internal.slots.draw_indexed_instanced]);
@@ -1070,19 +1064,19 @@ pub const CommandBuffer = opaque {
 
     pub fn drawIndexedInstancedIndirect(
         command_buffer: *CommandBuffer,
-        vertex_data: DeviceAddress,
-        pixel_data: DeviceAddress,
+        vertex_data: Ptr(.one, anyopaque, .{}),
+        pixel_data: Ptr(.one, anyopaque, .{}),
         index_type: IndexType,
-        indices: DeviceAddress,
-        arguments: DeviceAddress,
+        indices: Ptr(.many, u8, .{}),
+        arguments: Ptr(.many, u8, .{}),
     ) void {
         const f: *const fn (
             command_buffer: *CommandBuffer,
-            vertex_data: DeviceAddress,
-            pixel_data: DeviceAddress,
+            vertex_data: Ptr(.one, anyopaque, .{}),
+            pixel_data: Ptr(.one, anyopaque, .{}),
             index_type: IndexType,
-            indices: DeviceAddress,
-            arguments: DeviceAddress,
+            indices: Ptr(.many, u8, .{}),
+            arguments: Ptr(.many, u8, .{}),
         ) callconv(@"callconv") void = @ptrCast(internal.table(command_buffer)[internal.slots.draw_indexed_instanced_indirect]);
         return f(
             command_buffer,
@@ -1099,7 +1093,7 @@ pub const Texture = opaque {
     pub fn create(
         device: *Device,
         desc: TextureDesc,
-        data: DeviceAddress,
+        data: Ptr(.many, u8, .{}),
     ) error{
         OutOfMemory,
         OutOfDeviceMemory,
@@ -1108,7 +1102,7 @@ pub const Texture = opaque {
         const f: *const fn (
             device: *Device,
             desc: TextureDesc,
-            data: DeviceAddress,
+            data: Ptr(.many, u8, .{}),
             texture: **Texture,
         ) callconv(@"callconv") Result = @ptrCast(internal.table(device)[internal.slots.create_texture]);
         var texture: *Texture = undefined;
@@ -1592,7 +1586,7 @@ pub const SurfaceXlibDesc = extern struct {
 
 pub const HostDeviceAddress = extern struct {
     host: *anyopaque,
-    device: DeviceAddress,
+    device: Ptr(.many, u8, .{}),
 };
 
 pub const SwapchainDesc = extern struct {

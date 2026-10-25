@@ -926,41 +926,35 @@ pub fn barrier(
 /// 256 bytes is a typical optimal alignment for destination
 pub fn copyTextureToBuffer(
     command_buffer: *CommandBuffer,
-    source: DeviceAddress,
+    source_texture: *Texture,
     destination: DeviceAddress,
-    texture: *Texture,
 ) void {
     const f: *const fn (
         command_buffer: *CommandBuffer,
-        source: DeviceAddress,
+        source_texture: *Texture,
         destination: DeviceAddress,
-        texture: *Texture,
     ) callconv(@"callconv") void = @ptrCast(internal.table(command_buffer)[internal.slots.copy_texture_to_buffer]);
     return f(
         command_buffer,
-        source,
+        source_texture,
         destination,
-        texture,
     );
 }
 
 pub fn copyBufferToTexture(
     command_buffer: *CommandBuffer,
     source: DeviceAddress,
-    destination: DeviceAddress,
-    texture: *Texture,
+    destination_texture: *Texture,
 ) void {
     const f: *const fn (
         command_buffer: *CommandBuffer,
         source: DeviceAddress,
-        destination: DeviceAddress,
-        texture: *Texture,
+        destination_texture: *Texture,
     ) callconv(@"callconv") void = @ptrCast(internal.table(command_buffer)[internal.slots.copy_buffer_to_texture]);
     return f(
         command_buffer,
         source,
-        destination,
-        texture,
+        destination_texture,
     );
 }
 

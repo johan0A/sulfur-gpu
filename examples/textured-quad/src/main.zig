@@ -1,13 +1,13 @@
 const std = @import("std");
 const target = @import("builtin").target;
-const gpu = @import("sulfur");
+const sf = @import("sulfur");
 const c = @import("c");
 
-const sfSymbol = @extern(gpu.Symbol, .{ .name = "sfSymbol" });
+const sfSymbol = @extern(sf.Symbol, .{ .name = "sfSymbol" });
 
 const Data = extern struct {
-    positions: gpu.DeviceAddress,
-    uvs: gpu.DeviceAddress,
+    positions: sf.Ptr(.many, [3]f32, .{}),
+    uvs: sf.Ptr(.many, [2]f32, .{}),
 };
 
 const frames_in_flight = 2;
@@ -25,7 +25,7 @@ pub fn main(init: std.process.Init) !void {
     const window = c.SDL_CreateWindow("title", width, height, c.SDL_WINDOW_VULKAN | c.SDL_WINDOW_RESIZABLE) orelse @panic("SDL_CreateWindow failed");
     defer c.SDL_DestroyWindow(window);
 
-    const instance = gpu.Instance.create(null, sfSymbol);
+    const instance = sf.Instance.create(null, sfSymbol);
     defer instance.destroy();
 
     const adapters = try instance.enumerateAdaptersAlloc(arena);
@@ -39,26 +39,26 @@ pub fn main(init: std.process.Init) !void {
     const device = instance.createDevice(adapter);
     defer device.destroy();
 
-    const gpu_gpa = gpu.heap.rawDeviceAllocator(device);
-    var fix_buffer_allocator: gpu.heap.FixedBufferAllocator = try .initAlloc(gpu_gpa, .initFill(1024 * 1024 * 64));
+    const gpu_gpa = sf.heap.rawDeviceAllocator(device);
+    var fix_buffer_allocator: sf.heap.FixedBufferAllocator = try .initAlloc(gpu_gpa, .initFill(1024 * 1024 * 64));
     defer fix_buffer_allocator.deinit(gpu_gpa);
     const gpu_arena = fix_buffer_allocator.allocator();
 
     const queue = device.getQueue(.graphics);
 
     const props = c.SDL_GetWindowProperties(window);
-    const surface: *gpu.Surface = switch (target.os.tag) {
+    const surface: *sf.Surface = switch (target.os.tag) {
         .windows => blk: {
             const hwnd = c.SDL_GetPointerProperty(props, c.SDL_PROP_WINDOW_WIN32_HWND_POINTER, null) orelse @panic("TODO");
             const hinstance = c.SDL_GetPointerProperty(props, c.SDL_PROP_WINDOW_WIN32_INSTANCE_POINTER, null) orelse @panic("TODO");
-            const surface_desc: gpu.SurfaceWin32Desc = .{ .hinstance = hinstance, .hwnd = hwnd };
+            const surface_desc: sf.SurfaceWin32Desc = .{ .hinstance = hinstance, .hwnd = hwnd };
             break :blk .createWin32(device, surface_desc);
         },
         else => blk: {
             const display = c.SDL_GetPointerProperty(props, c.SDL_PROP_WINDOW_X11_DISPLAY_POINTER, null) orelse @panic("TODO");
             const x11_window = c.SDL_GetNumberProperty(props, c.SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0);
             if (x11_window == 0) @panic("TODO");
-            const surface_desc: gpu.SurfaceXlibDesc = .{ .display = display, .window = @intCast(x11_window) };
+            const surface_desc: sf.SurfaceXlibDesc = .{ .display = display, .window = @intCast(x11_window) };
             break :blk .createXlib(device, surface_desc);
         },
     };
@@ -76,7 +76,7 @@ pub fn main(init: std.process.Init) !void {
     defer frame_semaphore.destroy();
     var frame_index: u64 = 1;
 
-    const swapchain: *gpu.Swapchain = try .create(queue, surface, .{
+    const swapchain: *sf.Swapchain = try .create(queue, surface, .{
         .format = swapchain_format,
         .usage = .{ .color_attachment = true },
         .present_mode = .fifo,
@@ -115,19 +115,19 @@ pub fn main(init: std.process.Init) !void {
 
     const data_map = try gpu_arena.create(Data, .upload);
     data_map.host.* = .{
-        .positions = positions_map.device.addr,
-        .uvs = uvs_map.device.addr,
+        .positions = .ptrCast(positions_map.device),
+        .uvs = .ptrCast(uvs_map.device),
     };
 
     const dimensions: [3]u32 = .{ 256, 256, 1 };
-    const texture_desc: gpu.TextureDesc = .{
+    const texture_desc: sf.TextureDesc = .{
         .dimensions = dimensions,
         .format = .rgba8_unorm,
         .usage = .{ .sampled = true },
     };
     const texture_size_and_align = device.textureSizeAndAlign(texture_desc);
     const texture_map = try gpu_arena.runtimeAlignedAlloc(u8, texture_size_and_align.alignment(), texture_size_and_align.size, .device_local);
-    const texture = try device.createTexture(texture_desc, texture_map.device_ptr.addr);
+    const texture = try device.createTexture(texture_desc, texture_map.device_ptr);
     defer texture.destroy();
 
     const texture_upload_size = dimensions[0] * dimensions[1] * 4;
@@ -146,7 +146,7 @@ pub fn main(init: std.process.Init) !void {
     device.storeDescriptor(&texture_descriptor, descriptor_heap.host_ptr, 0);
 
     const upload_cb = try queue.startCommandRecording();
-    upload_cb.copyBufferToTexture(texture_upload.device_ptr.addr, texture_map.device_ptr.addr, texture);
+    upload_cb.copyBufferToTexture(.from(texture_upload.device_ptr), texture);
     upload_cb.barrier(.{ .transfer = true }, .all, .{ .descriptors = true });
     try queue.submit(&.{upload_cb});
 
@@ -180,7 +180,7 @@ pub fn main(init: std.process.Init) !void {
         const back_buffer = try swapchain.acquireBackBuffer(@intCast(width), @intCast(height));
 
         const cb = try queue.startCommandRecording();
-        cb.setActiveTextureHeap(descriptor_heap.device_ptr.addr);
+        cb.setActiveTextureHeap(descriptor_heap.device_ptr);
         cb.beginRenderPass(.{
             .stencil_attachment = .{},
             .depth_attachment = .{},
@@ -193,7 +193,7 @@ pub fn main(init: std.process.Init) !void {
             }},
         });
         cb.setPipeline(pipeline);
-        cb.draw(data_map.device.addr, data_map.device.addr, vertex_count, 1);
+        cb.draw(.from(data_map.device), .from(data_map.device), vertex_count, 1);
         cb.endRenderPass();
 
         try queue.submitAndSignal(&.{cb}, frame_semaphore, frame_index);

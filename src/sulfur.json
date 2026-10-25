@@ -129,7 +129,7 @@
       "name": "SfHostDeviceAddress",
       "fields": [
         { "name": "host", "type": { "base": "void", "ptr": [{}] }, "doc": "" },
-        { "name": "device", "type": { "base": "SfDeviceAddress" }, "doc": "" }
+        { "name": "device", "type": { "base": "uint8_t", "device_ptr": [{ "len": "none" }] }, "doc": "" }
       ],
       "doc": ""
     },
@@ -763,7 +763,7 @@
       "return": { "base": "void", "ptr": [{}] },
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
-        { "name": "address", "type": { "base": "SfDeviceAddress" }, "doc": "" }
+        { "name": "address", "type": { "base": "uint8_t", "device_ptr": [{ "len": "none" }] }, "doc": "" }
       ],
       "doc": ""
     },
@@ -792,7 +792,7 @@
       "return": { "base": "void" },
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
-        { "name": "address", "type": { "base": "SfDeviceAddress" }, "doc": "" }
+        { "name": "address", "type": { "base": "uint8_t", "device_ptr": [{ "len": "none" }] }, "doc": "" }
       ],
       "doc": ""
     },
@@ -1001,7 +1001,7 @@
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
-        { "name": "heap_address", "type": { "base": "SfDeviceAddress" }, "doc": "" }
+        { "name": "heap_address", "type": { "base": "uint8_t", "device_ptr": [{ "len": "none" }] }, "doc": "" }
       ],
       "doc": ""
     },
@@ -1023,7 +1023,7 @@
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
-        { "name": "data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "data", "type": { "base": "void", "device_ptr": [{}] }, "doc": "" },
         { "name": "x", "type": { "base": "uint32_t" }, "doc": "" },
         { "name": "y", "type": { "base": "uint32_t" }, "doc": "" },
         { "name": "z", "type": { "base": "uint32_t" }, "doc": "" }
@@ -1050,9 +1050,8 @@
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
-        { "name": "source", "type": { "base": "SfDeviceAddress" }, "doc": "" },
-        { "name": "destination", "type": { "base": "SfDeviceAddress" }, "doc": "" },
-        { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" }
+        { "name": "source_texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" },
+        { "name": "destination", "type": { "base": "uint8_t", "device_ptr": [{ "len": "none", "alignment": 16 }] }, "doc": "" }
       ],
       "doc": "256 bytes is a typical optimal alignment for destination"
     },
@@ -1063,9 +1062,8 @@
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
-        { "name": "source", "type": { "base": "SfDeviceAddress" }, "doc": "" },
-        { "name": "destination", "type": { "base": "SfDeviceAddress" }, "doc": "" },
-        { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" }
+        { "name": "source", "type": { "base": "uint8_t", "device_ptr": [{ "len": "none" }] }, "doc": "" },
+        { "name": "destination_texture", "type": { "base": "SfTexture", "ptr": [{}] }, "doc": "" }
       ],
       "doc": ""
     },
@@ -1097,8 +1095,8 @@
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
-        { "name": "vertex_data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
-        { "name": "pixel_data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "vertex_data", "type": { "base": "void", "device_ptr": [{}] }, "doc": "" },
+        { "name": "pixel_data", "type": { "base": "void", "device_ptr": [{}] }, "doc": "" },
         { "name": "vertex_count", "type": { "base": "uint32_t" }, "doc": "" },
         { "name": "instance_count", "type": { "base": "uint32_t" }, "doc": "" }
       ],
@@ -1111,10 +1109,10 @@
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
-        { "name": "vertex_data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
-        { "name": "pixel_data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "vertex_data", "type": { "base": "void", "device_ptr": [{}] }, "doc": "" },
+        { "name": "pixel_data", "type": { "base": "void", "device_ptr": [{}] }, "doc": "" },
         { "name": "index_type", "type": { "base": "SfIndexType" }, "doc": "" },
-        { "name": "indices", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "indices", "type": { "base": "uint8_t", "device_ptr": [{ "len": "none" }] }, "doc": "" },
         { "name": "index_count", "type": { "base": "uint32_t" }, "doc": "" }
       ],
       "doc": ""
@@ -1126,10 +1124,10 @@
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
-        { "name": "vertex_data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
-        { "name": "pixel_data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "vertex_data", "type": { "base": "void", "device_ptr": [{}] }, "doc": "" },
+        { "name": "pixel_data", "type": { "base": "void", "device_ptr": [{}] }, "doc": "" },
         { "name": "index_type", "type": { "base": "SfIndexType" }, "doc": "" },
-        { "name": "indices", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "indices", "type": { "base": "uint8_t", "device_ptr": [{ "len": "none" }] }, "doc": "" },
         { "name": "index_count", "type": { "base": "uint32_t" }, "doc": "" },
         { "name": "instance_count", "type": { "base": "uint32_t" }, "doc": "" }
       ],
@@ -1142,11 +1140,11 @@
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
-        { "name": "vertex_data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
-        { "name": "pixel_data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "vertex_data", "type": { "base": "void", "device_ptr": [{}] }, "doc": "" },
+        { "name": "pixel_data", "type": { "base": "void", "device_ptr": [{}] }, "doc": "" },
         { "name": "index_type", "type": { "base": "SfIndexType" }, "doc": "" },
-        { "name": "indices", "type": { "base": "SfDeviceAddress" }, "doc": "" },
-        { "name": "arguments", "type": { "base": "SfDeviceAddress" }, "doc": "" }
+        { "name": "indices", "type": { "base": "uint8_t", "device_ptr": [{ "len": "none" }] }, "doc": "" },
+        { "name": "arguments", "type": { "base": "uint8_t", "device_ptr": [{ "len": "none" }] }, "doc": "" }
       ],
       "doc": ""
     },
@@ -1174,7 +1172,7 @@
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "desc", "type": { "base": "SfTextureDesc" }, "doc": "" },
-        { "name": "data", "type": { "base": "SfDeviceAddress" }, "doc": "" },
+        { "name": "data", "type": { "base": "uint8_t", "device_ptr": [{ "len": "none" }] }, "doc": "" },
         { "name": "texture", "type": { "base": "SfTexture", "ptr": [{}, {}] }, "out": true, "doc": "" }
       ],
       "doc": ""

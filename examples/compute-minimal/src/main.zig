@@ -19,8 +19,12 @@ pub fn main(init: std.process.Init) !void {
     defer instance.destroy();
 
     const adapters = try instance.enumerateAdaptersAlloc(arena);
-
-    const adapter = adapters[0]; // TODO: pick adapter
+    if (adapters.len == 0) return error.NoAdapter;
+    const adapter = for (adapters) |adapter| {
+        if (instance.adapterInfo(adapter).type == .discrete_gpu) break adapter;
+    } else adapters[0];
+    const adapter_info = instance.adapterInfo(adapter);
+    std.log.info("selected device: {s}", .{adapter_info.name[0..adapter_info.name_lenght]});
 
     const device = instance.createDevice(adapter);
     defer device.destroy();
@@ -39,7 +43,7 @@ pub fn main(init: std.process.Init) !void {
     };
     const texture_size_and_align = device.textureSizeAndAlign(texture_info);
     const texture_map = try gpu_arena.runtimeAlignedAlloc(u8, texture_size_and_align.alignment(), texture_size_and_align.size, .device_local);
-    const texture = try device.createTexture(texture_info, texture_map.device_ptr.addr);
+    const texture = try device.createTexture(texture_info, texture_map.device_ptr);
     defer texture.destroy();
 
     const descriptor_size_and_align = device.descriptorSizeAndHeapAlign();
@@ -57,16 +61,16 @@ pub fn main(init: std.process.Init) !void {
     defer pipeline.destroy();
 
     const command_buffer = try queue.startCommandRecording();
-    command_buffer.setActiveTextureHeap(descriptor_heap.device_ptr.addr);
+    command_buffer.setActiveTextureHeap(descriptor_heap.device_ptr);
     command_buffer.setPipeline(pipeline);
     command_buffer.dispatch(
-        data_map.device.addr,
+        .from(data_map.device),
         (width + workgroup_size - 1) / workgroup_size,
         (height + workgroup_size - 1) / workgroup_size,
         1,
     );
     command_buffer.barrier(.{ .compute = true }, .{ .transfer = true }, .{});
-    command_buffer.copyTextureToBuffer(texture_map.device_ptr.addr, readback.device_ptr.addr, texture);
+    command_buffer.copyTextureToBuffer(texture, .from(readback.device_ptr));
 
     const done = try device.createSemaphore(0);
     defer done.destroy();

@@ -135,10 +135,10 @@ pub fn main(init: std.process.Init) !void {
         const h: u32 = @intCast(height);
 
         const command_buffer = try queue.startCommandRecording();
-        command_buffer.setActiveTextureHeap(descriptor_heap.device_ptr.addr);
+        command_buffer.setActiveTextureHeap(descriptor_heap.device_ptr);
         command_buffer.setPipeline(pipeline);
         command_buffer.dispatch(
-            data_map.device.addr,
+            .from(data_map.device),
             (w + workgroup_size - 1) / workgroup_size,
             (h + workgroup_size - 1) / workgroup_size,
             1,

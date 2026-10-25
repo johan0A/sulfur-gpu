@@ -87,13 +87,13 @@ fn renderBindings(
         try w.writeAll("pub const ");
         try renderConstName(w, registry, constant.name);
         try w.writeAll(": ");
-        try renderType(w, registry, constant.type);
+        try renderType(w, registry, style, constant.type);
         try w.print(" = {s};\n", .{constant.value});
     }
     try w.writeByte('\n');
     for (registry.typedefs) |typedef| {
         try renderDeclStart(w, registry, typedef.doc, typedef.name);
-        try renderType(w, registry, typedef.type);
+        try renderType(w, registry, style, typedef.type);
         try w.writeAll(";\n");
     }
     try w.writeByte('\n');
@@ -125,7 +125,7 @@ fn renderBindings(
                 const method_c_name = try std.mem.replaceOwned(u8, arena, function.name, type_name, "");
 
                 try renderFunction(w, registry, function, method_c_name, .normal);
-                if (function.enumerate) try renderEnumerateAlloc(w, registry, function, method_c_name);
+                if (function.enumerate) try renderEnumerateAlloc(w, registry, style, function, method_c_name);
             }
         }
         try w.writeAll("};\n");
@@ -148,7 +148,7 @@ fn renderBindings(
     for (registry.flags) |flags| try renderFlags(w, registry, flags);
     for (registry.function_pointers) |function_pointer| {
         try renderDeclStart(w, registry, function_pointer.doc, function_pointer.name);
-        try renderFnType(w, registry, function_pointer.params, function_pointer.return_type);
+        try renderFnType(w, registry, style, function_pointer.params, function_pointer.return_type);
         try w.writeAll(";\n\n");
     }
     for (registry.structs) |@"struct"| {
@@ -164,7 +164,7 @@ fn renderBindings(
                 try renderId(w, field.name);
             }
             try w.writeAll(": ");
-            try renderType(w, registry, field.type);
+            try renderType(w, registry, style, field.type);
             if (field.default) |default| {
                 try w.writeAll(" = ");
                 try renderDefault(w, registry, field.type, default);
@@ -188,7 +188,7 @@ fn renderBindings(
         }
     }
 
-    try renderInternal(w, registry);
+    try renderInternal(w, registry, style);
 }
 
 fn isHandle(@"type": Registry.Type, opaque_index: usize) bool {
@@ -198,6 +198,7 @@ fn isHandle(@"type": Registry.Type, opaque_index: usize) bool {
 fn renderEnumerateAlloc(
     w: *std.Io.Writer,
     registry: Registry,
+    style: BindingStyle,
     function: Registry.Function,
     c_name: []const u8,
 ) !void {
@@ -223,7 +224,7 @@ fn renderEnumerateAlloc(
         if (paramRole(function, param_index, out_param_index) != .plain) continue;
         try renderId(w, param.name);
         try w.writeAll(": ");
-        try renderType(w, registry, param.type);
+        try renderType(w, registry, style, param.type);
         try w.writeAll(", ");
     }
     try w.writeAll("gpa: std.mem.Allocator,) error{ OutOfMemory, ");
@@ -232,13 +233,13 @@ fn renderEnumerateAlloc(
         try w.writeAll(", ");
     }
     try w.writeAll("}![]");
-    try renderSliceElementType(w, registry, buffer_param.type);
+    try renderSliceElementType(w, registry, style, buffer_param.type);
     try w.writeAll(" {\n");
 
     try w.writeAll("var ");
     try renderId(w, buffer_param.name);
     try w.writeAll(": []");
-    try renderSliceElementType(w, registry, buffer_param.type);
+    try renderSliceElementType(w, registry, style, buffer_param.type);
     try w.writeAll(" = &.{};\nerrdefer gpa.free(");
     try renderId(w, buffer_param.name);
     try w.writeAll(");\nwhile (true) {\nconst ");
@@ -294,19 +295,19 @@ fn renderFunction(
             .plain => {
                 try renderId(w, param.name);
                 try w.writeAll(": ");
-                try renderType(w, registry, param.type);
+                try renderType(w, registry, style, param.type);
             },
             .slice => {
                 try renderId(w, param.name);
                 try w.writeAll(": ");
-                try renderSliceType(w, registry, param.type);
+                try renderSliceType(w, registry, style, param.type);
             },
         }
         try w.writeAll(", ");
     }
     if (is_create_instance) {
         try w.writeAll("getSymbol: ");
-        try renderType(w, registry, registry.get_symbol_type);
+        try renderType(w, registry, style, registry.get_symbol_type);
         try w.writeAll(", ");
     }
     try w.writeAll(") ");
@@ -316,11 +317,11 @@ fn renderFunction(
         try w.writeByte('!');
     }
     if (out_param_index) |index| {
-        try renderType(w, registry, pointee(function.params[index].type));
+        try renderType(w, registry, style, pointee(function.params[index].type));
     } else if (returns_error) {
         try w.writeAll("void");
     } else {
-        try renderType(w, registry, function.return_type);
+        try renderType(w, registry, style, function.return_type);
     }
     try w.writeAll(" {\n");
 
@@ -333,7 +334,7 @@ fn renderFunction(
         },
         .table => {
             try w.writeAll("const f: ");
-            try renderFnType(w, registry, function.params, function.return_type);
+            try renderFnType(w, registry, style, function.params, function.return_type);
             try w.writeAll(" = @ptrCast(internal.table(");
             try renderId(w, function.params[0].name);
             try w.writeAll(")[internal.slots.");
@@ -347,7 +348,7 @@ fn renderFunction(
         try w.writeAll("var ");
         try renderId(w, param.name);
         try w.writeAll(": ");
-        try renderType(w, registry, pointee(param.type));
+        try renderType(w, registry, style, pointee(param.type));
         try w.writeAll(" = undefined;\n");
     }
 
@@ -464,19 +465,19 @@ fn renderSliceField(w: *std.Io.Writer, param: Registry.Param, field: enum { ptr,
     });
 }
 
-fn renderSliceType(w: *std.Io.Writer, registry: Registry, @"type": Registry.Type) !void {
+fn renderSliceType(w: *std.Io.Writer, registry: Registry, style: BindingStyle, @"type": Registry.Type) !void {
     const outermost = @"type".ptrs[@"type".ptrs.len - 1];
     if (outermost.optional) try w.writeByte('?');
     try w.writeAll("[]");
     if (outermost.@"const") try w.writeAll("const ");
-    try renderSliceElementType(w, registry, @"type");
+    try renderSliceElementType(w, registry, style, @"type");
 }
 
-fn renderSliceElementType(w: *std.Io.Writer, registry: Registry, @"type": Registry.Type) !void {
+fn renderSliceElementType(w: *std.Io.Writer, registry: Registry, style: BindingStyle, @"type": Registry.Type) !void {
     const element = pointee(@"type");
     const is_untyped = element.ptrs.len == 0 and element.base == .builtin and element.base.builtin == .void;
     if (is_untyped) return w.writeAll("u8");
-    try renderType(w, registry, element);
+    try renderType(w, registry, style, element);
 }
 
 fn pointee(@"type": Registry.Type) Registry.Type {
@@ -524,7 +525,7 @@ fn outParamIndex(function: Registry.Function) !?usize {
     return found;
 }
 
-fn renderInternal(w: *std.Io.Writer, registry: Registry) !void {
+fn renderInternal(w: *std.Io.Writer, registry: Registry, style: BindingStyle) !void {
     try w.writeAll(
         \\const internal = struct {
         \\    inline fn table(handle: *const anyopaque) [*]const *const anyopaque {
@@ -537,7 +538,7 @@ fn renderInternal(w: *std.Io.Writer, registry: Registry) !void {
         try w.writeAll("var ");
         try renderSnakeName(w, registry, function.name);
         try w.writeAll(": ?");
-        try renderFnType(w, registry, function.params, function.return_type);
+        try renderFnType(w, registry, style, function.params, function.return_type);
         try w.writeAll(" = null;\n");
     }
 
@@ -550,7 +551,7 @@ fn renderInternal(w: *std.Io.Writer, registry: Registry) !void {
     try w.writeAll("} = .{};\n\n");
 
     try w.writeAll("fn loadGlobals(getSymbol: ");
-    try renderType(w, registry, registry.get_symbol_type);
+    try renderType(w, registry, style, registry.get_symbol_type);
     try w.writeAll(") void {\n");
     for (registry.functions) |function| {
         if (function.dispatch != .symbol) continue;
@@ -563,7 +564,7 @@ fn renderInternal(w: *std.Io.Writer, registry: Registry) !void {
     const get_slot = functionWithRole(registry, .get_slot);
 
     try w.writeAll("fn loadSlots(instance: ");
-    try renderType(w, registry, create_instance.return_type);
+    try renderType(w, registry, style, create_instance.return_type);
     try w.writeAll(") void {\n");
     for (registry.functions) |function| {
         if (function.dispatch != .table) continue;
@@ -611,13 +612,13 @@ fn renderSymbolMap(
         if (function.dispatch != dispatch) continue;
         try renderFnName(w, registry, function.name);
         try w.writeAll(": fn (");
-        try renderParams(w, registry, function.params, qualifier);
+        try renderParams(w, registry, .minimal, function.params, qualifier);
         try w.writeAll(") ");
         if (function.errors.len != 0) {
             try renderErrorSet(w, registry, function.errors);
             try w.writeAll("!void");
         } else {
-            try renderQualifiedType(w, registry, function.return_type, qualifier);
+            try renderQualifiedType(w, registry, .minimal, function.return_type, qualifier);
         }
         try w.writeAll(",\n");
     }
@@ -648,9 +649,9 @@ fn renderSymbolMap(
         try w.writeAll("pub fn ");
         try renderFnName(w, registry, function.name);
         try w.writeByte('(');
-        try renderParams(w, registry, function.params, qualifier);
+        try renderParams(w, registry, .minimal, function.params, qualifier);
         try w.writeAll(") callconv(sf.@\"callconv\") ");
-        try renderQualifiedType(w, registry, function.return_type, qualifier);
+        try renderQualifiedType(w, registry, .minimal, function.return_type, qualifier);
         try w.writeAll(" {\nreturn ");
 
         const converts_errors = function.errors.len != 0;
@@ -818,13 +819,14 @@ const TypeQualifier = struct {
     handle: []const u8 = "",
 };
 
-fn renderType(w: *std.Io.Writer, registry: Registry, @"type": Registry.Type) !void {
-    try renderQualifiedType(w, registry, @"type", .{});
+fn renderType(w: *std.Io.Writer, registry: Registry, style: BindingStyle, @"type": Registry.Type) !void {
+    try renderQualifiedType(w, registry, style, @"type", .{});
 }
 
 fn renderQualifiedType(
     w: *std.Io.Writer,
     registry: Registry,
+    style: BindingStyle,
     @"type": Registry.Type,
     qualifier: TypeQualifier,
 ) !void {
@@ -837,10 +839,10 @@ fn renderQualifiedType(
         },
     };
 
-    var index = @"type".ptrs.len;
-    while (index > 0) {
-        index -= 1;
-        const pointer = @"type".ptrs[index];
+    var ptrs_index = @"type".ptrs.len;
+    while (ptrs_index > 0) {
+        ptrs_index -= 1;
+        const pointer = @"type".ptrs[ptrs_index];
         if (pointer.optional) try w.writeByte('?');
         try w.writeAll(switch (pointer.size) {
             .one => "*",
@@ -850,10 +852,31 @@ fn renderQualifiedType(
         if (pointer.@"const") try w.writeAll("const ");
     }
 
+    if (style == .minimal and @"type".device_ptrs.len != 0) {
+        try w.writeAll(qualifier.decl);
+        return w.writeAll("DeviceAddress");
+    }
+
+    var device_ptrs_index = @"type".device_ptrs.len;
+    while (device_ptrs_index > 0) {
+        device_ptrs_index -= 1;
+        const pointer = @"type".device_ptrs[device_ptrs_index];
+        if (pointer.optional) try w.writeByte('?');
+        try w.writeAll(switch (pointer.size) {
+            .one => "Ptr(.one,",
+            .many, .sized_by_arg => "Ptr(.many,",
+            .null_terminated => return error.UnsupportedRegistry,
+        });
+        if (pointer.@"const") try w.writeAll("const ");
+    }
+
     switch (@"type".base) {
         .builtin => |builtin| {
-            if (@"type".ptrs.len != 0 and builtin == .void) return w.writeAll("anyopaque");
-            try renderBuiltinType(w, builtin);
+            if ((@"type".ptrs.len != 0 or @"type".device_ptrs.len != 0) and builtin == .void) {
+                try w.writeAll("anyopaque");
+            } else {
+                try renderBuiltinType(w, builtin);
+            }
         },
         .@"opaque" => {
             try w.writeAll(qualifier.handle);
@@ -863,6 +886,24 @@ fn renderQualifiedType(
             try w.writeAll(qualifier.decl);
             try renderTypeName(w, registry, registry.declName(@"type".base));
         },
+    }
+
+    for (@"type".device_ptrs) |device_ptr| {
+        try w.writeAll(", .{");
+        if (device_ptr.alignment) |a| {
+            try w.writeAll(".@\"align\" = ");
+            try w.writeAll(switch (a) {
+                1 => ".@\"1\"",
+                2 => ".@\"2\"",
+                4 => ".@\"4\"",
+                8 => ".@\"8\"",
+                16 => ".@\"16\"",
+                32 => ".@\"32\"",
+                64 => ".@\"64\"",
+                else => @panic("TODO"),
+            });
+        }
+        try w.writeAll("})");
     }
 }
 
@@ -888,25 +929,27 @@ fn renderBuiltinType(w: *std.Io.Writer, builtin: Registry.Builtin) !void {
 fn renderFnType(
     w: *std.Io.Writer,
     registry: Registry,
+    style: BindingStyle,
     params: []const Registry.Param,
     return_type: Registry.Type,
 ) !void {
     try w.writeAll("*const fn (");
-    try renderParams(w, registry, params, .{});
+    try renderParams(w, registry, style, params, .{});
     try w.writeAll(") callconv(@\"callconv\") ");
-    try renderType(w, registry, return_type);
+    try renderType(w, registry, style, return_type);
 }
 
 fn renderParams(
     w: *std.Io.Writer,
     registry: Registry,
+    style: BindingStyle,
     params: []const Registry.Param,
     qualifier: TypeQualifier,
 ) !void {
     for (params) |param| {
         try renderId(w, param.name);
         try w.writeAll(": ");
-        try renderQualifiedType(w, registry, param.type, qualifier);
+        try renderQualifiedType(w, registry, style, param.type, qualifier);
         try w.writeAll(", ");
     }
 }

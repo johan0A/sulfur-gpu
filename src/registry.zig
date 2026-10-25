@@ -51,11 +51,13 @@ pub const Registry = struct {
     pub const Type = struct {
         base: TypeBase,
         ptrs: []const Pointer = &.{},
+        device_ptrs: []const Pointer = &.{},
         array: ?Array = null,
 
         pub const Pointer = struct {
             optional: bool,
             @"const": bool,
+            alignment: ?usize,
             size: Size,
 
             pub const Size = union(enum) {
@@ -199,17 +201,17 @@ pub const Registry = struct {
     };
 
     pub fn resultEnum(registry: Registry) Enum {
-        return registry.enums[@intFromEnum(registry.result)];
+        return registry.enums[@backingInt(registry.result)];
     }
 
     pub fn declName(registry: Registry, base: TypeBase) []const u8 {
         return switch (base) {
-            .typedef => |index| registry.typedefs[@intFromEnum(index)].name,
-            .@"opaque" => |index| registry.opaques[@intFromEnum(index)].name,
-            .function_pointer => |index| registry.function_pointers[@intFromEnum(index)].name,
-            .@"struct" => |index| registry.structs[@intFromEnum(index)].name,
-            .@"enum" => |index| registry.enums[@intFromEnum(index)].name,
-            .flags => |index| registry.flags[@intFromEnum(index)].name,
+            .typedef => |index| registry.typedefs[@backingInt(index)].name,
+            .@"opaque" => |index| registry.opaques[@backingInt(index)].name,
+            .function_pointer => |index| registry.function_pointers[@backingInt(index)].name,
+            .@"struct" => |index| registry.structs[@backingInt(index)].name,
+            .@"enum" => |index| registry.enums[@backingInt(index)].name,
+            .flags => |index| registry.flags[@backingInt(index)].name,
             .builtin => |builtin| @tagName(builtin),
         };
     }
@@ -278,11 +280,13 @@ pub const JsonRegistry = struct {
     pub const Type = struct {
         base: []const u8,
         ptr: []const Ptr = &.{},
+        device_ptr: []const Ptr = &.{},
         array: ?Array = null,
 
         pub const Ptr = struct {
             optional: bool = false,
             @"const": bool = false,
+            alignment: ?usize = null,
             len: ?[]const u8 = null,
         };
 
@@ -376,7 +380,7 @@ fn convert(arena: std.mem.Allocator, json: JsonRegistry) !Registry {
         .arena = arena,
         .json = json,
         .decl_by_name = decl_by_name,
-        .result_enum = json.enums[@intFromEnum(result_index)],
+        .result_enum = json.enums[@backingInt(result_index)],
     };
 
     const constants = try arena.alloc(Registry.Constant, json.constants.len);
@@ -475,7 +479,7 @@ fn addDecls(
     for (decls, 0..) |decl, index| {
         const entry = try decl_by_name.getOrPut(arena, decl.name);
         if (entry.found_existing) return error.DuplicateDecl;
-        entry.value_ptr.* = @unionInit(Registry.TypeBase, @tagName(tag), @as(Index, @enumFromInt(index)));
+        entry.value_ptr.* = @unionInit(Registry.TypeBase, @tagName(tag), @as(Index, @fromBackingInt(@intCast(index))));
     }
 }
 
@@ -496,10 +500,31 @@ fn convertType(
     json_type: JsonRegistry.Type,
     siblings: anytype,
 ) !Registry.Type {
-    const pointers = try context.arena.alloc(Registry.Type.Pointer, json_type.ptr.len);
-    for (json_type.ptr, pointers) |json_pointer, *pointer| pointer.* = .{
+    const pointers = try convertPtr(context, siblings, json_type.ptr);
+    const device_pointers = try convertPtr(context, siblings, json_type.device_ptr);
+    return .{
+        .base = try resolveTypeBase(context, json_type.base),
+        .ptrs = pointers,
+        .device_ptrs = device_pointers,
+        .array = if (json_type.array) |array| switch (array) {
+            .int => |length| .{ .int = length },
+            .constant => |name| .{
+                .constant = @fromBackingInt(@intCast(findByName(context.json.constants, name) orelse return error.UnknownConstant)),
+            },
+        } else null,
+    };
+}
+
+fn convertPtr(
+    context: Context,
+    siblings: anytype,
+    json_pointers: []const JsonRegistry.Type.Ptr,
+) ![]Registry.Type.Pointer {
+    const pointers = try context.arena.alloc(Registry.Type.Pointer, json_pointers.len);
+    for (json_pointers, pointers) |json_pointer, *pointer| pointer.* = .{
         .optional = json_pointer.optional,
         .@"const" = json_pointer.@"const",
+        .alignment = json_pointer.alignment,
         .size = blk: {
             const len_name = json_pointer.len orelse break :blk .one;
             if (std.mem.eql(u8, len_name, "none")) break :blk .many;
@@ -508,17 +533,7 @@ fn convertType(
             break :blk .{ .sized_by_arg = @intCast(sibling_index) };
         },
     };
-
-    return .{
-        .base = try resolveTypeBase(context, json_type.base),
-        .ptrs = pointers,
-        .array = if (json_type.array) |array| switch (array) {
-            .int => |length| .{ .int = length },
-            .constant => |name| .{
-                .constant = @enumFromInt(findByName(context.json.constants, name) orelse return error.UnknownConstant),
-            },
-        } else null,
-    };
+    return pointers;
 }
 
 fn convertParams(context: Context, json_params: []const JsonRegistry.Param) ![]const Registry.Param {
@@ -555,7 +570,7 @@ fn convertDefault(
     if (!is_plain_enum) return .{ .raw = raw };
 
     const enum_index = @"type".base.@"enum";
-    const json_enum = context.json.enums[@intFromEnum(enum_index)];
+    const json_enum = context.json.enums[@backingInt(enum_index)];
     const value_index = findByName(json_enum.values, raw) orelse return .{ .raw = raw };
     return .{ .enum_value = .{ .@"enum" = enum_index, .value = @intCast(value_index) } };
 }

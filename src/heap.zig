@@ -3,8 +3,6 @@ const sf = @import("sf.zig");
 const Alignment = std.mem.Alignment;
 
 pub const PointerAttributes = struct {
-    @"const": bool = false,
-    @"volatile": bool = false,
     @"align": ?std.mem.Alignment = null,
     optional: bool = false,
 };
@@ -37,8 +35,6 @@ pub fn Ptr(
                 .one => .one,
                 .many => .many,
             }, .{
-                .@"const" = attributes.@"const",
-                .@"volatile" = attributes.@"volatile",
                 .@"align" = if (attributes.@"align") |a| a.toByteUnits() else null,
             }, Element, null);
             break :blk if (attributes.optional) ?H else H;
@@ -78,7 +74,7 @@ pub fn Ptr(
             return .{ .addr = ptr.addr };
         }
 
-        pub fn cast(ptr: anytype) @This() {
+        pub fn ptrCast(ptr: anytype) @This() {
             comptime blk: {
                 if (!isDevicePtr(@TypeOf(ptr)))
                     @compileError("expected a device pointer, found '" ++ @typeName(@TypeOf(ptr)) ++ "'");
@@ -150,8 +146,6 @@ pub fn Slice(
 
         pub const Host = blk: {
             const H = @Pointer(.slice, .{
-                .@"const" = attributes.@"const",
-                .@"volatile" = attributes.@"volatile",
                 .@"align" = if (attributes.@"align") |a| a.toByteUnits() else null,
             }, Element, null);
             break :blk if (attributes.optional) ?H else H;
@@ -183,7 +177,7 @@ pub fn Slice(
             const byte_len = src.len * @sizeOf(Src.info.Element);
             std.debug.assert(byte_len % @sizeOf(Element) == 0);
             return .{
-                .ptr = .cast(src.ptr),
+                .ptr = .ptrCast(src.ptr),
                 .len = byte_len / @sizeOf(Element),
             };
         }
@@ -319,7 +313,7 @@ const DeviceAllocator = struct {
         }
         const result = try a.allocBytesWithAlignment(.of(T), @sizeOf(T), memory, @returnAddress());
         return .{
-            .device = .fromInt(result.device),
+            .device = .fromInt(result.device.addr),
             .host = @ptrCast(@alignCast(result.host)),
         };
     }
@@ -386,7 +380,7 @@ const DeviceAllocator = struct {
         const result = try self.allocBytesWithAlignment(alignment, byte_count, memory, return_address);
         const host_ptr: [*]T = @ptrCast(@alignCast(result.host));
         return .{
-            .device_ptr = .fromInt(result.device),
+            .device_ptr = .fromInt(result.device.addr),
             .host_ptr = host_ptr,
             .len = n,
         };
@@ -400,7 +394,7 @@ const DeviceAllocator = struct {
         return_address: usize,
     ) Error!sf.HostDeviceAddress {
         if (byte_count == 0) return .{
-            .device = alignment.backward(std.math.maxInt(u64)),
+            .device = .{ .addr = alignment.backward(std.math.maxInt(u64)) },
             .host = undefined,
         };
         return try self.rawAlloc(byte_count, alignment, memory, return_address);
@@ -488,7 +482,7 @@ pub const raw_device_allocator = struct {
         _ = memory_type;
         _ = ret_addr;
         const device: *sf.Device = @ptrCast(@alignCast(self));
-        return device.free(memory.ptr.addr);
+        return device.free(.fromInt(memory.ptr.addr));
     }
 };
 
@@ -527,7 +521,7 @@ pub const FixedBufferAllocator = struct {
             r.end_index = new_end;
 
             return .{
-                .device = addr,
+                .device = .fromInt(addr),
                 .host = @ptrCast(r.buffer.host_ptr + start),
             };
         }

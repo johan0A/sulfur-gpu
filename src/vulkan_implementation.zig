@@ -1738,19 +1738,16 @@ pub const CommandBuffer = struct {
     /// 256 bytes is a typical optimal alignment for dest
     pub fn sfCopyTextureToBuffer(
         command_buffer: *Header(CommandBuffer),
-        source: gpu.DeviceAddress,
+        source_texture: *Header(Texture),
         destination: gpu.DeviceAddress,
-        texture: *Header(Texture),
     ) void {
-        copyTextureToBuffer(command_buffer.body(), source, destination, texture.body());
+        copyTextureToBuffer(command_buffer.body(), destination, source_texture.body());
     }
     fn copyTextureToBuffer(
         command_buffer: *CommandBuffer,
-        source: gpu.DeviceAddress,
         destination: gpu.DeviceAddress,
         texture: *Texture,
     ) void {
-        _ = source;
         const entry, const offset = command_buffer.d.heap.addrToEntryAndOffset(destination);
         const region: vk.BufferImageCopy2 = .{
             .buffer_offset = offset,
@@ -1782,18 +1779,15 @@ pub const CommandBuffer = struct {
     pub fn sfCopyBufferToTexture(
         command_buffer: *Header(CommandBuffer),
         source: gpu.DeviceAddress,
-        destination: gpu.DeviceAddress,
-        texture: *Header(Texture),
+        destination_texture: *Header(Texture),
     ) void {
-        copyBufferToTexture(command_buffer.body(), source, destination, texture.body());
+        copyBufferToTexture(command_buffer.body(), source, destination_texture.body());
     }
     fn copyBufferToTexture(
         command_buffer: *CommandBuffer,
         source: gpu.DeviceAddress,
-        destination: gpu.DeviceAddress,
         texture: *Texture,
     ) void {
-        _ = destination;
         const entry, const offset = command_buffer.d.heap.addrToEntryAndOffset(source);
         const region: vk.BufferImageCopy2 = .{
             .buffer_offset = offset,
