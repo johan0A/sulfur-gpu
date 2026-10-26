@@ -3,7 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const target = b.standardTargetOptions(.{});
-    const validation_layers = b.option(bool, "validation-layers", "") orelse (optimize == .Debug);
+    const validation_layers = b.option(bool, "validation-layers", "") orelse (optimize == .debug);
 
     const lib = b.addLibrary(.{
         .name = "sulfur",
@@ -219,10 +219,10 @@ pub const Sampler = packed struct(u64) {
         max = 0xFFF,
         _,
         pub fn of(x: f32) Lod {
-            return @enumFromInt(@as(u12, @intFromFloat(@min(x, 15.996) * 256.0)));
+            return @fromBackingInt(@intFromFloat(@min(x, 15.996) * 256.0));
         }
         pub fn toF32(self: Lod) f32 {
-            return @as(f32, @floatFromInt(@intFromEnum(self))) / 256.0;
+            return @as(f32, @floatFromInt(@backingInt(self))) / 256.0;
         }
     };
 
@@ -230,10 +230,10 @@ pub const Sampler = packed struct(u64) {
         none = 0,
         _,
         pub fn of(x: f32) Bias {
-            return @enumFromInt(@as(i14, @intFromFloat(x * 256)));
+            return @fromBackingInt(@intFromFloat(x * 256));
         }
         pub fn toF32(self: Bias) f32 {
-            return @as(f32, @floatFromInt(@intFromEnum(self))) / 256;
+            return @as(f32, @floatFromInt(@backingInt(self))) / 256;
         }
     };
 };

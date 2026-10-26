@@ -74,44 +74,44 @@ pub const to_gpu = struct {
             .eac_r11_snorm_block => .eacr11_snorm,
             .eac_r11g11_unorm_block => .eacrg11_unorm,
             .eac_r11g11_snorm_block => .eacrg11_snorm,
-            .astc_4x_4_unorm_block => .astc4x4_unorm,
-            .astc_4x_4_srgb_block => .astc4x4_unorm_srgb,
-            .astc_5x_4_unorm_block => .astc5x4_unorm,
-            .astc_5x_4_srgb_block => .astc5x4_unorm_srgb,
-            .astc_5x_5_unorm_block => .astc5x5_unorm,
-            .astc_5x_5_srgb_block => .astc5x5_unorm_srgb,
-            .astc_6x_5_unorm_block => .astc6x5_unorm,
-            .astc_6x_5_srgb_block => .astc6x5_unorm_srgb,
-            .astc_6x_6_unorm_block => .astc6x6_unorm,
-            .astc_6x_6_srgb_block => .astc6x6_unorm_srgb,
-            .astc_8x_5_unorm_block => .astc8x5_unorm,
-            .astc_8x_5_srgb_block => .astc8x5_unorm_srgb,
-            .astc_8x_6_unorm_block => .astc8x6_unorm,
-            .astc_8x_6_srgb_block => .astc8x6_unorm_srgb,
-            .astc_8x_8_unorm_block => .astc8x8_unorm,
-            .astc_8x_8_srgb_block => .astc8x8_unorm_srgb,
-            .astc_1_0x_5_unorm_block => .astc10x5_unorm,
-            .astc_1_0x_5_srgb_block => .astc10x5_unorm_srgb,
-            .astc_1_0x_6_unorm_block => .astc10x6_unorm,
-            .astc_1_0x_6_srgb_block => .astc10x6_unorm_srgb,
-            .astc_1_0x_8_unorm_block => .astc10x8_unorm,
-            .astc_1_0x_8_srgb_block => .astc10x8_unorm_srgb,
-            .astc_1_0x_10_unorm_block => .astc10x10_unorm,
-            .astc_1_0x_10_srgb_block => .astc10x10_unorm_srgb,
-            .astc_1_2x_10_unorm_block => .astc12x10_unorm,
-            .astc_1_2x_10_srgb_block => .astc12x10_unorm_srgb,
-            .astc_1_2x_12_unorm_block => .astc12x12_unorm,
-            .astc_1_2x_12_srgb_block => .astc12x12_unorm_srgb,
+            .astc_4x4_unorm_block => .astc4x4_unorm,
+            .astc_4x4_srgb_block => .astc4x4_unorm_srgb,
+            .astc_5x4_unorm_block => .astc5x4_unorm,
+            .astc_5x4_srgb_block => .astc5x4_unorm_srgb,
+            .astc_5x5_unorm_block => .astc5x5_unorm,
+            .astc_5x5_srgb_block => .astc5x5_unorm_srgb,
+            .astc_6x5_unorm_block => .astc6x5_unorm,
+            .astc_6x5_srgb_block => .astc6x5_unorm_srgb,
+            .astc_6x6_unorm_block => .astc6x6_unorm,
+            .astc_6x6_srgb_block => .astc6x6_unorm_srgb,
+            .astc_8x5_unorm_block => .astc8x5_unorm,
+            .astc_8x5_srgb_block => .astc8x5_unorm_srgb,
+            .astc_8x6_unorm_block => .astc8x6_unorm,
+            .astc_8x6_srgb_block => .astc8x6_unorm_srgb,
+            .astc_8x8_unorm_block => .astc8x8_unorm,
+            .astc_8x8_srgb_block => .astc8x8_unorm_srgb,
+            .astc_10x5_unorm_block => .astc10x5_unorm,
+            .astc_10x5_srgb_block => .astc10x5_unorm_srgb,
+            .astc_10x6_unorm_block => .astc10x6_unorm,
+            .astc_10x6_srgb_block => .astc10x6_unorm_srgb,
+            .astc_10x8_unorm_block => .astc10x8_unorm,
+            .astc_10x8_srgb_block => .astc10x8_unorm_srgb,
+            .astc_10x10_unorm_block => .astc10x10_unorm,
+            .astc_10x10_srgb_block => .astc10x10_unorm_srgb,
+            .astc_12x10_unorm_block => .astc12x10_unorm,
+            .astc_12x10_srgb_block => .astc12x10_unorm_srgb,
+            .astc_12x12_unorm_block => .astc12x12_unorm,
+            .astc_12x12_srgb_block => .astc12x12_unorm_srgb,
             else => null,
         };
     }
 
     pub fn usageFlags(flags: vk.ImageUsageFlags) gpu.TextureUsage {
         return .{
-            .sampled = flags.sampled_bit,
-            .storage = flags.storage_bit,
-            .color_attachment = flags.color_attachment_bit,
-            .depth_stencil_attachment = flags.depth_stencil_attachment_bit,
+            .sampled = flags.sampled,
+            .storage = flags.storage,
+            .color_attachment = flags.color_attachment,
+            .depth_stencil_attachment = flags.depth_stencil_attachment,
         };
     }
 
@@ -197,46 +197,46 @@ pub const to_vk = struct {
             .eacr11_snorm => .eac_r11_snorm_block,
             .eacrg11_unorm => .eac_r11g11_unorm_block,
             .eacrg11_snorm => .eac_r11g11_snorm_block,
-            .astc4x4_unorm => .astc_4x_4_unorm_block,
-            .astc4x4_unorm_srgb => .astc_4x_4_srgb_block,
-            .astc5x4_unorm => .astc_5x_4_unorm_block,
-            .astc5x4_unorm_srgb => .astc_5x_4_srgb_block,
-            .astc5x5_unorm => .astc_5x_5_unorm_block,
-            .astc5x5_unorm_srgb => .astc_5x_5_srgb_block,
-            .astc6x5_unorm => .astc_6x_5_unorm_block,
-            .astc6x5_unorm_srgb => .astc_6x_5_srgb_block,
-            .astc6x6_unorm => .astc_6x_6_unorm_block,
-            .astc6x6_unorm_srgb => .astc_6x_6_srgb_block,
-            .astc8x5_unorm => .astc_8x_5_unorm_block,
-            .astc8x5_unorm_srgb => .astc_8x_5_srgb_block,
-            .astc8x6_unorm => .astc_8x_6_unorm_block,
-            .astc8x6_unorm_srgb => .astc_8x_6_srgb_block,
-            .astc8x8_unorm => .astc_8x_8_unorm_block,
-            .astc8x8_unorm_srgb => .astc_8x_8_srgb_block,
-            .astc10x5_unorm => .astc_1_0x_5_unorm_block,
-            .astc10x5_unorm_srgb => .astc_1_0x_5_srgb_block,
-            .astc10x6_unorm => .astc_1_0x_6_unorm_block,
-            .astc10x6_unorm_srgb => .astc_1_0x_6_srgb_block,
-            .astc10x8_unorm => .astc_1_0x_8_unorm_block,
-            .astc10x8_unorm_srgb => .astc_1_0x_8_srgb_block,
-            .astc10x10_unorm => .astc_1_0x_10_unorm_block,
-            .astc10x10_unorm_srgb => .astc_1_0x_10_srgb_block,
-            .astc12x10_unorm => .astc_1_2x_10_unorm_block,
-            .astc12x10_unorm_srgb => .astc_1_2x_10_srgb_block,
-            .astc12x12_unorm => .astc_1_2x_12_unorm_block,
-            .astc12x12_unorm_srgb => .astc_1_2x_12_srgb_block,
+            .astc4x4_unorm => .astc_4x4_unorm_block,
+            .astc4x4_unorm_srgb => .astc_4x4_srgb_block,
+            .astc5x4_unorm => .astc_5x4_unorm_block,
+            .astc5x4_unorm_srgb => .astc_5x4_srgb_block,
+            .astc5x5_unorm => .astc_5x5_unorm_block,
+            .astc5x5_unorm_srgb => .astc_5x5_srgb_block,
+            .astc6x5_unorm => .astc_6x5_unorm_block,
+            .astc6x5_unorm_srgb => .astc_6x5_srgb_block,
+            .astc6x6_unorm => .astc_6x6_unorm_block,
+            .astc6x6_unorm_srgb => .astc_6x6_srgb_block,
+            .astc8x5_unorm => .astc_8x5_unorm_block,
+            .astc8x5_unorm_srgb => .astc_8x5_srgb_block,
+            .astc8x6_unorm => .astc_8x6_unorm_block,
+            .astc8x6_unorm_srgb => .astc_8x6_srgb_block,
+            .astc8x8_unorm => .astc_8x8_unorm_block,
+            .astc8x8_unorm_srgb => .astc_8x8_srgb_block,
+            .astc10x5_unorm => .astc_10x5_unorm_block,
+            .astc10x5_unorm_srgb => .astc_10x5_srgb_block,
+            .astc10x6_unorm => .astc_10x6_unorm_block,
+            .astc10x6_unorm_srgb => .astc_10x6_srgb_block,
+            .astc10x8_unorm => .astc_10x8_unorm_block,
+            .astc10x8_unorm_srgb => .astc_10x8_srgb_block,
+            .astc10x10_unorm => .astc_10x10_unorm_block,
+            .astc10x10_unorm_srgb => .astc_10x10_srgb_block,
+            .astc12x10_unorm => .astc_12x10_unorm_block,
+            .astc12x10_unorm_srgb => .astc_12x10_srgb_block,
+            .astc12x12_unorm => .astc_12x12_unorm_block,
+            .astc12x12_unorm_srgb => .astc_12x12_srgb_block,
             else => @panic("TODO"), // TODO: why some missing?
         };
     }
 
     pub fn aspectsForFormat(fmt: gpu.Format) vk.ImageAspectFlags {
         return switch (fmt) {
-            .stencil8 => .{ .stencil_bit = true },
-            .depth16_unorm, .depth24_plus => .{ .depth_bit = true },
-            .depth24_plus_stencil8 => .{ .depth_bit = true, .stencil_bit = true },
-            .depth32_float => .{ .depth_bit = true },
-            .depth32_float_stencil8 => .{ .depth_bit = true, .stencil_bit = true },
-            else => .{ .color_bit = true },
+            .stencil8 => .{ .stencil = true },
+            .depth16_unorm, .depth24_plus => .{ .depth = true },
+            .depth24_plus_stencil8 => .{ .depth = true, .stencil = true },
+            .depth32_float => .{ .depth = true },
+            .depth32_float_stencil8 => .{ .depth = true, .stencil = true },
+            else => .{ .color = true },
         };
     }
 
@@ -259,17 +259,17 @@ pub const to_vk = struct {
 
     pub fn pipelineStage(stage: gpu.Stage) vk.PipelineStageFlags2 {
         var out: vk.PipelineStageFlags2 = .{};
-        if (stage.transfer) out.all_transfer_bit = true;
-        if (stage.compute) out.compute_shader_bit = true;
-        if (stage.raster_color_out) out.color_attachment_output_bit = true;
+        if (stage.transfer) out.all_transfer = true;
+        if (stage.compute) out.compute_shader = true;
+        if (stage.raster_color_out) out.color_attachment_output = true;
         if (stage.raster_depth_out) {
-            out.early_fragment_tests_bit = true;
-            out.late_fragment_tests_bit = true;
+            out.early_fragment_tests = true;
+            out.late_fragment_tests = true;
         }
-        if (stage.pixel_shader) out.fragment_shader_bit = true;
+        if (stage.pixel_shader) out.fragment_shader = true;
         if (stage.vertex_shader) {
-            out.vertex_shader_bit = true;
-            out.index_input_bit = true;
+            out.vertex_shader = true;
+            out.index_input = true;
         }
         // TODO:
         // if (stage.mesh_shader) {
@@ -289,12 +289,12 @@ pub const to_vk = struct {
 
     pub fn usageFlags(flags: gpu.TextureUsage) vk.ImageUsageFlags {
         return .{
-            .transfer_src_bit = true,
-            .transfer_dst_bit = true,
-            .sampled_bit = flags.sampled,
-            .storage_bit = flags.storage,
-            .color_attachment_bit = flags.color_attachment,
-            .depth_stencil_attachment_bit = flags.depth_stencil_attachment,
+            .transfer_src = true,
+            .transfer_dst = true,
+            .sampled = flags.sampled,
+            .storage = flags.storage,
+            .color_attachment = flags.color_attachment,
+            .depth_stencil_attachment = flags.depth_stencil_attachment,
         };
     }
 
@@ -343,28 +343,28 @@ pub const to_vk = struct {
 
     pub fn sampleCount(n: u8) vk.SampleCountFlags {
         return switch (n) {
-            1 => .{ .@"1_bit" = true },
-            2 => .{ .@"2_bit" = true },
-            4 => .{ .@"4_bit" = true },
-            8 => .{ .@"8_bit" = true },
+            1 => .{ .@"1" = true },
+            2 => .{ .@"2" = true },
+            4 => .{ .@"4" = true },
+            8 => .{ .@"8" = true },
             else => unreachable,
         };
     }
 
     pub fn writeMask(mask: gpu.ColorWriteMask) vk.ColorComponentFlags {
         return .{
-            .r_bit = mask.r,
-            .g_bit = mask.g,
-            .b_bit = mask.b,
-            .a_bit = mask.a,
+            .r = mask.r,
+            .g = mask.g,
+            .b = mask.b,
+            .a = mask.a,
         };
     }
 
     pub fn cullMode(c: gpu.Cull) vk.CullModeFlags {
         return switch (c) {
-            .ccw => .{ .front_bit = true },
-            .cw => .{ .back_bit = true },
-            .all => .{ .front_bit = true, .back_bit = true },
+            .ccw => .{ .front = true },
+            .cw => .{ .back = true },
+            .all => .{ .front = true, .back = true },
             .none => .{},
         };
     }
@@ -424,7 +424,7 @@ pub const to_vk = struct {
 
     pub fn anisotropy(a: sampler_desc.Anisotropy) f32 {
         return @floatFromInt(
-            @as(u32, 1) << @intFromEnum(a),
+            @as(u32, 1) << @backingInt(a),
         );
     }
 

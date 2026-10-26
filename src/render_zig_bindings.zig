@@ -36,7 +36,7 @@ pub fn main(init: std.process.Init) !void {
     var file_writer = file.writer(io, &buf);
 
     const source = try output.toOwnedSliceSentinel(0);
-    const ast: std.zig.Ast = try .parse(arena, source, .zig);
+    const ast: std.zig.Ast = try .parse(arena, source, .{});
     try ast.render(arena, &file_writer.interface, .{});
     try file_writer.flush();
 }
@@ -64,7 +64,7 @@ fn renderBindings(
         \\const std = @import("std");
         \\const target = @import("builtin").target;
         \\
-        \\pub const @"callconv": std.builtin.CallingConvention = switch (target.os.tag) {
+        \\pub const @"callconv": std.lang.CallingConvention = switch (target.os.tag) {
         \\    .windows => if (target.cpu.arch == .x86) .{ .x86_stdcall = .{} } else .c,
         \\    else => .c,
         \\};
@@ -192,7 +192,7 @@ fn renderBindings(
 }
 
 fn isHandle(@"type": Registry.Type, opaque_index: usize) bool {
-    return @"type".base == .@"opaque" and opaque_index == @intFromEnum(@"type".base.@"opaque");
+    return @"type".base == .@"opaque" and opaque_index == @backingInt(@"type".base.@"opaque");
 }
 
 fn renderEnumerateAlloc(
@@ -687,7 +687,7 @@ fn renderSymbolMap(
 }
 
 fn markHandle(handle_used: []bool, @"type": Registry.Type) void {
-    if (@"type".base == .@"opaque") handle_used[@intFromEnum(@"type".base.@"opaque")] = true;
+    if (@"type".base == .@"opaque") handle_used[@backingInt(@"type".base.@"opaque")] = true;
 }
 
 fn renderDeclStart(
@@ -763,7 +763,7 @@ fn renderDefault(
 ) !void {
     switch (default) {
         .enum_value => |enum_value| {
-            const @"enum" = registry.enums[@intFromEnum(enum_value.@"enum")];
+            const @"enum" = registry.enums[@backingInt(enum_value.@"enum")];
             try w.writeByte('.');
             try renderMemberName(w, registry, @"enum".name, @"enum".values[enum_value.value].name);
         },
@@ -782,7 +782,7 @@ fn renderDefault(
             if (@"type".base == .flags) {
                 if (std.mem.eql(u8, raw, "0")) return w.writeAll(".{}");
 
-                const flags = registry.flags[@intFromEnum(@"type".base.flags)];
+                const flags = registry.flags[@backingInt(@"type".base.flags)];
                 for (flags.combinations) |combination| {
                     if (!std.mem.eql(u8, combination.name, raw)) continue;
                     try w.writeByte('.');
@@ -832,7 +832,7 @@ fn renderQualifiedType(
         .int => |length| try w.print("[{d}]", .{length}),
         .constant => |constant_index| {
             try w.writeByte('[');
-            try renderConstName(w, registry, registry.constants[@intFromEnum(constant_index)].name);
+            try renderConstName(w, registry, registry.constants[@backingInt(constant_index)].name);
             try w.writeByte(']');
         },
     };

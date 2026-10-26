@@ -18,17 +18,20 @@ pub fn build(b: *std.Build) void {
     });
     root_module.addImport("sulfur", sulfur_dep.module("sulfur"));
 
-    const frag = sulfur.compileShader(sulfur_dep, b, b.path("src/shaders/frag.slang"), "main", &.{.{}});
-    root_module.addAnonymousImport("frag.spv", .{ .root_source_file = frag });
+    const frag = sulfur.compileShader(sulfur_dep, b, b.path("src/shaders/frag.slang"), "main", &.{.{
+        .min_filter = .nearest,
+        .mag_filter = .nearest,
+        .mip_filter = .nearest,
+    }});
+    root_module.addAnonymousImport("frag.sfir", .{ .root_source_file = frag });
 
     const vert = sulfur.compileShader(sulfur_dep, b, b.path("src/shaders/vert.slang"), "main", &.{});
-    root_module.addAnonymousImport("vert.spv", .{ .root_source_file = vert });
+    root_module.addAnonymousImport("vert.sfir", .{ .root_source_file = vert });
 
     {
         const sdl_dep = b.dependency("sdl", .{
             .target = target,
             .optimize = optimize,
-            .preferred_link_mode = .static,
         });
         const sdl_lib = sdl_dep.artifact("SDL3");
         root_module.linkLibrary(sdl_lib);

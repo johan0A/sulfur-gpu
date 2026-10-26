@@ -4,7 +4,7 @@
 const std = @import("std");
 const target = @import("builtin").target;
 
-pub const @"callconv": std.builtin.CallingConvention = switch (target.os.tag) {
+pub const @"callconv": std.lang.CallingConvention = switch (target.os.tag) {
     .windows => if (target.cpu.arch == .x86) .{ .x86_stdcall = .{} } else .c,
     else => .c,
 };

@@ -63,7 +63,7 @@ pub const Instance = struct {
         const base_dispatch: vk.BaseWrapper = .load(loader.proc);
 
         var extensions: std.ArrayList([*:0]const u8) = .empty;
-        try extensions.append(arena, vk.extensions.ext_debug_utils.name.ptr);
+        try extensions.append(arena, vk.instance_extensions.ext_debug_utils.name.ptr);
 
         var surface_support: SurfaceSupport = .{};
 
@@ -71,19 +71,19 @@ pub const Instance = struct {
         for (available_extensions) |available_extension| {
             const available_ext_name = std.mem.sliceTo(&available_extension.extension_name, 0);
 
-            const surface = vk.extensions.khr_surface.name;
+            const surface = vk.instance_extensions.khr_surface.name;
             if (std.mem.eql(u8, available_ext_name, surface)) {
                 surface_support.surface = true;
                 try extensions.append(arena, surface);
             }
 
-            const win32 = vk.extensions.khr_win_32_surface.name;
+            const win32 = vk.instance_extensions.khr_win_32_surface.name;
             if (std.mem.eql(u8, available_ext_name, win32)) {
                 surface_support.win32 = true;
                 try extensions.append(arena, win32);
             }
 
-            const xlib = vk.extensions.khr_xlib_surface.name;
+            const xlib = vk.instance_extensions.khr_xlib_surface.name;
             if (std.mem.eql(u8, available_ext_name, xlib)) {
                 surface_support.xlib = true;
                 try extensions.append(arena, xlib);
@@ -121,8 +121,8 @@ pub const Instance = struct {
         const handle: vk.InstanceProxy = .init(instance_handle, instance_dispatch);
 
         const debug_messenger_info: vk.DebugUtilsMessengerCreateInfoEXT = .{
-            .message_severity = .{ .warning_bit_ext = true, .error_bit_ext = true },
-            .message_type = .{ .general_bit_ext = true, .validation_bit_ext = true, .performance_bit_ext = true },
+            .message_severity = .{ .warning_ext = true, .error_ext = true },
+            .message_type = .{ .general_ext = true, .validation_ext = true, .performance_ext = true },
             .pfn_user_callback = debugCallback,
         };
         const debug_messenger = try handle.createDebugUtilsMessengerEXT(&debug_messenger_info, null);
@@ -222,10 +222,10 @@ pub const Adapter = opaque {
         std.debug.assert(@sizeOf(vk.PhysicalDevice) == @sizeOf(*Adapter));
     }
     fn asPhysicalDevice(adapter: *Adapter) vk.PhysicalDevice {
-        return @enumFromInt(@intFromPtr(adapter));
+        return @ptrCast(adapter);
     }
     fn fromPhysicalDevice(physical_device: vk.PhysicalDevice) *Adapter {
-        return @ptrFromInt(@intFromEnum(physical_device));
+        return @ptrCast(physical_device);
     }
 };
 
@@ -265,7 +265,7 @@ pub const Device = struct {
 
     table: *anyopaque,
 
-    const max_queue_state_count = @typeInfo(gpu.QueueType).@"enum".fields.len;
+    const max_queue_state_count = @typeInfo(gpu.QueueType).@"enum".field_names.len;
 
     const QueueId = enum(u8) { _ };
 
@@ -374,7 +374,7 @@ pub const Device = struct {
             .binding = 0,
             .descriptor_type = .mutable_ext,
             .descriptor_count = 0,
-            .stage_flags = .{ .vertex_bit = true, .fragment_bit = true, .compute_bit = true },
+            .stage_flags = .{ .vertex = true, .fragment = true, .compute = true },
             .p_immutable_samplers = null,
         }};
         const allowed_types: []const vk.DescriptorType = &.{ .storage_image, .sampled_image };
@@ -387,8 +387,8 @@ pub const Device = struct {
             .p_mutable_descriptor_type_lists = &.{mutable_type_list},
         };
         const binding_flags: vk.DescriptorBindingFlags = .{
-            .partially_bound_bit = true,
-            .variable_descriptor_count_bit = true,
+            .partially_bound = true,
+            .variable_descriptor_count = true,
         };
         const binding_flags_info: vk.DescriptorSetLayoutBindingFlagsCreateInfo = .{
             .p_next = &mutable_info,
@@ -397,7 +397,7 @@ pub const Device = struct {
         };
         const layout_info: vk.DescriptorSetLayoutCreateInfo = .{
             .p_next = &binding_flags_info,
-            .flags = .{ .descriptor_buffer_bit_ext = true },
+            .flags = .{ .descriptor_buffer_ext = true },
             .binding_count = 1,
             .p_bindings = &bindings,
         };
@@ -416,12 +416,12 @@ pub const Device = struct {
         for (std.enums.values(gpu.QueueType)) |queue_type| {
             const family_index = queue_family_indices.get(queue_type);
             const existing: ?QueueId = for (queue_states[0..queue_state_count], 0..) |q, i| {
-                if (q.family == family_index) break @enumFromInt(i);
+                if (q.family == family_index) break @fromBackingInt(@intCast(i));
             } else null;
             queue_of_type.set(queue_type, existing orelse blk: {
                 const timeline: Semaphore = try .createVkDevice(handle, 0);
                 const command_pool_info: vk.CommandPoolCreateInfo = .{
-                    .flags = .{ .transient_bit = true, .reset_command_buffer_bit = true },
+                    .flags = .{ .transient = true, .reset_command_buffer = true },
                     .queue_family_index = family_index,
                 };
                 const pool = try handle.createCommandPool(&command_pool_info, null);
@@ -436,7 +436,7 @@ pub const Device = struct {
                     .free_command_buffers = .empty,
                 };
                 queue_state_count += 1;
-                break :blk @enumFromInt(queue_state_count - 1);
+                break :blk @fromBackingInt(queue_state_count - 1);
             });
         }
 
@@ -444,7 +444,7 @@ pub const Device = struct {
 
         const has_host_visible_device_local = for (0..memory_properties.memory_type_count) |i| {
             const t = memory_properties.memory_types[i];
-            if (t.property_flags.device_local_bit and t.property_flags.host_visible_bit) {
+            if (t.property_flags.device_local and t.property_flags.host_visible) {
                 const memory_heap = memory_properties.memory_heaps[t.heap_index];
                 if (memory_heap.size > 256 * 1024 * 1024) break true;
             }
@@ -619,7 +619,6 @@ pub const Device = struct {
     ) !void {
         mapped_memory.* = alloc(d.body(), bytes, .fromByteUnits(alignment), memory) catch |err| return switch (err) {
             // TODO: inverstigate:
-            error.ValidationFailed,
             error.Unknown,
             error.InvalidOpaqueCaptureAddressKHR,
             error.InvalidExternalHandle,
@@ -641,25 +640,25 @@ pub const Device = struct {
 
         const usage: vk.BufferUsageFlags = switch (memory) {
             .upload => .{
-                .storage_buffer_bit = true,
-                .index_buffer_bit = true,
-                .indirect_buffer_bit = true,
-                .transfer_src_bit = true,
-                .shader_device_address_bit = true,
-                .resource_descriptor_buffer_bit_ext = true,
+                .storage_buffer = true,
+                .index_buffer = true,
+                .indirect_buffer = true,
+                .transfer_src = true,
+                .shader_device_address = true,
+                .resource_descriptor_buffer_ext = true,
             },
             .device_local => .{
-                .storage_buffer_bit = true,
-                .index_buffer_bit = true,
-                .indirect_buffer_bit = true,
-                .transfer_src_bit = true,
-                .transfer_dst_bit = true,
-                .shader_device_address_bit = true,
+                .storage_buffer = true,
+                .index_buffer = true,
+                .indirect_buffer = true,
+                .transfer_src = true,
+                .transfer_dst = true,
+                .shader_device_address = true,
             },
             .readback => .{
-                .storage_buffer_bit = true,
-                .transfer_dst_bit = true,
-                .shader_device_address_bit = true,
+                .storage_buffer = true,
+                .transfer_dst = true,
+                .shader_device_address = true,
             },
         };
 
@@ -688,45 +687,45 @@ pub const Device = struct {
             buffer_memory_requirements = d.device.getBufferMemoryRequirements(buffer);
         }
 
-        const memory_type_bits = switch (memory) {
+        const memory_types = switch (memory) {
             .upload, .readback => buffer_memory_requirements.memory_type_bits,
             .device_local => bits: {
-                const color_bits = probeImageMemoryTypeBits(d.*, .r8g8b8a8_unorm, .{
-                    .sampled_bit = true,
-                    .transfer_dst_bit = true,
-                    .color_attachment_bit = true,
+                const colors = probeImageMemoryTypeBits(d.*, .r8g8b8a8_unorm, .{
+                    .sampled = true,
+                    .transfer_dst = true,
+                    .color_attachment = true,
                 });
-                const depth_bits = probeImageMemoryTypeBits(d.*, .d32_sfloat, .{
-                    .depth_stencil_attachment_bit = true,
-                    .sampled_bit = true,
+                const depths = probeImageMemoryTypeBits(d.*, .d32_sfloat, .{
+                    .depth_stencil_attachment = true,
+                    .sampled = true,
                 });
-                break :bits buffer_memory_requirements.memory_type_bits & color_bits & depth_bits;
+                break :bits buffer_memory_requirements.memory_type_bits & colors & depths;
             },
         };
 
         const properties: vk.MemoryPropertyFlags = switch (memory) {
             .upload => .{
-                .device_local_bit = d.has_host_visible_device_local,
-                .host_visible_bit = true,
-                .host_coherent_bit = true,
+                .device_local = d.has_host_visible_device_local,
+                .host_visible = true,
+                .host_coherent = true,
             },
             .device_local => .{
-                .device_local_bit = true,
+                .device_local = true,
             },
             .readback => .{
-                .host_visible_bit = true,
-                .host_cached_bit = true,
-                .host_coherent_bit = true,
+                .host_visible = true,
+                .host_cached = true,
+                .host_coherent = true,
             },
         };
         const alloc_flags: vk.MemoryAllocateFlagsInfo = .{
-            .flags = .{ .device_address_bit = true },
+            .flags = .{ .device_address = true },
             .device_mask = 0,
         };
         const buffer_memory = try d.device.allocateMemory(&.{
             .p_next = &alloc_flags,
             .allocation_size = buffer_memory_requirements.size,
-            .memory_type_index = findMemoryType(d.*, memory_type_bits, properties),
+            .memory_type_index = findMemoryType(d.*, memory_types, properties),
         }, null);
         errdefer d.device.freeMemory(buffer_memory, null);
 
@@ -788,7 +787,7 @@ pub const Device = struct {
             .extent = .{ .width = 16, .height = 16, .depth = 1 },
             .mip_levels = 1,
             .array_layers = 1,
-            .samples = .{ .@"1_bit" = true },
+            .samples = .{ .@"1" = true },
             .tiling = .optimal,
             .usage = usage,
             .sharing_mode = .exclusive,
@@ -864,12 +863,12 @@ pub const Device = struct {
         var required_device_extensions_buff: [64][*:0]const u8 = undefined;
         var required_device_extensions: std.ArrayList([*:0]const u8) = .initBuffer(&required_device_extensions_buff);
         required_device_extensions.appendSliceAssumeCapacity(&.{
-            vk.extensions.ext_descriptor_buffer.name,
-            vk.extensions.ext_mutable_descriptor_type.name,
-            // vk.extensions.khr_unified_image_layouts.name, TODO
+            vk.device_extensions.ext_descriptor_buffer.name,
+            vk.device_extensions.ext_mutable_descriptor_type.name,
+            // vk.device_extensions.khr_unified_image_layouts.name, TODO
         });
         if (surface_support) required_device_extensions.appendAssumeCapacity(
-            vk.extensions.khr_swapchain.name,
+            vk.device_extensions.khr_swapchain.name,
         );
 
         return try instance_dispatch.createDevice(physical_device, &.{
@@ -897,7 +896,7 @@ pub const Device = struct {
 
         var graphics: u32 = std.math.maxInt(u32);
         for (queue_family_indices, 0..) |family, i| {
-            if (family.queue_flags.graphics_bit) {
+            if (family.queue_flags.graphics) {
                 graphics = @intCast(i);
                 break;
             }
@@ -905,7 +904,7 @@ pub const Device = struct {
 
         var compute = graphics;
         for (queue_family_indices, 0..) |family, i| {
-            if (family.queue_flags.compute_bit and !family.queue_flags.graphics_bit) {
+            if (family.queue_flags.compute and !family.queue_flags.graphics) {
                 compute = @intCast(i);
                 break;
             }
@@ -913,9 +912,9 @@ pub const Device = struct {
 
         var transfer = compute;
         for (queue_family_indices, 0..) |family, i| {
-            if (family.queue_flags.transfer_bit and
-                !family.queue_flags.graphics_bit and
-                !family.queue_flags.compute_bit)
+            if (family.queue_flags.transfer and
+                !family.queue_flags.graphics and
+                !family.queue_flags.compute)
             {
                 transfer = @intCast(i);
                 break;
@@ -935,7 +934,7 @@ pub const Device = struct {
     }
 
     fn queueStateForQueueId(d: *Device, queue_id: QueueId) *QueueState {
-        return &d.queue_states[@intFromEnum(queue_id)];
+        return &d.queue_states[@backingInt(queue_id)];
     }
 
     fn acquireCommandBuffer(d: *Device, queue_type: gpu.QueueType) !CommandBuffer {
@@ -964,7 +963,7 @@ pub const Device = struct {
 
     fn reclaimCompletedCommandBuffers(d: *Device) void {
         for (d.queue_states[0..d.queue_state_count], 0..) |*queue_state, queue_index| {
-            const queue_id: QueueId = @enumFromInt(queue_index);
+            const queue_id: QueueId = @fromBackingInt(@intCast(queue_index));
             const list = &queue_state.pending_command_buffers;
             if (list.items.len == 0) continue;
             const timeline = queue_state.timeline;
@@ -1004,8 +1003,7 @@ pub const Queue = struct {
         const cb = try d.command_buffers.create(d.gpa);
         cb.set(d.table, startCommandRecording(queue.body()) catch |err| return switch (err) {
             error.OutOfHostMemory => error.OutOfMemory,
-            error.OutOfDeviceMemory => |e| e,
-            error.ValidationFailed, error.Unknown => error.Unknown,
+            error.OutOfDeviceMemory, error.Unknown => |e| e,
         });
         command_buffer.* = cb;
     }
@@ -1014,7 +1012,7 @@ pub const Queue = struct {
         const command_buffer = try queue.d.acquireCommandBuffer(queue.queue_type);
         errdefer queue.d.releaseCommandBuffer(command_buffer);
 
-        const begin_info: vk.CommandBufferBeginInfo = .{ .flags = .{ .one_time_submit_bit = true } };
+        const begin_info: vk.CommandBufferBeginInfo = .{ .flags = .{ .one_time_submit = true } };
         try queue.d.device.beginCommandBuffer(command_buffer.command_buffer, &begin_info);
 
         return command_buffer;
@@ -1032,7 +1030,7 @@ pub const Queue = struct {
         ) catch |err| return switch (err) {
             error.OutOfMemory, error.OutOfHostMemory => error.OutOfMemory,
             error.OutOfDeviceMemory, error.DeviceLost => |e| e,
-            error.InvalidVideoStdParametersKHR, error.ValidationFailed, error.Unknown => error.Unknown,
+            error.InvalidVideoStdParametersKHR, error.Unknown => error.Unknown,
         };
     }
 
@@ -1050,7 +1048,7 @@ pub const Queue = struct {
         ) catch |err| return switch (err) {
             error.OutOfMemory, error.OutOfHostMemory => error.OutOfMemory,
             error.OutOfDeviceMemory, error.DeviceLost => |e| e,
-            error.InvalidVideoStdParametersKHR, error.ValidationFailed, error.Unknown => error.Unknown,
+            error.InvalidVideoStdParametersKHR, error.Unknown => error.Unknown,
         };
     }
 
@@ -1087,8 +1085,8 @@ pub const Queue = struct {
                 const info = entry.value_ptr.*;
 
                 barrier.* = .{
-                    .dst_stage_mask = .{ .all_commands_bit = true },
-                    .dst_access_mask = .{ .memory_read_bit = true, .memory_write_bit = true },
+                    .dst_stage_mask = .{ .all_commands = true },
+                    .dst_access_mask = .{ .memory_read = true, .memory_write = true },
                     .old_layout = .undefined,
                     .new_layout = .general,
                     .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
@@ -1149,19 +1147,19 @@ pub const Queue = struct {
             transition_waits[0] = .{
                 .semaphore = texture_init_timeline.semaphore.semaphore,
                 .value = init_previous,
-                .stage_mask = .{ .all_commands_bit = true },
+                .stage_mask = .{ .all_commands = true },
                 .device_index = 0,
             };
             transition_signals[0] = .{
                 .semaphore = timeline.semaphore,
                 .value = transition_value,
-                .stage_mask = .{ .all_commands_bit = true },
+                .stage_mask = .{ .all_commands = true },
                 .device_index = 0,
             };
             transition_signals[1] = .{
                 .semaphore = texture_init_timeline.semaphore.semaphore,
                 .value = init_target,
-                .stage_mask = .{ .all_commands_bit = true },
+                .stage_mask = .{ .all_commands = true },
                 .device_index = 0,
             };
 
@@ -1179,7 +1177,7 @@ pub const Queue = struct {
         var work_waits: [1]vk.SemaphoreSubmitInfo = .{.{
             .semaphore = texture_init_timeline.semaphore.semaphore,
             .value = init_target,
-            .stage_mask = .{ .all_commands_bit = true },
+            .stage_mask = .{ .all_commands = true },
             .device_index = 0,
         }};
 
@@ -1188,14 +1186,14 @@ pub const Queue = struct {
         work_signals[0] = .{
             .semaphore = timeline.semaphore,
             .value = work_value,
-            .stage_mask = .{ .all_commands_bit = true },
+            .stage_mask = .{ .all_commands = true },
             .device_index = 0,
         };
         if (extra_signal) |signal| {
             work_signals[1] = .{
                 .semaphore = signal.semaphore.semaphore,
                 .value = signal.value,
-                .stage_mask = .{ .all_commands_bit = true },
+                .stage_mask = .{ .all_commands = true },
                 .device_index = 0,
             };
             work_signal_count = 2;
@@ -1211,7 +1209,7 @@ pub const Queue = struct {
         };
         submit_count += 1;
 
-        try d.device.queueSubmit2(queue_state.queue, submits[0..submit_count], .null_handle);
+        try d.device.queueSubmit2(queue_state.queue, submits[0..submit_count], .null);
 
         texture_init_timeline.value = init_target;
         queue_state.last_submitted = work_value;
@@ -1242,7 +1240,7 @@ pub const Semaphore = struct {
         semaphore.* = create(d.body(), init_value) catch |err| return switch (err) {
             error.OutOfMemory, error.OutOfHostMemory => error.OutOfMemory,
             error.OutOfDeviceMemory => |e| e,
-            error.ValidationFailed, error.Unknown => error.Unknown,
+            error.Unknown => error.Unknown,
         };
     }
     fn create(d: *Device, init_value: u64) !*Header(Semaphore) {
@@ -1263,8 +1261,7 @@ pub const Semaphore = struct {
     pub fn sfWaitSemaphore(semaphore: *Header(Semaphore), value: u64) !void {
         wait(semaphore.body(), value) catch |err| return switch (err) {
             error.OutOfHostMemory => error.OutOfMemory,
-            error.OutOfDeviceMemory, error.DeviceLost => |e| e,
-            error.ValidationFailed, error.Unknown => error.Unknown,
+            error.OutOfDeviceMemory, error.Unknown, error.DeviceLost => |e| e,
         };
     }
     fn wait(semaphore: *const Semaphore, value: u64) !void {
@@ -1321,8 +1318,7 @@ pub const Swapchain = struct {
     ) !void {
         swapchain.* = create(queue.body(), surface.body(), options) catch |err| return switch (err) {
             error.OutOfMemory, error.OutOfHostMemory => error.OutOfMemory,
-            error.OutOfDeviceMemory => |e| e,
-            error.ValidationFailed, error.Unknown => error.Unknown,
+            error.OutOfDeviceMemory, error.Unknown => |e| e,
             error.SurfaceLostKHR => error.SurfaceLost,
         };
     }
@@ -1338,7 +1334,7 @@ pub const Swapchain = struct {
 
         const swapchain = try queue.d.swapchains.create(queue.d.gpa);
         swapchain.set(queue.d.table, .{
-            .swapchain = .null_handle,
+            .swapchain = .null,
             .surface = surface.surface,
             .desc = options,
             .queue = queue,
@@ -1374,9 +1370,8 @@ pub const Swapchain = struct {
             height,
         ) catch |err| return switch (err) {
             error.OutOfMemory, error.OutOfHostMemory => error.OutOfMemory,
-            error.OutOfDeviceMemory, error.DeviceLost => |e| e,
+            error.OutOfDeviceMemory, error.DeviceLost, error.Unknown => |e| e,
             error.SurfaceLostKHR, error.SurfaceLost => error.SurfaceLost,
-            error.ValidationFailed, error.Unknown => error.Unknown,
 
             error.InvalidVideoStdParametersKHR,
             error.InitializationFailed,
@@ -1401,7 +1396,7 @@ pub const Swapchain = struct {
             const result = swapchain.d.device.acquireNextImageKHR(
                 swapchain.swapchain,
                 std.math.maxInt(u64),
-                .null_handle,
+                .null,
                 swapchain.acquire_fence,
             ) catch |err| switch (err) {
                 error.OutOfDateKHR => {
@@ -1433,9 +1428,8 @@ pub const Swapchain = struct {
             swapchain.body(),
         ) catch |err| return switch (err) {
             error.OutOfHostMemory => error.OutOfMemory,
-            error.OutOfDeviceMemory, error.DeviceLost => |e| e,
+            error.OutOfDeviceMemory, error.DeviceLost, error.Unknown => |e| e,
             error.SurfaceLostKHR => error.SurfaceLost,
-            error.ValidationFailed, error.Unknown => error.Unknown,
 
             error.FullScreenExclusiveModeLostEXT,
             error.PresentTimingQueueFullEXT,
@@ -1461,11 +1455,11 @@ pub const Swapchain = struct {
                 .p_signal_semaphore_infos = &.{.{
                     .semaphore = texture.present_semaphore,
                     .value = 0,
-                    .stage_mask = .{ .all_commands_bit = true },
+                    .stage_mask = .{ .all_commands = true },
                     .device_index = 0,
                 }},
             }},
-            .null_handle,
+            .null,
         );
 
         _ = swapchain.d.device.queuePresentKHR(queue_state.queue, &.{
@@ -1516,7 +1510,7 @@ pub const Swapchain = struct {
             .queue_family_index_count = 0,
             .p_queue_family_indices = null,
             .pre_transform = capabilities.current_transform,
-            .composite_alpha = .{ .opaque_bit_khr = true },
+            .composite_alpha = .{ .opaque_khr = true },
             .present_mode = switch (swapchain.desc.present_mode) {
                 .immediate => .immediate_khr,
                 .mailbox => .mailbox_khr,
@@ -1529,7 +1523,7 @@ pub const Swapchain = struct {
 
         const old = swapchain.swapchain;
         swapchain.swapchain = try d.device.createSwapchainKHR(&create_info, null);
-        if (old != .null_handle) d.device.destroySwapchainKHR(old, null);
+        if (old != .null) d.device.destroySwapchainKHR(old, null);
 
         const images = try d.device.getSwapchainImagesAllocKHR(swapchain.swapchain, d.gpa);
         defer d.gpa.free(images);
@@ -1549,12 +1543,12 @@ pub const Swapchain = struct {
 
             const present_command_buffer = try d.acquireCommandBuffer(queue.queue_type);
 
-            const begin_info: vk.CommandBufferBeginInfo = .{ .flags = .{ .simultaneous_use_bit = true } };
+            const begin_info: vk.CommandBufferBeginInfo = .{ .flags = .{ .simultaneous_use = true } };
             try d.device.beginCommandBuffer(present_command_buffer.command_buffer, &begin_info);
 
             const image_barrier: vk.ImageMemoryBarrier2 = .{
-                .src_stage_mask = .{ .all_commands_bit = true },
-                .src_access_mask = .{ .memory_write_bit = true },
+                .src_stage_mask = .{ .all_commands = true },
+                .src_access_mask = .{ .memory_write = true },
                 .old_layout = .general,
                 .new_layout = .present_src_khr,
                 .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
@@ -1611,7 +1605,7 @@ pub const CommandBuffer = struct {
     command_buffer: vk.CommandBuffer,
     queue_id: Device.QueueId,
 
-    pipeline_layout: vk.PipelineLayout = .null_handle,
+    pipeline_layout: vk.PipelineLayout = .null,
     pipeline_bind_point: vk.PipelineBindPoint = undefined,
     texture_heap_ptr: ?vk.DeviceAddress = null,
 
@@ -1631,14 +1625,14 @@ pub const CommandBuffer = struct {
         if (command_buffer.texture_heap_ptr == address) return;
         const binding_info: vk.DescriptorBufferBindingInfoEXT = .{
             .address = address,
-            .usage = .{ .resource_descriptor_buffer_bit_ext = true },
+            .usage = .{ .resource_descriptor_buffer_ext = true },
         };
         command_buffer.d.device.cmdBindDescriptorBuffersEXT(
             command_buffer.command_buffer,
             &.{binding_info},
         );
         command_buffer.texture_heap_ptr = address;
-        if (command_buffer.pipeline_layout != .null_handle) {
+        if (command_buffer.pipeline_layout != .null) {
             command_buffer.setDescriptorBufferOffsets();
         }
     }
@@ -1685,7 +1679,7 @@ pub const CommandBuffer = struct {
         command_buffer.d.device.cmdPushConstants(
             command_buffer.command_buffer,
             command_buffer.pipeline_layout,
-            .{ .compute_bit = true },
+            .{ .compute = true },
             0,
             @sizeOf(vk.DeviceAddress),
             std.mem.asBytes(&address),
@@ -1715,22 +1709,22 @@ pub const CommandBuffer = struct {
         const src_stage = to_vk.pipelineStage(before);
         var dst_stage = to_vk.pipelineStage(after);
         var dst_access: vk.AccessFlags2 = .{
-            .memory_read_bit = true,
-            .memory_write_bit = true,
+            .memory_read = true,
+            .memory_write = true,
         };
         if (hazard.draw_arguments) {
-            dst_stage.draw_indirect_bit = true;
+            dst_stage.draw_indirect = true;
         }
         if (hazard.depth_stencil) {
-            dst_stage.early_fragment_tests_bit = true;
-            dst_stage.late_fragment_tests_bit = true;
+            dst_stage.early_fragment_tests = true;
+            dst_stage.late_fragment_tests = true;
         }
         if (hazard.descriptors) {
-            dst_access.descriptor_buffer_read_bit_ext = true;
+            dst_access.descriptor_buffer_read_ext = true;
         }
         const memory_barrier: vk.MemoryBarrier2 = .{
             .src_stage_mask = src_stage,
-            .src_access_mask = .{ .memory_write_bit = true },
+            .src_access_mask = .{ .memory_write = true },
             .dst_stage_mask = dst_stage,
             .dst_access_mask = dst_access,
         };
@@ -1763,7 +1757,7 @@ pub const CommandBuffer = struct {
             .buffer_row_length = 0,
             .buffer_image_height = 0,
             .image_subresource = .{
-                .aspect_mask = .{ .color_bit = true },
+                .aspect_mask = .{ .color = true },
                 .mip_level = 0,
                 .base_array_layer = 0,
                 .layer_count = texture.desc.layer_count,
@@ -1806,7 +1800,7 @@ pub const CommandBuffer = struct {
             .buffer_row_length = 0,
             .buffer_image_height = 0,
             .image_subresource = .{
-                .aspect_mask = .{ .color_bit = true },
+                .aspect_mask = .{ .color = true },
                 .mip_level = 0,
                 .base_array_layer = 0,
                 .layer_count = texture.desc.layer_count,
@@ -1842,7 +1836,7 @@ pub const CommandBuffer = struct {
                 .image_view = texture.body().default_view,
                 .image_layout = .general,
                 .resolve_mode = .{},
-                .resolve_image_view = .null_handle,
+                .resolve_image_view = .null,
                 .resolve_image_layout = .undefined,
                 .load_op = to_vk.attachmentLoadOp(t.load_op),
                 .store_op = to_vk.attachmentStoreOp(t.store_op),
@@ -1857,7 +1851,7 @@ pub const CommandBuffer = struct {
                 .image_view = texture.body().default_view,
                 .image_layout = .general,
                 .resolve_mode = .{},
-                .resolve_image_view = .null_handle,
+                .resolve_image_view = .null,
                 .resolve_image_layout = .undefined,
                 .load_op = to_vk.attachmentLoadOp(desc.depth_attachment.load_op),
                 .store_op = to_vk.attachmentStoreOp(desc.depth_attachment.store_op),
@@ -1872,7 +1866,7 @@ pub const CommandBuffer = struct {
                 .image_view = texture.body().default_view,
                 .image_layout = .general,
                 .resolve_mode = .{},
-                .resolve_image_view = .null_handle,
+                .resolve_image_view = .null,
                 .resolve_image_layout = .undefined,
                 .load_op = to_vk.attachmentLoadOp(desc.stencil_attachment.load_op),
                 .store_op = to_vk.attachmentStoreOp(desc.stencil_attachment.store_op),
@@ -2000,7 +1994,7 @@ pub const CommandBuffer = struct {
         cb.d.device.cmdPushConstants(
             cb.command_buffer,
             cb.pipeline_layout,
-            .{ .vertex_bit = true, .fragment_bit = true },
+            .{ .vertex = true, .fragment = true },
             0,
             @sizeOf(vk.DeviceAddress) * 2,
             std.mem.asBytes(&addresses),
@@ -2086,8 +2080,7 @@ pub const Texture = struct {
     pub fn sfCreateTexture(d: *Header(Device), info: Desc, texture_data: gpu.DeviceAddress, texture: **Header(Texture)) !void {
         texture.* = create(d.body(), info, texture_data) catch |err| return switch (err) {
             error.OutOfMemory, error.OutOfHostMemory => error.OutOfMemory,
-            error.OutOfDeviceMemory => |e| e,
-            error.ValidationFailed, error.Unknown => error.Unknown,
+            error.OutOfDeviceMemory, error.Unknown => |e| e,
 
             error.CompressionExhaustedEXT,
             error.InvalidOpaqueCaptureAddressKHR,
@@ -2137,8 +2130,7 @@ pub const Texture = struct {
     pub fn sfTextureStorageDescriptor(texture: *Header(Texture), view_info: gpu.TextureViewDesc, descriptor: *gpu.Descriptor) !void {
         descriptor.* = storageDescriptor(texture.body(), view_info) catch |err| return switch (err) {
             error.OutOfMemory, error.OutOfHostMemory => error.OutOfMemory,
-            error.OutOfDeviceMemory => |e| e,
-            error.ValidationFailed, error.Unknown => error.Unknown,
+            error.OutOfDeviceMemory, error.Unknown => |e| e,
 
             error.InvalidOpaqueCaptureAddressKHR => @panic("TODO"),
         };
@@ -2152,7 +2144,7 @@ pub const Texture = struct {
         const image_info: vk.DescriptorImageInfo = .{
             .image_view = view,
             .image_layout = .general,
-            .sampler = .null_handle,
+            .sampler = .null,
         };
         const get_info: vk.DescriptorGetInfoEXT = .{
             .type = .storage_image,
@@ -2167,8 +2159,7 @@ pub const Texture = struct {
     pub fn sfTextureViewDescriptor(texture: *Header(Texture), view_info: gpu.TextureViewDesc, descriptor: *gpu.Descriptor) !void {
         descriptor.* = viewDescriptor(texture.body(), view_info) catch |err| return switch (err) {
             error.OutOfMemory, error.OutOfHostMemory => error.OutOfMemory,
-            error.OutOfDeviceMemory => |e| e,
-            error.ValidationFailed, error.Unknown => error.Unknown,
+            error.OutOfDeviceMemory, error.Unknown => |e| e,
 
             error.InvalidOpaqueCaptureAddressKHR => @panic("TODO"),
         };
@@ -2185,7 +2176,7 @@ pub const Texture = struct {
         const image_info: vk.DescriptorImageInfo = .{
             .image_view = view,
             .image_layout = .general,
-            .sampler = .null_handle,
+            .sampler = .null,
         };
         const get_info: vk.DescriptorGetInfoEXT = .{
             .type = .sampled_image,
@@ -2204,7 +2195,7 @@ pub const Texture = struct {
             .extent = .{ .width = info.dimensions[0], .height = info.dimensions[1], .depth = info.dimensions[2] },
             .mip_levels = info.mip_count,
             .array_layers = info.layer_count,
-            .samples = .{ .@"1_bit" = true },
+            .samples = .{ .@"1" = true },
             .tiling = .optimal,
             .usage = to_vk.usageFlags(info.usage),
             .sharing_mode = .exclusive,
@@ -2251,8 +2242,7 @@ pub const Pipeline = struct {
     ) !void {
         pipeline.* = createCompute(d.body(), ir[0..ir_size]) catch |err| return switch (err) {
             error.OutOfHostMemory, error.OutOfMemory => error.OutOfMemory,
-            error.OutOfDeviceMemory => |e| e,
-            error.ValidationFailed, error.Unknown => error.Unknown,
+            error.OutOfDeviceMemory, error.Unknown => |e| e,
 
             error.InvalidOpaqueCaptureAddressKHR,
             error.BadMagic,
@@ -2273,7 +2263,7 @@ pub const Pipeline = struct {
         defer d.device.destroyShaderModule(module, null);
 
         const stage: vk.PipelineShaderStageCreateInfo = .{
-            .stage = .{ .compute_bit = true },
+            .stage = .{ .compute = true },
             .module = module,
             .p_name = "main",
         };
@@ -2287,7 +2277,7 @@ pub const Pipeline = struct {
         }
 
         const push_constant_ranges = [_]vk.PushConstantRange{.{
-            .stage_flags = .{ .compute_bit = true },
+            .stage_flags = .{ .compute = true },
             .offset = 0,
             .size = @sizeOf(vk.DeviceAddress),
         }};
@@ -2295,13 +2285,13 @@ pub const Pipeline = struct {
         const pipeline_layout = try createPipelineLayout(d, sampler_set_layout, &push_constant_ranges);
 
         const info: vk.ComputePipelineCreateInfo = .{
-            .flags = .{ .descriptor_buffer_bit_ext = true },
+            .flags = .{ .descriptor_buffer_ext = true },
             .stage = stage,
             .layout = pipeline_layout,
             .base_pipeline_index = -1,
         };
         var handle: vk.Pipeline = undefined;
-        _ = try d.device.createComputePipelines(.null_handle, &.{info}, null, (&handle)[0..1]);
+        _ = try d.device.createComputePipelines(.null, &.{info}, null, (&handle)[0..1]);
 
         const pipeline = try d.pipelines.create(d.gpa);
         pipeline.set(d.table, .{
@@ -2333,8 +2323,7 @@ pub const Pipeline = struct {
             desc,
         ) catch |err| return switch (err) {
             error.OutOfHostMemory, error.OutOfMemory => error.OutOfMemory,
-            error.OutOfDeviceMemory => |e| e,
-            error.ValidationFailed, error.Unknown => error.Unknown,
+            error.OutOfDeviceMemory, error.Unknown => |e| e,
 
             error.InvalidOpaqueCaptureAddressKHR,
             error.BadMagic,
@@ -2372,8 +2361,8 @@ pub const Pipeline = struct {
         defer d.device.destroyShaderModule(frag_module, null);
 
         const stages = [_]vk.PipelineShaderStageCreateInfo{
-            .{ .stage = .{ .vertex_bit = true }, .module = vert_module, .p_name = "main" },
-            .{ .stage = .{ .fragment_bit = true }, .module = frag_module, .p_name = "main" },
+            .{ .stage = .{ .vertex = true }, .module = vert_module, .p_name = "main" },
+            .{ .stage = .{ .fragment = true }, .module = frag_module, .p_name = "main" },
         };
 
         const vertex_input: vk.PipelineVertexInputStateCreateInfo = .{};
@@ -2493,7 +2482,7 @@ pub const Pipeline = struct {
         const pixel_samplers = samplers[vertex_samplers.len..sampler_i];
 
         const push_constant_range: vk.PushConstantRange = .{
-            .stage_flags = .{ .vertex_bit = true, .fragment_bit = true },
+            .stage_flags = .{ .vertex = true, .fragment = true },
             .offset = 0,
             .size = @sizeOf(vk.DeviceAddress) * 2,
         };
@@ -2509,7 +2498,7 @@ pub const Pipeline = struct {
         };
         const info: vk.GraphicsPipelineCreateInfo = .{
             .p_next = &rendering_info,
-            .flags = .{ .descriptor_buffer_bit_ext = true },
+            .flags = .{ .descriptor_buffer_ext = true },
             .stage_count = stages.len,
             .p_stages = &stages,
             .p_vertex_input_state = &vertex_input,
@@ -2521,12 +2510,12 @@ pub const Pipeline = struct {
             .p_color_blend_state = &color_blend,
             .p_dynamic_state = &dynamic_state,
             .layout = pipeline_layout,
-            .render_pass = .null_handle,
+            .render_pass = .null,
             .subpass = 0,
             .base_pipeline_index = -1,
         };
         var handle: vk.Pipeline = undefined;
-        _ = try d.device.createGraphicsPipelines(.null_handle, &.{info}, null, (&handle)[0..1]);
+        _ = try d.device.createGraphicsPipelines(.null, &.{info}, null, (&handle)[0..1]);
 
         const pipeline = try d.pipelines.create(d.gpa);
         pipeline.set(d.table, .{
@@ -2567,7 +2556,7 @@ pub const Pipeline = struct {
                 .binding = 0,
                 .descriptor_type = .sampler,
                 .descriptor_count = @intCast(samplers.len),
-                .stage_flags = .{ .vertex_bit = true, .fragment_bit = true, .compute_bit = true },
+                .stage_flags = .{ .vertex = true, .fragment = true, .compute = true },
                 .p_immutable_samplers = samplers.ptr,
             };
             sampler_bindings_count += 1;
@@ -2577,7 +2566,7 @@ pub const Pipeline = struct {
                 .binding = 1,
                 .descriptor_type = .sampler,
                 .descriptor_count = @intCast(pixel_samplers.len),
-                .stage_flags = .{ .vertex_bit = true, .fragment_bit = true, .compute_bit = true },
+                .stage_flags = .{ .vertex = true, .fragment = true, .compute = true },
                 .p_immutable_samplers = pixel_samplers.ptr,
             };
             sampler_bindings_count += 1;
@@ -2585,8 +2574,8 @@ pub const Pipeline = struct {
 
         const sampler_layout_info: vk.DescriptorSetLayoutCreateInfo = .{
             .flags = .{
-                .descriptor_buffer_bit_ext = true,
-                .embedded_immutable_samplers_bit_ext = true,
+                .descriptor_buffer_ext = true,
+                .embedded_immutable_samplers_ext = true,
             },
             .binding_count = sampler_bindings_count,
             .p_bindings = &sampler_bindings,
@@ -2646,14 +2635,14 @@ fn debugCallback(
     _ = .{ message_types, p_user_data };
     const callback_data = p_callback_data orelse @panic("");
     const message = std.mem.span(callback_data.p_message orelse "no message");
-    if (message_severity.error_bit_ext) {
+    if (message_severity.error_ext) {
         std.log.err("Validation: {s}", .{message});
-    } else if (message_severity.warning_bit_ext) {
+    } else if (message_severity.warning_ext) {
         std.log.warn("Validation: {s}", .{message});
     } else {
         std.log.info("Validation: {s}", .{message});
     }
-    if (message_severity.error_bit_ext or message_severity.warning_bit_ext) {
+    if (message_severity.error_ext or message_severity.warning_ext) {
         std.debug.dumpCurrentStackTrace(.{});
     }
     return .false;
