@@ -114,6 +114,11 @@ pub fn Ptr(
             return .{ .ptr = .fromInt(ptr.addr), .len = len };
         }
 
+        pub fn add(ptr: @This(), n: u64) Ptr(.many, Element, .{}) {
+            if (attributes.optional) @compileError("cannot be optional");
+            return .{ .addr = ptr.addr + n * @sizeOf(Element) };
+        }
+
         fn assertAlignment(ptr: @This()) void {
             if (alignement != null) std.debug.assert(std.mem.isAligned(ptr.addr, alignement.?.toByteUnits()));
         }
@@ -246,6 +251,14 @@ pub fn Allocation(Element: type, @"align": ?Alignment) type {
 
         pub fn device(allocation: @This()) Slice(Element, .{ .@"align" = @"align" }) {
             return allocation.device_ptr.slice(allocation.len);
+        }
+
+        pub fn sliceStart(allocation: @This(), start: u64) Allocation(Element, null) {
+            return .{
+                .device_ptr = allocation.device_ptr.add(start),
+                .host_ptr = allocation.host_ptr + start,
+                .len = allocation.len - start,
+            };
         }
     };
 }
