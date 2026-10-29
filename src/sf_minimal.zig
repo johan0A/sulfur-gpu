@@ -26,6 +26,7 @@ pub const Swapchain = opaque {};
 pub const CommandBuffer = opaque {};
 pub const Texture = opaque {};
 pub const Pipeline = opaque {};
+pub const DepthStencilState = opaque {};
 
 pub const Result = enum(u32) {
     ok = 0,
@@ -61,7 +62,7 @@ pub const CompareOp = enum(u32) {
     never = 0,
     less = 1,
     equal = 2,
-    less_equal = 3,
+    less_equal = 3, // TODO: rename to less_or_equal?
     greater = 4,
     not_equal = 5,
     greater_equal = 6,
@@ -230,6 +231,17 @@ pub const Format = enum(u32) {
     astc12x12_unorm_srgb = 101,
 };
 
+pub const StencilOp = enum(u32) {
+    keep = 0,
+    zero = 1,
+    replace = 2,
+    increment_clamp = 3,
+    decrement_clamp = 4,
+    invert = 5,
+    increment_wrap = 6,
+    decrement_wrap = 7,
+};
+
 pub const Stage = packed struct(u32) {
     transfer: bool = false,
     compute: bool = false,
@@ -276,6 +288,17 @@ pub const ColorWriteMask = packed struct(u32) {
         .g = true,
         .b = true,
         .a = true,
+    };
+};
+
+pub const DepthFlags = packed struct(u32) {
+    read: bool = false,
+    write: bool = false,
+    padding: u30 = 0,
+
+    pub const read_write: DepthFlags = .{
+        .read = true,
+        .write = true,
     };
 };
 
@@ -426,6 +449,26 @@ pub const GraphicsPipelineDesc = extern struct {
     color_target_count: u32,
     color_targets: ?[*]const ColorTarget = null,
     blend_state: ?*const BlendDesc = null,
+};
+
+pub const StencilDesc = extern struct {
+    @"test": CompareOp = .always,
+    fail_op: StencilOp = .keep,
+    pass_op: StencilOp = .keep,
+    depth_fail_op: StencilOp = .keep,
+    reference: u8 = 0,
+};
+
+pub const DepthStencilDesc = extern struct {
+    depth_mode: DepthFlags = .{},
+    depth_test: CompareOp = .always,
+    depth_bias: f32 = 0,
+    depth_bias_slope_factor: f32 = 0,
+    depth_bias_clamp: f32 = 0,
+    stencil_read_mask: u8 = 0xff,
+    stencil_write_mask: u8 = 0xff,
+    stencil_front: StencilDesc,
+    stencil_back: StencilDesc,
 };
 
 pub fn createInstance(
@@ -866,6 +909,20 @@ pub fn setActiveTextureHeap(
     );
 }
 
+pub fn setDepthStencilState(
+    command_buffer: *CommandBuffer,
+    pipeline: *DepthStencilState,
+) void {
+    const f: *const fn (
+        command_buffer: *CommandBuffer,
+        pipeline: *DepthStencilState,
+    ) callconv(@"callconv") void = @ptrCast(internal.table(command_buffer)[internal.slots.set_depth_stencil_state]);
+    return f(
+        command_buffer,
+        pipeline,
+    );
+}
+
 pub fn setPipeline(
     command_buffer: *CommandBuffer,
     pipeline: *Pipeline,
@@ -1226,6 +1283,23 @@ pub fn destroyPipeline(
     );
 }
 
+pub fn createDepthStencilState(
+    device: *Device,
+    desc: DepthStencilDesc,
+    depth_stencil_state: **DepthStencilState,
+) Result {
+    const f: *const fn (
+        device: *Device,
+        desc: DepthStencilDesc,
+        depth_stencil_state: **DepthStencilState,
+    ) callconv(@"callconv") Result = @ptrCast(internal.table(device)[internal.slots.create_depth_stencil_state]);
+    return f(
+        device,
+        desc,
+        depth_stencil_state,
+    );
+}
+
 const internal = struct {
     inline fn table(handle: *const anyopaque) [*]const *const anyopaque {
         return @as(*const [*]const *const anyopaque, @ptrCast(@alignCast(handle))).*;
@@ -1280,6 +1354,7 @@ const internal = struct {
         acquire_back_buffer: usize = 0,
         present: usize = 0,
         set_active_texture_heap: usize = 0,
+        set_depth_stencil_state: usize = 0,
         set_pipeline: usize = 0,
         dispatch: usize = 0,
         barrier: usize = 0,
@@ -1299,6 +1374,7 @@ const internal = struct {
         create_compute_pipeline: usize = 0,
         create_graphics_pipeline: usize = 0,
         destroy_pipeline: usize = 0,
+        create_depth_stencil_state: usize = 0,
     } = .{};
 
     fn loadGlobals(getSymbol: Symbol) void {
@@ -1335,6 +1411,7 @@ const internal = struct {
         slots.acquire_back_buffer = get_slot.?(instance, "sfAcquireBackBuffer");
         slots.present = get_slot.?(instance, "sfPresent");
         slots.set_active_texture_heap = get_slot.?(instance, "sfSetActiveTextureHeap");
+        slots.set_depth_stencil_state = get_slot.?(instance, "sfSetDepthStencilState");
         slots.set_pipeline = get_slot.?(instance, "sfSetPipeline");
         slots.dispatch = get_slot.?(instance, "sfDispatch");
         slots.barrier = get_slot.?(instance, "sfBarrier");
@@ -1354,5 +1431,6 @@ const internal = struct {
         slots.create_compute_pipeline = get_slot.?(instance, "sfCreateComputePipeline");
         slots.create_graphics_pipeline = get_slot.?(instance, "sfCreateGraphicsPipeline");
         slots.destroy_pipeline = get_slot.?(instance, "sfDestroyPipeline");
+        slots.create_depth_stencil_state = get_slot.?(instance, "sfCreateDepthStencilState");
     }
 };

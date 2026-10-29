@@ -15,6 +15,7 @@ const HandleTypes = struct {
     CommandBuffer: type,
     Texture: type,
     Pipeline: type,
+    DepthStencilState: type,
 };
 
 fn Functions(handle_types: HandleTypes) type {
@@ -173,6 +174,10 @@ fn Functions(handle_types: HandleTypes) type {
             command_buffer: *handle_types.CommandBuffer,
             heap_address: sf.DeviceAddress,
         ) void,
+        setDepthStencilState: fn (
+            command_buffer: *handle_types.CommandBuffer,
+            pipeline: *handle_types.DepthStencilState,
+        ) void,
         setPipeline: fn (
             command_buffer: *handle_types.CommandBuffer,
             pipeline: *handle_types.Pipeline,
@@ -300,6 +305,15 @@ fn Functions(handle_types: HandleTypes) type {
         destroyPipeline: fn (
             pipeline: *handle_types.Pipeline,
         ) void,
+        createDepthStencilState: fn (
+            device: *handle_types.Device,
+            desc: sf.DepthStencilDesc,
+            depth_stencil_state: **handle_types.DepthStencilState,
+        ) error{
+            OutOfMemory,
+            OutOfDeviceMemory,
+            Unknown,
+        }!void,
     };
 }
 
@@ -593,6 +607,16 @@ fn CFunctions(comptime handle_types: HandleTypes, comptime functions: Functions(
             );
         }
 
+        pub fn setDepthStencilState(
+            command_buffer: *handle_types.CommandBuffer,
+            pipeline: *handle_types.DepthStencilState,
+        ) callconv(sf.@"callconv") void {
+            return functions.setDepthStencilState(
+                command_buffer,
+                pipeline,
+            );
+        }
+
         pub fn setPipeline(
             command_buffer: *handle_types.CommandBuffer,
             pipeline: *handle_types.Pipeline,
@@ -844,6 +868,18 @@ fn CFunctions(comptime handle_types: HandleTypes, comptime functions: Functions(
                 pipeline,
             );
         }
+
+        pub fn createDepthStencilState(
+            device: *handle_types.Device,
+            desc: sf.DepthStencilDesc,
+            depth_stencil_state: **handle_types.DepthStencilState,
+        ) callconv(sf.@"callconv") sf.Result {
+            return cResult(functions.createDepthStencilState(
+                device,
+                desc,
+                depth_stencil_state,
+            ));
+        }
     };
 }
 
@@ -877,6 +913,7 @@ pub fn map(
         .{ "sfAcquireBackBuffer", @ptrCast(&c_functions.acquireBackBuffer) },
         .{ "sfPresent", @ptrCast(&c_functions.present) },
         .{ "sfSetActiveTextureHeap", @ptrCast(&c_functions.setActiveTextureHeap) },
+        .{ "sfSetDepthStencilState", @ptrCast(&c_functions.setDepthStencilState) },
         .{ "sfSetPipeline", @ptrCast(&c_functions.setPipeline) },
         .{ "sfDispatch", @ptrCast(&c_functions.dispatch) },
         .{ "sfBarrier", @ptrCast(&c_functions.barrier) },
@@ -896,5 +933,6 @@ pub fn map(
         .{ "sfCreateComputePipeline", @ptrCast(&c_functions.createComputePipeline) },
         .{ "sfCreateGraphicsPipeline", @ptrCast(&c_functions.createGraphicsPipeline) },
         .{ "sfDestroyPipeline", @ptrCast(&c_functions.destroyPipeline) },
+        .{ "sfCreateDepthStencilState", @ptrCast(&c_functions.createDepthStencilState) },
     }));
 }

@@ -375,9 +375,9 @@ pub const to_vk = struct {
             .mag_filter = filter(s.mag_filter),
             .min_filter = filter(s.min_filter),
             .mipmap_mode = samplerMipmapMode(s.mip_filter),
-            .address_mode_u = Address(s.address.u),
-            .address_mode_v = Address(s.address.v),
-            .address_mode_w = Address(s.address.w),
+            .address_mode_u = address(s.address.u),
+            .address_mode_v = address(s.address.v),
+            .address_mode_w = address(s.address.w),
             .mip_lod_bias = s.lod_bias.toF32(),
             .anisotropy_enable = if (s.max_anisotropy != .x1) .true else .false,
             .max_anisotropy = anisotropy(s.max_anisotropy),
@@ -413,7 +413,7 @@ pub const to_vk = struct {
         };
     }
 
-    pub fn Address(f: sampler_desc.Address) vk.SamplerAddressMode {
+    pub fn address(f: sampler_desc.Address) vk.SamplerAddressMode {
         return switch (f) {
             .repeat => .repeat,
             .mirrored_repeat => .mirrored_repeat,
@@ -433,6 +433,32 @@ pub const to_vk = struct {
             .none => .nearest, // TODO
             .linear => .linear,
             .nearest => .nearest,
+        };
+    }
+
+    pub fn stencilOp(op: gpu.StencilOp) vk.StencilOp {
+        return switch (op) {
+            .keep => .keep,
+            .zero => .zero,
+            .replace => .replace,
+            .increment_clamp => .increment_and_clamp,
+            .decrement_clamp => .decrement_and_clamp,
+            .invert => .invert,
+            .increment_wrap => .increment_and_wrap,
+            .decrement_wrap => .decrement_and_wrap,
+        };
+    }
+
+    pub fn compareOp(op: gpu.CompareOp) vk.CompareOp {
+        return switch (op) {
+            .never => .never,
+            .less => .less,
+            .equal => .equal,
+            .less_equal => .less_or_equal,
+            .greater => .greater,
+            .not_equal => .not_equal,
+            .greater_equal => .greater_or_equal,
+            .always => .always,
         };
     }
 };

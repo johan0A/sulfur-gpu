@@ -262,6 +262,7 @@ pub const Device = struct {
     command_buffers: std.heap.MemoryPool(Header(CommandBuffer)),
     textures: std.heap.MemoryPool(Header(Texture)),
     pipelines: std.heap.MemoryPool(Header(Pipeline)),
+    depth_stencil_states: std.heap.MemoryPool(Header(DepthStencilState)),
 
     table: *anyopaque,
 
@@ -481,6 +482,7 @@ pub const Device = struct {
             .command_buffers = .empty,
             .textures = .empty,
             .pipelines = .empty,
+            .depth_stencil_states = .empty,
 
             .table = table,
         });
@@ -1659,6 +1661,64 @@ pub const CommandBuffer = struct {
         }
     }
 
+    pub fn sfSetDepthStencilState(
+        cb: *Header(CommandBuffer),
+        depth_stencil_state: *Header(DepthStencilState),
+    ) void {
+        setDepthStencilState(cb.body(), depth_stencil_state.body());
+    }
+    fn setDepthStencilState(cb: *CommandBuffer, depth_stencil_state: *const DepthStencilState) void {
+        const device = cb.d.device;
+        const vk_cb = cb.command_buffer;
+        const desc = &depth_stencil_state.desc;
+
+        const depth_test_enable = desc.depth_mode.read or desc.depth_mode.write;
+        device.cmdSetDepthTestEnable(vk_cb, .fromBool(depth_test_enable));
+        device.cmdSetDepthWriteEnable(vk_cb, .fromBool(desc.depth_mode.write));
+        device.cmdSetDepthCompareOp(
+            vk_cb,
+            if (desc.depth_mode.read) to_vk.compareOp(desc.depth_test) else .always,
+        );
+
+        const depth_bias_enable = desc.depth_bias != 0 or
+            desc.depth_bias_slope_factor != 0 or
+            desc.depth_bias_clamp != 0;
+        device.cmdSetDepthBiasEnable(vk_cb, .fromBool(depth_bias_enable));
+        if (depth_bias_enable) {
+            device.cmdSetDepthBias(
+                vk_cb,
+                desc.depth_bias,
+                desc.depth_bias_clamp,
+                desc.depth_bias_slope_factor,
+            );
+        }
+
+        const stencil_enable = !stencilIsNoop(desc.stencil_front) or !stencilIsNoop(desc.stencil_back);
+        device.cmdSetStencilTestEnable(vk_cb, .fromBool(stencil_enable));
+        if (stencil_enable) {
+            const both: vk.StencilFaceFlags = .{ .front = true, .back = true };
+            device.cmdSetStencilCompareMask(vk_cb, both, desc.stencil_read_mask);
+            device.cmdSetStencilWriteMask(vk_cb, both, desc.stencil_write_mask);
+
+            setStencilFace(cb, .{ .front = true }, desc.stencil_front);
+            setStencilFace(cb, .{ .back = true }, desc.stencil_back);
+        }
+    }
+    fn stencilIsNoop(s: gpu.StencilDesc) bool {
+        return s.@"test" == .always and s.pass_op == .keep and s.depth_fail_op == .keep;
+    }
+    fn setStencilFace(cb: *CommandBuffer, face: vk.StencilFaceFlags, s: gpu.StencilDesc) void {
+        cb.d.device.cmdSetStencilOp(
+            cb.command_buffer,
+            face,
+            to_vk.stencilOp(s.fail_op),
+            to_vk.stencilOp(s.pass_op),
+            to_vk.stencilOp(s.depth_fail_op),
+            to_vk.compareOp(s.@"test"),
+        );
+        cb.d.device.cmdSetStencilReference(cb.command_buffer, face, s.reference);
+    }
+
     pub fn sfDispatch(
         command_buffer: *Header(CommandBuffer),
         data: gpu.DeviceAddress,
@@ -2017,6 +2077,26 @@ pub const CommandBuffer = struct {
             &.{0},
             &.{0},
         );
+    }
+};
+
+pub const DepthStencilState = struct {
+    desc: gpu.DepthStencilDesc,
+    d: *Device,
+
+    pub fn sfCreateDepthStencilState(d: *Header(Device), desc: gpu.DepthStencilDesc, depth_stencil_state: **Header(DepthStencilState)) !void {
+        depth_stencil_state.* = create(d.body(), desc) catch |err| return switch (err) {
+            error.OutOfMemory => error.OutOfMemory,
+        };
+    }
+    fn create(d: *Device, desc: gpu.DepthStencilDesc) !*Header(DepthStencilState) {
+        const depth_stencil_state = try d.depth_stencil_states.create(d.gpa);
+        depth_stencil_state.set(d.table, .{ .desc = desc, .d = d });
+        return depth_stencil_state;
+    }
+
+    pub fn sfDestroyDepthStencilState(depth_stencil_state: *Header(DepthStencilState)) void {
+        depth_stencil_state.body().d.depth_stencil_states.destroy(depth_stencil_state);
     }
 };
 
@@ -2652,6 +2732,7 @@ pub fn sfSymbol(name: [*:0]const u8) callconv(gpu.@"callconv") *const anyopaque 
         .Semaphore = Header(Semaphore),
         .Swapchain = Header(Swapchain),
         .CommandBuffer = Header(CommandBuffer),
+        .DepthStencilState = Header(DepthStencilState),
         .Texture = Header(Texture),
         .Pipeline = Header(Pipeline),
     }, .{
@@ -2685,6 +2766,7 @@ pub fn sfSymbol(name: [*:0]const u8) callconv(gpu.@"callconv") *const anyopaque 
         .present = Swapchain.sfPresent,
         .setActiveTextureHeap = CommandBuffer.sfSetActiveTextureHeap,
         .setPipeline = CommandBuffer.sfSetPipeline,
+        .setDepthStencilState = CommandBuffer.sfSetDepthStencilState,
         .dispatch = CommandBuffer.sfDispatch,
         .barrier = CommandBuffer.sfBarrier,
         .copyTextureToBuffer = CommandBuffer.sfCopyTextureToBuffer,
@@ -2702,6 +2784,7 @@ pub fn sfSymbol(name: [*:0]const u8) callconv(gpu.@"callconv") *const anyopaque 
         .textureViewDescriptor = Texture.sfTextureViewDescriptor,
         .createComputePipeline = Pipeline.sfCreateComputePipeline,
         .createGraphicsPipeline = Pipeline.sfCreateGraphicsPipeline,
+        .createDepthStencilState = DepthStencilState.sfCreateDepthStencilState,
         .destroyPipeline = Pipeline.sfDestroyPipeline,
     });
     return map.get(std.mem.span(name)).?;

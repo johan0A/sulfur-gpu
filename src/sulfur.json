@@ -32,7 +32,8 @@
     { "name": "SfSwapchain", "doc": "" },
     { "name": "SfCommandBuffer", "doc": "" },
     { "name": "SfTexture", "doc": "" },
-    { "name": "SfPipeline", "doc": "" }
+    { "name": "SfPipeline", "doc": "" },
+    { "name": "SfDepthStencilState", "doc": "" }
   ],
 
   "function_pointers": [
@@ -257,6 +258,32 @@
         { "name": "color_target_count", "type": { "base": "uint32_t" }, "doc": "" },
         { "name": "color_targets", "type": { "base": "SfColorTarget", "ptr": [{ "const": true, "optional": true, "len": "color_target_count" }] }, "default": "NULL", "doc": "" },
         { "name": "blend_state", "type": { "base": "SfBlendDesc", "ptr": [{ "const": true, "optional": true }] }, "default": "NULL", "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfStencilDesc",
+      "fields": [
+        { "name": "test", "type": { "base": "SfCompareOp" }, "default": "SF_COMPARE_OP_ALWAYS", "doc": "" },
+        { "name": "fail_op", "type": { "base": "SfStencilOp" }, "default": "SF_STENCIL_OP_KEEP", "doc": "" },
+        { "name": "pass_op", "type": { "base": "SfStencilOp" }, "default": "SF_STENCIL_OP_KEEP", "doc": "" },
+        { "name": "depth_fail_op", "type": { "base": "SfStencilOp" }, "default": "SF_STENCIL_OP_KEEP", "doc": "" },
+        { "name": "reference", "type": { "base": "uint8_t" }, "default": "0", "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfDepthStencilDesc",
+      "fields": [
+        { "name": "depth_mode", "type": { "base": "SfDepthFlags" }, "default": "0", "doc": "" },
+        { "name": "depth_test", "type": { "base": "SfCompareOp" }, "default": "SF_COMPARE_OP_ALWAYS", "doc": "" },
+        { "name": "depth_bias", "type": { "base": "float" }, "default": "0", "doc": "" },
+        { "name": "depth_bias_slope_factor", "type": { "base": "float" }, "default": "0", "doc": "" },
+        { "name": "depth_bias_clamp", "type": { "base": "float" }, "default": "0", "doc": "" },
+        { "name": "stencil_read_mask", "type": { "base": "uint8_t" }, "default": "0xff", "doc": "" },
+        { "name": "stencil_write_mask", "type": { "base": "uint8_t" }, "default": "0xff", "doc": "" },
+        { "name": "stencil_front", "type": { "base": "SfStencilDesc" }, "doc": "" },
+        { "name": "stencil_back", "type": { "base": "SfStencilDesc" }, "doc": "" }
       ],
       "doc": ""
     }
@@ -525,6 +552,21 @@
         { "name": "SF_FORMAT_ASTC12X12_UNORM_SRGB", "value": 101, "doc": "" }
       ],
       "doc": ""
+    },
+    {
+      "name": "SfStencilOp",
+      "backing_type": "uint32_t",
+      "values": [
+        { "name": "SF_STENCIL_OP_KEEP", "value": 0, "doc": "" },
+        { "name": "SF_STENCIL_OP_ZERO", "value": 1, "doc": "" },
+        { "name": "SF_STENCIL_OP_REPLACE", "value": 2, "doc": "" },
+        { "name": "SF_STENCIL_OP_INCREMENT_CLAMP", "value": 3, "doc": "" },
+        { "name": "SF_STENCIL_OP_DECREMENT_CLAMP", "value": 4, "doc": "" },
+        { "name": "SF_STENCIL_OP_INVERT", "value": 5, "doc": "" },
+        { "name": "SF_STENCIL_OP_INCREMENT_WRAP", "value": 6, "doc": "" },
+        { "name": "SF_STENCIL_OP_DECREMENT_WRAP", "value": 7, "doc": "" }
+      ],
+      "doc": ""
     }
   ],
 
@@ -596,6 +638,25 @@
             "SF_COLOR_WRITE_MASK_G_BIT",
             "SF_COLOR_WRITE_MASK_B_BIT",
             "SF_COLOR_WRITE_MASK_A_BIT"
+          ],
+          "doc": ""
+        }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "SfDepthFlags",
+      "backing_type": "uint32_t",
+      "bits": [
+        { "name": "SF_DEPTH_FLAGS_READ_BIT", "bit": 0, "doc": "" },
+        { "name": "SF_DEPTH_FLAGS_WRITE_BIT", "bit": 1, "doc": "" }
+      ],
+      "combinations": [
+        {
+          "name": "SF_DEPTH_FLAGS_READ_WRITE",
+          "bits": [
+            "SF_DEPTH_FLAGS_READ_BIT",
+            "SF_DEPTH_FLAGS_WRITE_BIT"
           ],
           "doc": ""
         }
@@ -1006,6 +1067,17 @@
       "doc": ""
     },
     {
+      "name": "sfSetDepthStencilState",
+      "group": "SfCommandBuffer",
+      "dispatch": "table",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
+        { "name": "pipeline", "type": { "base": "SfDepthStencilState", "ptr": [{}] }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
       "name": "sfSetPipeline",
       "group": "SfCommandBuffer",
       "dispatch": "table",
@@ -1267,6 +1339,23 @@
       "return": { "base": "void" },
       "params": [
         { "name": "pipeline", "type": { "base": "SfPipeline", "ptr": [{}] }, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfCreateDepthStencilState",
+      "group": "SfDepthStencilState",
+      "dispatch": "table",
+      "return": { "base": "SfResult" },
+      "errors": [
+        "SF_RESULT_OUT_OF_MEMORY",
+        "SF_RESULT_OUT_OF_DEVICE_MEMORY",
+        "SF_RESULT_UNKNOWN"
+      ],
+      "params": [
+        { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
+        { "name": "desc", "type": { "base": "SfDepthStencilDesc" }, "doc": "" },
+        { "name": "depth_stencil_state", "type": { "base": "SfDepthStencilState", "ptr": [{}, {}] }, "out": true, "doc": "" }
       ],
       "doc": ""
     }
