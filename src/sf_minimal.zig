@@ -62,7 +62,7 @@ pub const CompareOp = enum(u32) {
     never = 0,
     less = 1,
     equal = 2,
-    less_equal = 3, // TODO: rename to less_or_equal?
+    less_equal = 3,
     greater = 4,
     not_equal = 5,
     greater_equal = 6,
@@ -911,15 +911,15 @@ pub fn setActiveTextureHeap(
 
 pub fn setDepthStencilState(
     command_buffer: *CommandBuffer,
-    pipeline: *DepthStencilState,
+    depth_stencil_state: *DepthStencilState,
 ) void {
     const f: *const fn (
         command_buffer: *CommandBuffer,
-        pipeline: *DepthStencilState,
+        depth_stencil_state: *DepthStencilState,
     ) callconv(@"callconv") void = @ptrCast(internal.table(command_buffer)[internal.slots.set_depth_stencil_state]);
     return f(
         command_buffer,
-        pipeline,
+        depth_stencil_state,
     );
 }
 
@@ -1300,6 +1300,17 @@ pub fn createDepthStencilState(
     );
 }
 
+pub fn destroyDepthStencilState(
+    depth_stencil_state: *DepthStencilState,
+) void {
+    const f: *const fn (
+        depth_stencil_state: *DepthStencilState,
+    ) callconv(@"callconv") void = @ptrCast(internal.table(depth_stencil_state)[internal.slots.destroy_depth_stencil_state]);
+    return f(
+        depth_stencil_state,
+    );
+}
+
 const internal = struct {
     inline fn table(handle: *const anyopaque) [*]const *const anyopaque {
         return @as(*const [*]const *const anyopaque, @ptrCast(@alignCast(handle))).*;
@@ -1375,6 +1386,7 @@ const internal = struct {
         create_graphics_pipeline: usize = 0,
         destroy_pipeline: usize = 0,
         create_depth_stencil_state: usize = 0,
+        destroy_depth_stencil_state: usize = 0,
     } = .{};
 
     fn loadGlobals(getSymbol: Symbol) void {
@@ -1432,5 +1444,6 @@ const internal = struct {
         slots.create_graphics_pipeline = get_slot.?(instance, "sfCreateGraphicsPipeline");
         slots.destroy_pipeline = get_slot.?(instance, "sfDestroyPipeline");
         slots.create_depth_stencil_state = get_slot.?(instance, "sfCreateDepthStencilState");
+        slots.destroy_depth_stencil_state = get_slot.?(instance, "sfDestroyDepthStencilState");
     }
 };

@@ -554,8 +554,6 @@ pub const Device = opaque {
         desc: DepthStencilDesc,
     ) error{
         OutOfMemory,
-        OutOfDeviceMemory,
-        Unknown,
     }!*DepthStencilState {
         const f: *const fn (
             device: *Device,
@@ -571,8 +569,6 @@ pub const Device = opaque {
         switch (result) {
             .ok => {},
             .out_of_memory => return error.OutOfMemory,
-            .out_of_device_memory => return error.OutOfDeviceMemory,
-            .unknown => return error.Unknown,
             else => unreachable,
         }
         return depth_stencil_state;
@@ -898,15 +894,15 @@ pub const CommandBuffer = opaque {
 
     pub fn setDepthStencilState(
         command_buffer: *CommandBuffer,
-        pipeline: *DepthStencilState,
+        depth_stencil_state: *DepthStencilState,
     ) void {
         const f: *const fn (
             command_buffer: *CommandBuffer,
-            pipeline: *DepthStencilState,
+            depth_stencil_state: *DepthStencilState,
         ) callconv(@"callconv") void = @ptrCast(internal.table(command_buffer)[internal.slots.set_depth_stencil_state]);
         return f(
             command_buffer,
-            pipeline,
+            depth_stencil_state,
         );
     }
 
@@ -1324,8 +1320,6 @@ pub const DepthStencilState = opaque {
         desc: DepthStencilDesc,
     ) error{
         OutOfMemory,
-        OutOfDeviceMemory,
-        Unknown,
     }!*DepthStencilState {
         const f: *const fn (
             device: *Device,
@@ -1341,11 +1335,20 @@ pub const DepthStencilState = opaque {
         switch (result) {
             .ok => {},
             .out_of_memory => return error.OutOfMemory,
-            .out_of_device_memory => return error.OutOfDeviceMemory,
-            .unknown => return error.Unknown,
             else => unreachable,
         }
         return depth_stencil_state;
+    }
+
+    pub fn destroy(
+        depth_stencil_state: *DepthStencilState,
+    ) void {
+        const f: *const fn (
+            depth_stencil_state: *DepthStencilState,
+        ) callconv(@"callconv") void = @ptrCast(internal.table(depth_stencil_state)[internal.slots.destroy_depth_stencil_state]);
+        return f(
+            depth_stencil_state,
+        );
     }
 };
 
@@ -1871,6 +1874,7 @@ const internal = struct {
         create_graphics_pipeline: usize = 0,
         destroy_pipeline: usize = 0,
         create_depth_stencil_state: usize = 0,
+        destroy_depth_stencil_state: usize = 0,
     } = .{};
 
     fn loadGlobals(getSymbol: Symbol) void {
@@ -1928,5 +1932,6 @@ const internal = struct {
         slots.create_graphics_pipeline = get_slot.?(instance, "sfCreateGraphicsPipeline");
         slots.destroy_pipeline = get_slot.?(instance, "sfDestroyPipeline");
         slots.create_depth_stencil_state = get_slot.?(instance, "sfCreateDepthStencilState");
+        slots.destroy_depth_stencil_state = get_slot.?(instance, "sfDestroyDepthStencilState");
     }
 };

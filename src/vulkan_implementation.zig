@@ -2784,8 +2784,9 @@ pub fn sfSymbol(name: [*:0]const u8) callconv(gpu.@"callconv") *const anyopaque 
         .textureViewDescriptor = Texture.sfTextureViewDescriptor,
         .createComputePipeline = Pipeline.sfCreateComputePipeline,
         .createGraphicsPipeline = Pipeline.sfCreateGraphicsPipeline,
-        .createDepthStencilState = DepthStencilState.sfCreateDepthStencilState,
         .destroyPipeline = Pipeline.sfDestroyPipeline,
+        .createDepthStencilState = DepthStencilState.sfCreateDepthStencilState,
+        .destroyDepthStencilState = DepthStencilState.sfDestroyDepthStencilState,
     });
     return map.get(std.mem.span(name)).?;
 }

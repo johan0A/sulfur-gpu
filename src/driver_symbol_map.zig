@@ -176,7 +176,7 @@ fn Functions(handle_types: HandleTypes) type {
         ) void,
         setDepthStencilState: fn (
             command_buffer: *handle_types.CommandBuffer,
-            pipeline: *handle_types.DepthStencilState,
+            depth_stencil_state: *handle_types.DepthStencilState,
         ) void,
         setPipeline: fn (
             command_buffer: *handle_types.CommandBuffer,
@@ -311,9 +311,10 @@ fn Functions(handle_types: HandleTypes) type {
             depth_stencil_state: **handle_types.DepthStencilState,
         ) error{
             OutOfMemory,
-            OutOfDeviceMemory,
-            Unknown,
         }!void,
+        destroyDepthStencilState: fn (
+            depth_stencil_state: *handle_types.DepthStencilState,
+        ) void,
     };
 }
 
@@ -609,11 +610,11 @@ fn CFunctions(comptime handle_types: HandleTypes, comptime functions: Functions(
 
         pub fn setDepthStencilState(
             command_buffer: *handle_types.CommandBuffer,
-            pipeline: *handle_types.DepthStencilState,
+            depth_stencil_state: *handle_types.DepthStencilState,
         ) callconv(sf.@"callconv") void {
             return functions.setDepthStencilState(
                 command_buffer,
-                pipeline,
+                depth_stencil_state,
             );
         }
 
@@ -880,6 +881,14 @@ fn CFunctions(comptime handle_types: HandleTypes, comptime functions: Functions(
                 depth_stencil_state,
             ));
         }
+
+        pub fn destroyDepthStencilState(
+            depth_stencil_state: *handle_types.DepthStencilState,
+        ) callconv(sf.@"callconv") void {
+            return functions.destroyDepthStencilState(
+                depth_stencil_state,
+            );
+        }
     };
 }
 
@@ -934,5 +943,6 @@ pub fn map(
         .{ "sfCreateGraphicsPipeline", @ptrCast(&c_functions.createGraphicsPipeline) },
         .{ "sfDestroyPipeline", @ptrCast(&c_functions.destroyPipeline) },
         .{ "sfCreateDepthStencilState", @ptrCast(&c_functions.createDepthStencilState) },
+        .{ "sfDestroyDepthStencilState", @ptrCast(&c_functions.destroyDepthStencilState) },
     }));
 }

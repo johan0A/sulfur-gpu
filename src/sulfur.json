@@ -1073,7 +1073,7 @@
       "return": { "base": "void" },
       "params": [
         { "name": "command_buffer", "type": { "base": "SfCommandBuffer", "ptr": [{}] }, "doc": "" },
-        { "name": "pipeline", "type": { "base": "SfDepthStencilState", "ptr": [{}] }, "doc": "" }
+        { "name": "depth_stencil_state", "type": { "base": "SfDepthStencilState", "ptr": [{}] }, "doc": "" }
       ],
       "doc": ""
     },
@@ -1348,14 +1348,22 @@
       "dispatch": "table",
       "return": { "base": "SfResult" },
       "errors": [
-        "SF_RESULT_OUT_OF_MEMORY",
-        "SF_RESULT_OUT_OF_DEVICE_MEMORY",
-        "SF_RESULT_UNKNOWN"
+        "SF_RESULT_OUT_OF_MEMORY"
       ],
       "params": [
         { "name": "device", "type": { "base": "SfDevice", "ptr": [{}] }, "doc": "" },
         { "name": "desc", "type": { "base": "SfDepthStencilDesc" }, "doc": "" },
         { "name": "depth_stencil_state", "type": { "base": "SfDepthStencilState", "ptr": [{}, {}] }, "out": true, "doc": "" }
+      ],
+      "doc": ""
+    },
+    {
+      "name": "sfDestroyDepthStencilState",
+      "group": "SfDepthStencilState",
+      "dispatch": "table",
+      "return": { "base": "void" },
+      "params": [
+        { "name": "depth_stencil_state", "type": { "base": "SfDepthStencilState", "ptr": [{}] }, "doc": "" }
       ],
       "doc": ""
     }
